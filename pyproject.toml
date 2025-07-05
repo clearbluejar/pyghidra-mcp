@@ -1,0 +1,41 @@
+[project]
+name = "pyghidra-mcp"
+version = "0.1.0"
+description = "Python Command-Line Ghidra MCP"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.2.1",
+    "ghidra-stubs>=11.3.2",
+    "mcp[cli]>=1.9.4",
+    "pyghidra>=2.1.0",
+]
+authors = [
+    { name = "clearbluejar", email = "3752074+clearbluejar@users.noreply.github.com" },
+]
+keywords = [
+    "security",
+    "dynamic-analysis",
+    "static-analysis",
+    "pyghidra",
+    "ghidra",
+    "mcp",
+    "reverse-engineering"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+pyghidra-mcp = "pyghidra_mcp.server:main"
