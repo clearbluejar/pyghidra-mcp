@@ -1,3 +1,4 @@
+from pyghidra_mcp.models import DecompiledFunction, FunctionInfo, FunctionSearchResults
 from pyghidra_mcp.__init__ import __version__
 from pyghidra_mcp.decompile import setup_decomplier, decompile_func
 from contextlib import asynccontextmanager
@@ -24,17 +25,8 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
-logger = logging.getLogger("pyghidra-mcp")
+logger = logging.getLogger(__name__)
 logger.info("Server initialized")
-
-
-# # Section to make autocomplete work
-# try:
-#     import ghidra
-#     from ghidra_builtins import *
-# except:
-#     pass
-# ####
 
 # Constants
 # ---------------------------------------------------------------------------------
@@ -44,26 +36,15 @@ PROJECT_LOCATION = 'pyghidra_mcp_projects'
 # Init Pyghidra
 # ---------------------------------------------------------------------------------
 
-# def make_lifespan(input_path: Path, cache_url: str):
-#     @asynccontextmanager
-#     async def lifespan(app) -> AsyncIterator[None]:
-#         print(f"Connecting to DB at {db_url}")
-#         print(f"Connecting to cache at {cache_url}")
-#         # Setup logic here
-#         yield
-#         # Teardown logic here
-#         print("Disconnecting from services")
-#     return lifespan
-
 
 @asynccontextmanager
 async def server_lifespan(server: Server) -> AsyncIterator[dict]:
     """Manage server startup and shutdown lifecycle."""
 
-    if server.settings['input_path'] is None:
+    if server._input_path is None:
         raise 'Missing Input Path!'
 
-    input_path = Path(server.settings['input_path'])
+    input_path = Path(server._input_path)
 
     logger.info(f"Analyzing {input_path}")
     logger.info(f"Project: {PROJECT_NAME}")
@@ -93,7 +74,7 @@ mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
 
 
 @mcp.tool()
-async def decompile_function(name: str, ctx: Context) -> str:
+async def decompile_function(name: str, ctx: Context) -> DecompiledFunction:
     """Decompile a specific function and return the psuedo-c code for the function"""
 
     flat_api = ctx.request_context.lifespan_context["flat_api"]
@@ -101,27 +82,61 @@ async def decompile_function(name: str, ctx: Context) -> str:
 
     from ghidra.program.model.listing import Program
 
-    # prog = None
-    # with flat_api as flat_apt:
-    # set correct typing to leverage autocomplete  my_var: "ghidra-type"
     prog: "Program" = flat_api.getCurrentProgram()
 
     fm = prog.getFunctionManager()
     functions = fm.getFunctions(True)
 
-    await ctx.info(f"Analyzing {prog.name} data points")
+    await ctx.info(f"Analyzing function {name} for {prog.name}")
 
-    code = None
     for func in functions:
         if name == func.name:
-            name, code, sig = decompile_func(func, decompiler)
+            f_name, code, sig = decompile_func(func, decompiler)
+            return DecompiledFunction(name=f_name, code=code, signature=sig)
 
-    return code
+    raise ValueError(f"Function {name} not found")
+
+
+@mcp.tool()
+def search_functions_by_name(query: str, ctx: Context, offset: int = 0, limit: int = 100) -> FunctionSearchResults:
+    """
+    Search for functions whose name contains the given substring.
+    """
+
+    from ghidra.program.model.listing import Program, Function
+
+    if not query:
+        raise ValueError("Query string is required")
+
+    flat_api = ctx.request_context.lifespan_context["flat_api"]
+    prog: "Program" = flat_api.getCurrentProgram()
+
+    funcs = []
+
+    fm = prog.getFunctionManager()
+    functions = fm.getFunctions(True)
+
+    # Search for functions containing the query string
+    for func in functions:
+        func: "Function"
+        if query.lower() in func.name.lower():
+            funcs.append(FunctionInfo(name=func.name,
+                         entry_point=str(func.getEntryPoint())))
+
+    return FunctionSearchResults(functions=funcs[offset:limit+offset])
 
 
 def configure_mcp(mcp: FastMCP, input_path: Path) -> FastMCP:
 
-    mcp.settings = dict(mcp.settings) | {'input_path': input_path}
+    # from mcp.server.fastmcp.server import Settings
+
+    # mcp._input_path settings = Settings(dict(mcp.settings) | {'input_path': input_path})
+
+    mcp._input_path = input_path
+
+    # mcp.settings['input_path'] = input_path
+
+    # mcp.settings.__dict__ | {'input_path': input_path}
 
     return mcp
 
@@ -146,10 +161,10 @@ def configure_mcp(mcp: FastMCP, input_path: Path) -> FastMCP:
 )
 @click.argument("input_path", type=click.Path(exists=True))
 def main(transport: str, input_path: Path) -> None:
-    """Entry point for the MCP server
+    """PyGhidra Command-Line MCP server
 
-    input_path: Path to binary to import,analyze,and expose with pyghidra-mcp
-    transport:Supports stdio, streamable-http, and sse transports.
+    - input_path: Path to binary to import,analyze,and expose with pyghidra-mcp
+    - transport: Supports stdio, streamable-http, and sse transports.
     For stdio, it will read from stdin and write to stdout.
     For streamable-http and sse, it will start an HTTP server on port 8000.
 
@@ -162,6 +177,8 @@ def main(transport: str, input_path: Path) -> None:
     elif transport == "streamable-http":
         mcp.run(transport="streamable-http")
     elif transport == "sse":
+        # mcp.settings.port = 13378
+        # mcp.settings.mount_path = "sse"
         mcp.run(transport="sse")
 
     else:
