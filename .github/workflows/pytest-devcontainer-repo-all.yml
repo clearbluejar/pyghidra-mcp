@@ -61,8 +61,8 @@ jobs:
 
           # install plugins before use
           python tests/init_pyghidra.py
-          pytest tests/unit/ --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
-          pytest tests/integration/ --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
+          python -m pytest tests/unit/ --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
+          python -m pytest tests/integration/ --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
 
     - name: Upload unit test results
       if: ${{ always() }}
