@@ -19,62 +19,76 @@ class PyGhidraContext:
     Manages a Ghidra project, including its creation, program imports, and cleanup.
     """
 
+    def __init__(self, project_name: str, project_path: Path, bin_paths: List[Path]):
+        """
+        Initializes a new Ghidra project context.
 
-def __init__(self, project_name: str, project_path: Path, bin_paths: List[Path]):
-    """
-    Initializes a new Ghidra project context.
+        Args:
+            project_name: The name of the Ghidra project.
+            project_path: The directory where the project will be created.
+        """
+        from ghidra.base.project import GhidraProject
 
-    Args:
-        project_name: The name of the Ghidra project.
-        project_path: The directory where the project will be created.
-    """
-    from ghidra.base.project import GhidraProject
+        self.project_name = project_name
+        self.project_path = project_path
+        self.project: GhidraProject = self._get_or_create_project()
+        self.binaries: List[Program] = self._import_binaries(bin_paths)
 
-    self.project_name = project_name
-    self.project_path = project_path
-    self.project: GhidraProject = self._get_or_create_project()
-    self.binaries: List[Program] = self._import_binaries(bin_paths)
+    def _import_binaries(self, bin_paths: List[Path]) -> None:
+        for bin_path in binaries:
+            self.add_binary(bin_path)
 
+    def add_binary(self, bin_path: Path) -> None:
+        """ Import and analyze a binary the binary.
+        Add it to the current project
+        """
+        pass
 
-def _import_binaries(self, bin_paths: List[Path]) -> None:
-    for bin_path in binaries:
-        self.add_binary(bin_path)
-
-
-def add_binary(self, bin_path: Path) -> None:
-    """ Import and analyze a binary the binary.
-    Add it to the current project
-    """
+    def list_binaries(self)
+    """List all the binaries within the project"""
     pass
 
+    def _get_or_create_project(self) -> "GhidraProject":
+        """
+        Creates a new Ghidra project if it doesn't exist, otherwise opens the existing project.
 
-def list_binaries(self)
+        Returns:
+            The Ghidra project object.
+        """
 
-"""List all the binaries within the project"""
-pass
+        from ghidra.base.project import GhidraProject
+        # from java.lang import ClassLoader  # type:ignore @UnresolvedImport
+        from ghidra.framework.model import ProjectLocator  # type:ignore @UnresolvedImport
 
+        if ProjectLocator(self.project_path, self.project_name).exists():
+            project = GhidraProject.openProject(
+                self.project_path, self.project_name, True)
+        else:
+            project_location.mkdir(exist_ok=True, parents=True)
+            project = GhidraProject.createProject(
+                self.project_path, self.project_name, False)
 
-def _get_or_create_project(self) -> "GhidraProject":
-    """
-    Creates a new Ghidra project if it doesn't exist, otherwise opens the existing project.
+        return project
 
-    Returns:
-        The Ghidra project object.
-    """
+    def close(self):
+        """
+        Saves changes to all open programs and closes the project.
+        """
+        for program in self.open_programs:
+            if program.isChanged():
+                program.save("Changes made by PyGhidra", None)
+        self.project.close()
 
-    from ghidra.base.project import GhidraProject
-    # from java.lang import ClassLoader  # type:ignore @UnresolvedImport
-    from ghidra.framework.model import ProjectLocator  # type:ignore @UnresolvedImport
-
-    if ProjectLocator(self.project_path, self.project_name).exists():
-        project = GhidraProject.openProject(
-            self.project_path, self.project_name, True)
-    else:
-        project_location.mkdir(exist_ok=True, parents=True)
-        project = GhidraProject.createProject(
-            self.project_path, self.project_name, False)
-
-    return project
+    @contextmanager
+    def open_context(project_name: str, project_path: Path):
+        """
+        Context manager for creating and managing a Ghidra project.
+        """
+        context = PyGhidraContext(project_name, project_path)
+        try:
+            yield context
+        finally:
+            context.close()
 
 
 def setup_project(
@@ -243,25 +257,3 @@ def setup_project(
             'Program: %s imported: %s has_pdb: %s pdb_loaded: %s analyzed %s', *result)
 
     return bin_results
-
-
-def close(self):
-    """
-    Saves changes to all open programs and closes the project.
-    """
-    for program in self.open_programs:
-        if program.isChanged():
-            program.save("Changes made by PyGhidra", None)
-    self.project.close()
-
-
-@contextmanager
-def open_context(project_name: str, project_path: Path):
-    """
-    Context manager for creating and managing a Ghidra project.
-    """
-    context = PyGhidraContext(project_name, project_path)
-    try:
-        yield context
-    finally:
-        context.close()
