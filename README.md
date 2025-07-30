@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/clearbluejar/ghidriff/assets/3752074/170f1a54-24d9-4c8e-ac4d-3b5bea860750" width=60% >
+  <img src="https://github.com/user-attachments/assets/f9a6756c-a1aa-402d-8e61-b7e384967836" width=60% >
 </p>
 
 <p align="center">
