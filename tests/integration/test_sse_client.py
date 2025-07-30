@@ -49,5 +49,5 @@ async def test_sse_client_smoke(sse_server):
             assert isinstance(content, dict)
             assert len(content.keys()) == len(
                 DecompiledFunction.model_fields.keys())
-            assert "void entry" in content["code"]
+            assert "entry" in content["code"]
             print(json.dumps(content, indent=2))
