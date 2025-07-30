@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/clearbluejar/pyghidra-mcp">
-      <img src="https://img.shields.io/badge/PyGhidra-docs-2acfa6?style=flat-square" alt="Documentation" />
+      <img src="https://img.shields.io/badge/PyGhidra-docs-2acfa6?&style=for-the-badge" alt="Documentation" />
   </a>
   <img align="center" alt="GitHub Workflow Status (with event)" src="https://img.shields.io/github/actions/workflow/status/clearbluejar/pyghidra-mcp/actions/workflows/pytest-devcontainer-repo-all.yml?label=pytest&style=for-the-badge">
   <img align="center" alt="PyPI - Downloads" src="https://img.shields.io/pypi/dm/pyghidra-mcp?color=yellow&label=PyPI%20downloads&style=for-the-badge">
