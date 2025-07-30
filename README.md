@@ -231,15 +231,13 @@ docker run -p 8000:0000 ghcr.io/clearbluejar/pyghidra-mcp -t sse
 
 ## Integrations
 
-(To be filled with specific integration examples for Cursor, VS Code, etc., similar to semgrep's README)
+-  TODO
+(To be filled with specific integration examples for Cursor, VS Code, etc.)
 
 ## Contributing, community, and running from source
 
 > [!NOTE]
-> We love your feedback, bug reports, feature requests, and code. Join the community Slack channel! (Link to be added)
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more info and details on how to run from the MCP server from source code.
-
+> We love your feedback, bug reports, feature requests, and code. 
 ______________________________________________________________________
 
 Made with ❤️ by the [PyGhidra-MCP Team](https://github.com/clearbluejar/pyghidra-mcp)
