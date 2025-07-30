@@ -3,10 +3,10 @@
 </p>
 
 <p align="center">
-  <a href="https://semgrep.dev/docs/">
+  <a href="https://github.com/clearbluejar/pyghidra-mcp">
       <img src="https://img.shields.io/badge/PyGhidra-docs-2acfa6?style=flat-square" alt="Documentation" />
   </a>
-  <img align="center" alt="GitHub Workflow Status (with event)" src="https://img.shields.io/github/actions/workflow/status/clearbluejar/ghidriff/pytest-devcontainer.yml?label=pytest&style=for-the-badge">
+  <img align="center" alt="GitHub Workflow Status (with event)" src="https://img.shields.io/github/actions/workflow/status/clearbluejar/pyghidra-mcp/actions/workflows/pytest-devcontainer-repo-all.yml?label=pytest&style=for-the-badge">
   <img align="center" alt="PyPI - Downloads" src="https://img.shields.io/pypi/dm/pyghidra-mcp?color=yellow&label=PyPI%20downloads&style=for-the-badge">
   <img align="center" src="https://img.shields.io/github/stars/clearbluejar/pyghidra-mcp?style=for-the-badge">
 </p>
@@ -20,9 +20,24 @@
 > [!NOTE]
 > This beta project is under active development. We would love your feedback, bug reports, feature requests, and code.
 
+## Yet another Ghidra MCP?
+
+Yes, the original [ghidra-mcp](https://github.com/LaurieWired/GhidraMCP) is fantastic. But `pyghidra-mcp` takes a different approach:
+
+- 🐍 **No GUI required** – Run entirely via CLI for streamlined automation and scripting.
+- 🔁 **Designed for automation** – Ideal for integrating with LLMs, CI pipelines, and tooling that needs repeatable behavior.
+- ✅ **CI/CD friendly** – Built with robust unit and integration tests for both client and server sessions.
+- 🚀 **Quick startup** – Supports fast command-line launching with minimal setup.
+
+This project complements `ghidra-mcp` by providing a Python-first experience optimized for local development, headless environments, and testable workflows.
+
+
+
+
 ## Contents
 
 - [PyGhidra-MCP - Ghidra Model Context Protocol Server](#pyghidra-mcp---ghidra-model-context-protocol-server)
+  - [Yet another Ghidra MCP?](#yet-another-ghidra-mcp)
   - [Contents](#contents)
   - [Getting started](#getting-started)
   - [Setup and Testing with uv](#setup-and-testing-with-uv)
