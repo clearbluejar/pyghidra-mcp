@@ -6,12 +6,22 @@ if typing.TYPE_CHECKING:
     from ghidra import *
 
 
-def setup_decomplier(program: "ghidra.program.model.listing.Program") -> dict:
+def setup_decomplier(program: "ghidra.program.model.listing.Program") -> "ghidra.app.decompiler.DecompInterface":
 
     from ghidra.app.decompiler import DecompInterface
+    from ghidra.app.decompiler import DecompileOptions
+
+    prog_options = DecompileOptions()
 
     decomp = DecompInterface()
 
+    # grab default options from program
+    prog_options.grabFromProgram(program)
+
+    # increase maxpayload size to 100MB (default 50MB)
+    prog_options.setMaxPayloadMBytes(100)
+
+    decomp.setOptions(prog_options)
     decomp.openProgram(program)
 
     return decomp

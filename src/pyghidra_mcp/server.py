@@ -1,6 +1,7 @@
 from pyghidra_mcp.models import DecompiledFunction, FunctionInfo, FunctionSearchResults
 from pyghidra_mcp.__init__ import __version__
 from pyghidra_mcp.decompile import setup_decomplier, decompile_func
+from pyghidra_mcp.context import PyGhidraContext
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -38,7 +39,7 @@ PROJECT_LOCATION = 'pyghidra_mcp_projects'
 
 
 @asynccontextmanager
-async def server_lifespan(server: Server) -> AsyncIterator[dict]:
+async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
     """Manage server startup and shutdown lifecycle."""
 
     if server._input_path is None:
@@ -54,18 +55,27 @@ async def server_lifespan(server: Server) -> AsyncIterator[dict]:
     pyghidra.start(False)  # setting Verbose output
 
     # Initialize resources on startup
-    with pyghidra.open_program(
-            input_path,
-            project_name=PROJECT_NAME,
-            project_location=PROJECT_LOCATION) as flat_api:
+    # with pyghidra.open_program(
+    #         input_path,
+    #         project_name=PROJECT_NAME,
+    #         project_location=PROJECT_LOCATION) as flat_api:
 
-        decompiler = setup_decomplier(flat_api.getCurrentProgram())
+    #     decompiler = setup_decomplier(flat_api.getCurrentProgram())
 
-        try:
-            yield {"flat_api": flat_api, "decompiler": decompiler}
-        finally:
-            # Clean up on shutdown
-            pass
+    #     try:
+    #         yield {"flat_api": flat_api, "decompiler": decompiler}
+    #     finally:
+    #         # Clean up on shutdown
+    #         pass
+
+    pyghidra_context = PyGhidraContext(PROJECT_NAME, PROJECT_LOCATION)
+    pyghidra_context.import_binaries([input_path])
+    pyghidra_context.analyze_project()
+    try:
+        yield pyghidra_context
+    finally:
+        pyghidra_context.close()
+
 
 mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
 
