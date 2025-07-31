@@ -5,11 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "pyghidra /bin/ls",
+            "name": "pyghidra /bin/ls server",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "src/pyghidra_mcp/server.py",
             "console": "integratedTerminal",
+            "justMyCode": false,
             "args": "/bin/ls"
         },
         {

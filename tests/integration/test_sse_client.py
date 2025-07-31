@@ -41,7 +41,7 @@ async def test_sse_client_smoke(sse_server):
             # Decompile a function
             results = await session.call_tool(
                 "decompile_function",
-                {"name": "entry"},
+                {"binary_name": "ls", "name": "entry"},
             )
             # We have results!
             assert results is not None

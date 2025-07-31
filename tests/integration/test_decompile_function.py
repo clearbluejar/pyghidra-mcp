@@ -55,9 +55,11 @@ async def test_decompile_function_tool():
 
             # Call the decompile_function tool
             try:
+                binary_name = os.path.basename(server_params.args[-1])
                 results = await session.call_tool(
                     "decompile_function",
                     {
+                        "binary_name": binary_name,
                         "name": "main"
                     }
                 )

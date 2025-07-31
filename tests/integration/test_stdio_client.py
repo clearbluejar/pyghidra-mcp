@@ -77,6 +77,10 @@ async def test_stdio_client_list_tools():
                 # Check that we have at least the decompile_function tool
                 assert any(
                     tool.name == "decompile_function" for tool in tools.tools)
+                assert any(
+                    tool.name == "list_project_binaries" for tool in tools.tools)
+                assert any(
+                    tool.name == "list_project_program_info" for tool in tools.tools)
     finally:
         os.unlink(bin_file + '.c')
         os.unlink(bin_file)
