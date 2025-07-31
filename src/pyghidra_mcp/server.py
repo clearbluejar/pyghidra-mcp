@@ -1,4 +1,4 @@
-from pyghidra_mcp.models import DecompiledFunction, FunctionInfo, FunctionSearchResults
+from pyghidra_mcp.models import DecompiledFunction, FunctionInfo, FunctionSearchResults, ProgramInfo, ProgramInfos
 from pyghidra_mcp.__init__ import __version__
 from pyghidra_mcp.decompile import setup_decomplier, decompile_func
 from pyghidra_mcp.context import PyGhidraContext
@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 import pyghidra
 import click
-from typing import Any
+from typing import Any, List
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server import Server
 import asyncio
@@ -84,15 +84,17 @@ mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
 
 
 @mcp.tool()
-async def decompile_function(name: str, ctx: Context) -> DecompiledFunction:
+async def decompile_function(binary_name: str, name: str, ctx: Context) -> DecompiledFunction:
     """Decompile a specific function and return the psuedo-c code for the function"""
 
-    flat_api = ctx.request_context.lifespan_context["flat_api"]
-    decompiler = ctx.request_context.lifespan_context["decompiler"]
+    pyghidra_context: "PyGhidraContext" = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.programs.get(binary_name)
 
-    from ghidra.program.model.listing import Program
+    if not program_info:
+        raise ValueError(f"Binary {binary_name} not found")
 
-    prog: "Program" = flat_api.getCurrentProgram()
+    prog = program_info.program
+    decompiler = program_info.decompiler
 
     fm = prog.getFunctionManager()
     functions = fm.getFunctions(True)
@@ -108,18 +110,23 @@ async def decompile_function(name: str, ctx: Context) -> DecompiledFunction:
 
 
 @mcp.tool()
-def search_functions_by_name(query: str, ctx: Context, offset: int = 0, limit: int = 100) -> FunctionSearchResults:
+def search_functions_by_name(binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 100) -> FunctionSearchResults:
     """
     Search for functions whose name contains the given substring.
     """
 
-    from ghidra.program.model.listing import Program, Function
+    from ghidra.program.model.listing import Function
 
     if not query:
         raise ValueError("Query string is required")
 
-    flat_api = ctx.request_context.lifespan_context["flat_api"]
-    prog: "Program" = flat_api.getCurrentProgram()
+    pyghidra_context: "PyGhidraContext" = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.programs.get(binary_name)
+
+    if not program_info:
+        raise ValueError(f"Binary {binary_name} not found")
+
+    prog = program_info.program
 
     funcs = []
 
@@ -134,6 +141,31 @@ def search_functions_by_name(query: str, ctx: Context, offset: int = 0, limit: i
                          entry_point=str(func.getEntryPoint())))
 
     return FunctionSearchResults(functions=funcs[offset:limit+offset])
+
+
+@mcp.tool()
+def list_project_binaries(ctx: Context) -> List[str]:
+    """List all the binaries within the project."""
+    pyghidra_context: "PyGhidraContext" = ctx.request_context.lifespan_context
+    return list(pyghidra_context.programs.keys())
+
+
+@mcp.tool()
+def list_project_program_info(ctx: Context) -> ProgramInfos:
+    """List all the program info within the project."""
+    pyghidra_context: "PyGhidraContext" = ctx.request_context.lifespan_context
+    program_infos = []
+    for name, pi in pyghidra_context.programs.items():
+        program_infos.append(
+            ProgramInfo(
+                name=pi.name,
+                file_path=str(pi.file_path) if pi.file_path else None,
+                load_time=pi.load_time,
+                analysis_complete=pi.analysis_complete,
+                metadata=pi.metadata,
+            )
+        )
+    return ProgramInfos(programs=program_infos)
 
 
 def configure_mcp(mcp: FastMCP, input_path: Path) -> FastMCP:
