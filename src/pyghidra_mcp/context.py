@@ -122,6 +122,27 @@ class PyGhidraContext:
             logger.info(f"Creating new project: {self.project_name}")
             return GhidraProject.createProject(project_dir, self.project_name, False)
 
+    def _init_program_info(self, program, binary_path):
+
+        from ghidra.program.flatapi import FlatProgramAPI
+        from .decompile import setup_decomplier
+
+        assert program is not None
+
+        import time
+        program_info = ProgramInfo(
+            name=program.name,
+            program=program,
+            flat_api=FlatProgramAPI(program),
+            decompiler=setup_decomplier(program),
+            metadata=self.get_metadata(program),
+            file_path=binary_path,
+            load_time=time.time(),
+            analysis_complete=False
+        )
+
+        return program_info
+
     def import_binaries(self, binary_paths: List[Union[str, Path]]):
         """
         Imports and optionally analyzes a list of binaries into the project.
@@ -143,9 +164,6 @@ class PyGhidraContext:
             None
         """
 
-        from ghidra.program.flatapi import FlatProgramAPI
-        from .decompile import setup_decomplier
-
         binary_path = Path(binary_path)
         program_name = binary_path.name
 
@@ -164,22 +182,8 @@ class PyGhidraContext:
                 raise ImportError(f"Failed to import binary: {binary_path}")
 
         if program:
-
-            decompiler = setup_decomplier(program)
-            flat_api = FlatProgramAPI(program)
-
-            import time
-            program_info = ProgramInfo(
-                name=program_name,
-                program=program,
-                flat_api=flat_api,
-                decompiler=decompiler,
-                metadata=self.get_metadata(program),
-                file_path=binary_path,
-                load_time=time.time(),
-                analysis_complete=False
-            )
-            self.programs[program_name] = program_info
+            self.programs[program_name] = self._init_program_info(
+                program, binary_path)
 
     def configure_symbols(self, symbols_path: Union[str, Path], symbol_urls: List[str] = None, allow_remote: bool = True):
         """
@@ -222,7 +226,8 @@ class PyGhidraContext:
         """
         Saves changes to all open programs and closes the project.
         """
-        for program_name, program in self.programs.items():
+        for program_name, program_info in self.programs.items():
+            program = program_info.program
             self.project.close(program)
 
         self.project.close()
@@ -342,7 +347,14 @@ class PyGhidraContext:
 
         program_was_opened = False
         if isinstance(df_or_prog, DomainFile):
-            program = self.programs[df_or_prog.name].program
+            if self.programs.get(df_or_prog.name):
+                program = self.programs[df_or_prog.name].program
+            else:
+                program = self.project.openProgram(
+                    "/", df_or_prog.getName(), False)
+                self.programs[df_or_prog.name] = self._init_program_info(
+                    program, program.name)
+
         elif isinstance(df_or_prog, Program):
             program = df_or_prog
         else:
@@ -441,6 +453,7 @@ class PyGhidraContext:
 
         domain_files = [domainFile for domainFile in self.project.getRootFolder().getFiles()
                         if domainFile.getContentType() == 'Program']
+
         prog_count = len(domain_files)
         completed_count = 0
 
