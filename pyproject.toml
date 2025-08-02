@@ -58,7 +58,8 @@ dev = [
 [project.scripts]
 pyghidra-mcp = "pyghidra_mcp.server:main"
 
-[tool.hatch.build.targets.wheel]
-packages = [
+[tool.hatch.build]
+include = [
     "src/pyghidra_mcp",
 ]
+
