@@ -54,7 +54,6 @@ dev = [
   "pytest-cov>=6.2.1",
 ]
 
-
 [project.scripts]
 pyghidra-mcp = "pyghidra_mcp.server:main"
 
@@ -63,3 +62,10 @@ include = [
     "src/pyghidra_mcp",
 ]
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/pyghidra_mcp",
+]
