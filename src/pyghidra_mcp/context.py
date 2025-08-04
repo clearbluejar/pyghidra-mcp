@@ -9,22 +9,9 @@ import random
 import multiprocessing
 from dataclasses import dataclass, field
 
-# Ghidra imports
-# from ghidra.app.util.importer import MessageLog
-# from ghidra.base.project import GhidraProject
-#
-# from ghidra.program.model.listing import Program
-# from ghidra.util.exception import NotFoundException
-# from java.io import IOException
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# if TYPE_CHECKING:
-#     import ghidra
-#     from ghidra_builtins import *
-#     from ghidra import *
 
 
 @dataclass
@@ -39,10 +26,6 @@ class ProgramInfo:
     file_path: Optional[Path] = None
     load_time: Optional[float] = None
     analysis_complete: bool = False
-
-    # def __post_init__(self):
-    #     if self.file_path and isinstance(self.file_path, str):
-    #         self.file_path = Path(self.file_path)
 
 
 class PyGhidraContext:
