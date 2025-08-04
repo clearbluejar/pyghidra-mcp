@@ -42,39 +42,11 @@ PROJECT_LOCATION = 'pyghidra_mcp_projects'
 async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
     """Manage server startup and shutdown lifecycle."""
 
-    if server._input_path is None:
-        raise 'Missing Input Path!'
-
-    input_path = Path(server._input_path)
-
-    logger.info(f"Analyzing {input_path}")
-    logger.info(f"Project: {PROJECT_NAME}")
-    logger.info(f"Project: Location {PROJECT_LOCATION}")
-
-    # init pyghidra
-    pyghidra.start(False)  # setting Verbose output
-
-    # Initialize resources on startup
-    # with pyghidra.open_program(
-    #         input_path,
-    #         project_name=PROJECT_NAME,
-    #         project_location=PROJECT_LOCATION) as flat_api:
-
-    #     decompiler = setup_decomplier(flat_api.getCurrentProgram())
-
-    #     try:
-    #         yield {"flat_api": flat_api, "decompiler": decompiler}
-    #     finally:
-    #         # Clean up on shutdown
-    #         pass
-
-    pyghidra_context = PyGhidraContext(PROJECT_NAME, PROJECT_LOCATION)
-    pyghidra_context.import_binaries([input_path])
-    pyghidra_context.analyze_project()
     try:
-        yield pyghidra_context
+        yield server._pyghidra_context
     finally:
-        pyghidra_context.close()
+        # pyghidra_context.close()
+        pass
 
 
 mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
@@ -87,7 +59,7 @@ mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
 async def decompile_function(binary_name: str, name: str, ctx: Context) -> DecompiledFunction:
     """Decompile a specific function and return the psuedo-c code for the function"""
 
-    pyghidra_context: "PyGhidraContext" = ctx.request_context.lifespan_context
+    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.programs.get(binary_name)
 
     if not program_info:
@@ -120,7 +92,7 @@ def search_functions_by_name(binary_name: str, query: str, ctx: Context, offset:
     if not query:
         raise ValueError("Query string is required")
 
-    pyghidra_context: "PyGhidraContext" = ctx.request_context.lifespan_context
+    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.programs.get(binary_name)
 
     if not program_info:
@@ -146,14 +118,14 @@ def search_functions_by_name(binary_name: str, query: str, ctx: Context, offset:
 @mcp.tool()
 def list_project_binaries(ctx: Context) -> List[str]:
     """List all the binaries within the project."""
-    pyghidra_context: "PyGhidraContext" = ctx.request_context.lifespan_context
+    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     return list(pyghidra_context.programs.keys())
 
 
 @mcp.tool()
 def list_project_program_info(ctx: Context) -> ProgramInfos:
     """List all the program info within the project."""
-    pyghidra_context: "PyGhidraContext" = ctx.request_context.lifespan_context
+    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_infos = []
     for name, pi in pyghidra_context.programs.items():
         program_infos.append(
@@ -168,17 +140,28 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
     return ProgramInfos(programs=program_infos)
 
 
-def configure_mcp(mcp: FastMCP, input_path: Path) -> FastMCP:
+def init_pyghidra_context(mcp: FastMCP, input_paths: List[Path]) -> FastMCP:
 
-    # from mcp.server.fastmcp.server import Settings
+    if not input_paths:
+        raise ValueError('Missing Input Paths!')
 
-    # mcp._input_path settings = Settings(dict(mcp.settings) | {'input_path': input_path})
+    bin_paths = [Path(p) for p in input_paths]
 
-    mcp._input_path = input_path
+    logger.info(f"Analyzing {', '.join(map(str, bin_paths))}")
+    logger.info(f"Project: {PROJECT_NAME}")
+    logger.info(f"Project: Location {PROJECT_LOCATION}")
 
-    # mcp.settings['input_path'] = input_path
+    # init pyghidra
+    pyghidra.start(False)  # setting Verbose output
 
-    # mcp.settings.__dict__ | {'input_path': input_path}
+    # init PyGhidraContext / import + analyze binaries
+    pyghidra_context = PyGhidraContext(PROJECT_NAME, PROJECT_LOCATION)
+    logger.info(f"Importing binaries: {PROJECT_LOCATION}")
+    pyghidra_context.import_binaries(bin_paths)
+    logger.info(f"Analyize project: {pyghidra_context.project}")
+    pyghidra_context.analyze_project()
+
+    mcp._pyghidra_context = pyghidra_context
 
     return mcp
 
@@ -201,18 +184,18 @@ def configure_mcp(mcp: FastMCP, input_path: Path) -> FastMCP:
     envvar="MCP_TRANSPORT",
     help="Transport protocol to use: stdio, streamable-http, or sse (legacy)",
 )
-@click.argument("input_path", type=click.Path(exists=True))
-def main(transport: str, input_path: Path) -> None:
+@click.argument("input_paths", type=click.Path(exists=True), nargs=-1, required=True)
+def main(transport: str, input_paths: List[Path]) -> None:
     """PyGhidra Command-Line MCP server
 
-    - input_path: Path to binary to import,analyze,and expose with pyghidra-mcp
+    - input_paths: Path to one or more binaries to import, analyze, and expose with pyghidra-mcp
     - transport: Supports stdio, streamable-http, and sse transports.
     For stdio, it will read from stdin and write to stdout.
     For streamable-http and sse, it will start an HTTP server on port 8000.
 
     """
 
-    configure_mcp(mcp, input_path)
+    init_pyghidra_context(mcp, input_paths)
 
     if transport == "stdio":
         mcp.run(transport="stdio")
@@ -222,7 +205,6 @@ def main(transport: str, input_path: Path) -> None:
         # mcp.settings.port = 13378
         # mcp.settings.mount_path = "sse"
         mcp.run(transport="sse")
-
     else:
         raise ValueError(f"Invalid transport: {transport}")
 
