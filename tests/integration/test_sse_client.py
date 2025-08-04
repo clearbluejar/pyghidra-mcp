@@ -8,6 +8,8 @@ import pytest
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from pyghidra_mcp.models import DecompiledFunction
+import aiohttp
+import asyncio
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
@@ -21,11 +23,24 @@ def sse_server():
         ["python", "-m", "pyghidra_mcp", "--transport", "sse", "/bin/ls"],
         env={**os.environ, "GHIDRA_INSTALL_DIR": "/ghidra"},
     )
-    # Wait briefly to ensure the server starts
-    time.sleep(5)
-    yield
+
+    async def wait_for_server():
+        async with aiohttp.ClientSession() as session:
+            for _ in range(20):  # Poll for 20 seconds
+                try:
+                    async with session.get(f"{base_url}/sse") as response:
+                        if response.status == 200:
+                            return
+                except aiohttp.ClientConnectorError:
+                    pass
+                await asyncio.sleep(1)
+            raise RuntimeError("Server did not start in time")
+
+    asyncio.run(wait_for_server())
+
     time.sleep(2)
-    # Teardown: terminate the server
+
+    yield
     proc.terminate()
     proc.wait()
 

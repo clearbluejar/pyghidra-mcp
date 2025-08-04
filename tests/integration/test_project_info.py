@@ -64,7 +64,7 @@ async def test_list_project_binaries_tool():
                 # The result should be a JSON list of strings
                 text_content = results.content[0].text
                 assert text_content is not None
-                binaries = results.structuredContent['result']
+                binaries = [name.text for name in results.content]
                 assert isinstance(binaries, list)
                 assert binary_name in binaries
 
