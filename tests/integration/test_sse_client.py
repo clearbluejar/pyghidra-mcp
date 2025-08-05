@@ -19,7 +19,6 @@ print(f"MCP_BASE_URL: {base_url}")
 
 @pytest.fixture(scope="module")
 def sse_server():
-
     binary_name = "/bin/ls"
     # Start the SSE server
     proc = subprocess.Popen(
@@ -67,7 +66,6 @@ async def test_sse_client_smoke(sse_server):
             assert results is not None
             content = json.loads(results.content[0].text)
             assert isinstance(content, dict)
-            assert len(content.keys()) == len(
-                DecompiledFunction.model_fields.keys())
+            assert len(content.keys()) == len(DecompiledFunction.model_fields.keys())
             assert "entry" in content["code"]
             print(json.dumps(content, indent=2))

@@ -75,8 +75,7 @@ async def test_list_exports(server_params):
             # Initialize the connection
             await session.initialize()
 
-            binary_name = PyGhidraContext._gen_unique_bin_name(
-                server_params.args[-1])
+            binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
 
             response = await session.call_tool("list_exports", {"binary_name": binary_name})
 
@@ -84,5 +83,4 @@ async def test_list_exports(server_params):
             export_infos = ExportInfos(**export_infos_result)
 
             assert len(export_infos.exports) > 0
-            assert any(
-                "function_one" in export.name for export in export_infos.exports)
+            assert any("function_one" in export.name for export in export_infos.exports)

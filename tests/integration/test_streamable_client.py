@@ -48,8 +48,7 @@ int main() {
 def streamable_server(test_binary):
     """Fixture to start the pyghidra-mcp server in a separate process."""
     proc = subprocess.Popen(
-        ["python", "-m", "pyghidra_mcp", "--transport",
-            "streamable-http", test_binary],
+        ["python", "-m", "pyghidra_mcp", "--transport", "streamable-http", test_binary],
         env={**os.environ, "GHIDRA_INSTALL_DIR": "/ghidra"},
     )
 
@@ -86,8 +85,7 @@ async def test_streamable_client_smoke(streamable_server):
             await session.initialize()
             # Session initialized
 
-            binary_name = PyGhidraContext._gen_unique_bin_name(
-                streamable_server)
+            binary_name = PyGhidraContext._gen_unique_bin_name(streamable_server)
 
             # Decompile a function
             results = await session.call_tool(
@@ -98,7 +96,6 @@ async def test_streamable_client_smoke(streamable_server):
             assert results is not None
             content = json.loads(results.content[0].text)
             assert isinstance(content, dict)
-            assert len(content.keys()) == len(
-                DecompiledFunction.model_fields.keys())
+            assert len(content.keys()) == len(DecompiledFunction.model_fields.keys())
             assert "main(void)" in content["code"]
             print(json.dumps(content, indent=2))

@@ -74,8 +74,7 @@ class PyGhidraContext:
         self.no_symbols = no_symbols
         self.gdts = gdts if gdts is not None else []
         self.program_options = program_options
-        self.gzfs_path = Path(
-            gzfs_path) if gzfs_path else self.project_path / "gzfs"
+        self.gzfs_path = Path(gzfs_path) if gzfs_path else self.project_path / "gzfs"
         if self.gzfs_path:
             self.gzfs_path.mkdir(exist_ok=True, parents=True)
 
@@ -147,13 +146,12 @@ class PyGhidraContext:
             logger.info(f"Importing new program: {program_name}")
             program = self.project.importProgram(binary_path)
             if program:
-                self.project.saveAs(program, "/", program_name, True)
+                 self.project.saveAs(program, "/", program_name, True)
             else:
                 raise ImportError(f"Failed to import binary: {binary_path}")
 
         if program:
-            self.programs[program_name] = self._init_program_info(
-                program, binary_path)
+            self.programs[program_name] = self._init_program_info(program, binary_path)
 
     def import_binaries(self, binary_paths: list[str | Path]):
         """
@@ -186,7 +184,7 @@ class PyGhidraContext:
         return program_info
 
     @staticmethod
-    def _gen_unique_bin_name(path: Union[str, Path]):
+    def _gen_unique_bin_name(path: str | Path):
         """
         Generate unique program name from binary for Ghidra Project
         """
@@ -241,17 +239,16 @@ class PyGhidraContext:
                 for future in concurrent.futures.as_completed(futures):
                     completed_count += 1
                     logger.info(
-                        f"Analysis % complete: {round(completed_count/prog_count, 2)*100}")
+                        f"Analysis % complete: {round(completed_count / prog_count, 2) * 100}"
+                    )
                     try:
                         program = future.result()
                         self.programs[program.name].analysis_complete = True
                     except Exception as exc:
-                        logger.error(
-                            f"{futures[future].getName()} generated an exception: {exc}")
+                        logger.error(f"{futures[future].getName()} generated an exception: {exc}")
         else:
             for domain_file in domain_files:
-                self.analyze_program(
-                    domain_file, require_symbols, force_analysis, verbose_analysis)
+                self.analyze_program(domain_file, require_symbols, force_analysis, verbose_analysis)
 
     def analyze_program(
         self,
@@ -271,10 +268,8 @@ class PyGhidraContext:
         if self.programs.get(df_or_prog.name):
             program = self.programs[df_or_prog.name].program
         else:
-            program = self.project.openProgram(
-                "/", df_or_prog.getName(), False)
-            self.programs[df_or_prog.name] = self._init_program_info(
-                program, program.name)
+            program = self.project.openProgram("/", df_or_prog.getName(), False)
+            self.programs[df_or_prog.name] = self._init_program_info(program, program.name)
 
         assert isinstance(program, Program)
 
@@ -286,8 +281,7 @@ class PyGhidraContext:
                 raise FileNotFoundError(f"GDT Path not found {gdt}")
             self.apply_gdt(program, gdt)
 
-        gdt_names = [
-            name for name in program.getDataTypeManager().getSourceArchives()]
+        gdt_names = [name for name in program.getDataTypeManager().getSourceArchives()]
         if len(gdt_names) > 0:
             logger.debug(f"Using file gdts: {gdt_names}")
 
@@ -314,8 +308,7 @@ class PyGhidraContext:
                         .get("Decompiler Parameter ID")
                         is None
                     ):
-                        self.set_analysis_option(
-                            program, "Decompiler Parameter ID", True)
+                        self.set_analysis_option(program, "Decompiler Parameter ID", True)
 
                 if self.program_options:
                     analyzer_options = self.program_options.get("program_options", {}).get(
@@ -327,7 +320,8 @@ class PyGhidraContext:
 
                 if self.no_symbols:
                     logger.warn(
-                        f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}")
+                        f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}"
+                    )
                     self.set_analysis_option(program, "PDB Universal", False)
 
                 logger.info(f"Starting Ghidra analysis of {program}...")
@@ -348,10 +342,8 @@ class PyGhidraContext:
             if self.gzfs_path is not None:
                 from java.io import File
 
-                gzf_file = self.gzfs_path / \
-                    f"{program.getDomainFile().getName()}.gzf"
-                self.project.saveAsPackedFile(
-                    program, File(str(gzf_file.absolute())), True)
+                gzf_file = self.gzfs_path / f"{program.getDomainFile().getName()}.gzf"
+                self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
 
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
         return df_or_prog
@@ -392,13 +384,11 @@ class PyGhidraContext:
                 if isinstance(value, str):
                     temp_bool = value.lower()
                     if temp_bool in {"true", "false"}:
-                        prog_options.setBoolean(
-                            option_name, temp_bool == "true")
+                        prog_options.setBoolean(option_name, temp_bool == "true")
                 elif isinstance(value, bool):
                     prog_options.setBoolean(option_name, value)
                 else:
-                    raise ValueError(
-                        f"Failed to setBoolean on {option_name} {option_type}")
+                    raise ValueError(f"Failed to setBoolean on {option_name} {option_type}")
             case "ENUM_TYPE":
                 logger.debug("Setting type: ENUM")
                 from java.lang import Enum
@@ -424,8 +414,7 @@ class PyGhidraContext:
                     )
                 prog_options.setEnum(option_name, new_enum)
             case _:
-                logger.warning(
-                    f"option {option_type} set not supported, ignoring")
+                logger.warning(f"option {option_type} set not supported, ignoring")
 
     def configure_symbols(
         self,
@@ -447,12 +436,10 @@ class PyGhidraContext:
             logger.info(f"Configuring symbols for {program_name}")
             try:
                 if hasattr(PdbUniversalAnalyzer, "setAllowUntrustedOption"):  # Ghidra 11.2+
-                    PdbUniversalAnalyzer.setAllowUntrustedOption(
-                        program, allow_remote)
+                    PdbUniversalAnalyzer.setAllowUntrustedOption(program, allow_remote)
                     PdbAnalyzer.setAllowUntrustedOption(program, allow_remote)
                 else:  # Ghidra < 11.2
-                    PdbUniversalAnalyzer.setAllowRemoteOption(
-                        program, allow_remote)
+                    PdbUniversalAnalyzer.setAllowRemoteOption(program, allow_remote)
                     PdbAnalyzer.setAllowRemoteOption(program, allow_remote)
 
                 # The following is a placeholder for actual symbol loading logic
@@ -463,8 +450,7 @@ class PyGhidraContext:
                     )
 
             except Exception as e:
-                logger.error(
-                    f"Failed to configure symbols for {program_name}: {e}")
+                logger.error(f"Failed to configure symbols for {program_name}: {e}")
 
     def apply_gdt(
         self,

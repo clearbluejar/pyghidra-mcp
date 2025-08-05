@@ -57,8 +57,7 @@ int main() {
 def streamable_server(test_binary):
     """Fixture to start the pyghidra-mcp server in a separate process."""
     proc = subprocess.Popen(
-        ["python", "-m", "pyghidra_mcp", "--transport",
-            "streamable-http", test_binary],
+        ["python", "-m", "pyghidra_mcp", "--transport", "streamable-http", test_binary],
         env={**os.environ, "GHIDRA_INSTALL_DIR": "/ghidra"},
     )
 
@@ -87,22 +86,18 @@ async def invoke_tool_concurrently(server_binary_path):
     async with streamablehttp_client(f"{base_url}/mcp") as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            binary_name = PyGhidraContext._gen_unique_bin_name(
-                Path(server_binary_path))
+            binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))
 
             tasks = [
                 session.call_tool(
-                    "decompile_function", {
-                        "binary_name": binary_name, "name": "main"}
+                    "decompile_function", {"binary_name": binary_name, "name": "main"}
                 ),
                 session.call_tool(
-                    "search_functions_by_name", {
-                        "binary_name": binary_name, "query": "function"}
+                    "search_functions_by_name", {"binary_name": binary_name, "query": "function"}
                 ),
                 session.call_tool("list_project_binaries", {}),
                 session.call_tool("list_project_program_info", {}),
-                session.call_tool(
-                    "list_exports", {"binary_name": binary_name}),
+                session.call_tool("list_exports", {"binary_name": binary_name}),
             ]
 
             responses = await asyncio.gather(*tasks)
@@ -116,8 +111,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     using streamable-http transport.
     """
     num_clients = 5
-    tasks = [invoke_tool_concurrently(streamable_server)
-             for _ in range(num_clients)]
+    tasks = [invoke_tool_concurrently(streamable_server) for _ in range(num_clients)]
     results = await asyncio.gather(*tasks)
 
     assert len(results) == num_clients
@@ -126,8 +120,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         assert len(client_responses) == 5
 
         # Decompiled function
-        decompiled_func_result = json.loads(
-            client_responses[0].content[0].text)
+        decompiled_func_result = json.loads(client_responses[0].content[0].text)
         decompiled_function = DecompiledFunction(**decompiled_func_result)
         assert "main" in decompiled_function.name
         assert "main" in decompiled_function.code
@@ -136,27 +129,22 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         search_results_result = json.loads(client_responses[1].content[0].text)
         search_results = FunctionSearchResults(**search_results_result)
         assert len(search_results.functions) >= 2
-        assert any(
-            "function_one" in func.name for func in search_results.functions)
-        assert any(
-            "function_two" in func.name for func in search_results.functions)
+        assert any("function_one" in func.name for func in search_results.functions)
+        assert any("function_two" in func.name for func in search_results.functions)
 
         # List project binaries
         binaries_result = client_responses[2].content
         assert isinstance(binaries_result, list)
-        assert any([os.path.basename(streamable_server)
-                   in name.text for name in binaries_result])
+        assert any([os.path.basename(streamable_server) in name.text for name in binaries_result])
 
         # List project program info
         program_infos_result = json.loads(client_responses[3].content[0].text)
         program_infos = ProgramInfos(**program_infos_result)
         assert len(program_infos.programs) >= 1
-        assert os.path.basename(
-            streamable_server) in program_infos.programs[0].name
+        assert os.path.basename(streamable_server) in program_infos.programs[0].name
 
         # List exports
         export_infos_result = json.loads(client_responses[4].content[0].text)
         export_infos = ExportInfos(**export_infos_result)
         assert len(export_infos.exports) > 0
-        assert any(
-            ["function_one" in export.name for export in export_infos.exports])
+        assert any(["function_one" in export.name for export in export_infos.exports])

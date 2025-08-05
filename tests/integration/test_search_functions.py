@@ -65,11 +65,9 @@ async def test_search_functions_by_name_tool():
 
             # Call the search_functions_by_name tool
             try:
-                binary_name = PyGhidraContext._gen_unique_bin_name(
-                    server_params.args[-1])
+                binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
                 results = await session.call_tool(
-                    "search_functions_by_name", {
-                        "binary_name": binary_name, "query": "function"}
+                    "search_functions_by_name", {"binary_name": binary_name, "query": "function"}
                 )
 
                 # Check that we got results
