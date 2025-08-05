@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 
 [[package]]
@@ -880,11 +880,10 @@ wheels = [
 
 [[package]]
 name = "pyghidra-mcp"
-version = "0.1.4"
+version = "0.1.6"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
-    { name = "ghidra-stubs" },
     { name = "mcp", extra = ["cli"] },
     { name = "pyghidra" },
 ]
@@ -900,6 +899,7 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "aiohttp" },
+    { name = "ghidra-stubs" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -909,7 +909,6 @@ dev = [
 requires-dist = [
     { name = "aiohttp", marker = "extra == 'dev'", specifier = ">=3.9.5" },
     { name = "click", specifier = ">=8.2.1" },
-    { name = "ghidra-stubs", specifier = ">=11.3.2" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.9.4" },
     { name = "pyghidra", specifier = ">=2.1.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.1" },
@@ -921,6 +920,7 @@ provides-extras = ["dev"]
 [package.metadata.requires-dev]
 dev = [
     { name = "aiohttp", specifier = ">=3.9.5" },
+    { name = "ghidra-stubs", specifier = ">=11.3.2" },
     { name = "pytest", specifier = ">=8.4.1" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "pytest-cov", specifier = ">=6.2.1" },

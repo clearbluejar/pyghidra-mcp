@@ -1,12 +1,11 @@
 [project]
 name = "pyghidra-mcp"
-version = "0.1.4"
+version = "0.1.6"
 description = "Python Command-Line Ghidra MCP"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.2.1",
-    "ghidra-stubs>=11.3.2",
     "mcp[cli]>=1.9.4",
     "pyghidra>=2.1.0",
 ]
@@ -43,6 +42,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "aiohttp>=3.9.5",
     "pytest-cov>=6.2.1",
+    "ghidra-stubs>=11.3.2",
 ]
 
 
@@ -69,3 +69,37 @@ where = ["src"]
 packages = [
     "src/pyghidra_mcp",
 ]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = [
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "B",
+    "I",
+    "UP",
+    "N",
+    "W",
+    "C90",
+    "RUF",
+]
+ignore = ["F821"] 
+# this is because of Java / Python import issues (see Jpype)
+
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "pyghidra_mcp",
+]
+combine-as-imports = true
+split-on-trailing-comma = true
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10

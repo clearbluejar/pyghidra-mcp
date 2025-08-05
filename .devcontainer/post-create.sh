@@ -15,7 +15,7 @@ pip install pyghidra
 pip install uv
 
 # install local workspace and test requirements
-pip install -e ".[cli]"
+pip install -e ".[dev]"
 
 # If arm64 os, need to build native binaries for Ghidra
 if uname -a | grep -q 'aarch64'; then
