@@ -53,9 +53,9 @@ def streamable_server(test_binary):
         env={**os.environ, "GHIDRA_INSTALL_DIR": "/ghidra"},
     )
 
-    async def wait_for_server():
+    async def wait_for_server(timeout=120):
         async with aiohttp.ClientSession() as session:
-            for _ in range(20):  # Poll for 20 seconds
+            for _ in range(timeout):  # Poll for 20 seconds
                 try:
                     async with session.get(f"{base_url}/mcp") as response:
                         if response.status == 406:

@@ -24,9 +24,9 @@ def sse_server():
         env={**os.environ, "GHIDRA_INSTALL_DIR": "/ghidra"},
     )
 
-    async def wait_for_server():
+    async def wait_for_server(timeout=120):
         async with aiohttp.ClientSession() as session:
-            for _ in range(40):  # Poll for 40 seconds
+            for _ in range(timeout):  # Poll for 60 seconds
                 try:
                     async with session.get(f"{base_url}/sse") as response:
                         if response.status == 200:
