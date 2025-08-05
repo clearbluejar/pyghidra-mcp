@@ -1,15 +1,18 @@
-
+import asyncio
 import json
 import os
 import subprocess
-import time
 import tempfile
-import pytest
-import asyncio
+import time
+from pathlib import Path
+
 import aiohttp
+import pytest
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-from pyghidra_mcp.models import DecompiledFunction, FunctionSearchResults, ProgramInfos, ExportInfos
+
+from pyghidra_mcp.models import DecompiledFunction, ExportInfos, FunctionSearchResults, ProgramInfos
+from pyghidra_mcp.context import PyGhidraContext
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
@@ -19,7 +22,7 @@ def test_binary():
     """Create a simple test binary for testing."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
         f.write(
-            '''
+            """
 #include <stdio.h>
 
 void function_one() {
@@ -36,11 +39,12 @@ int main() {
     function_two();
     return 0;
 }
-'''
+"""
         )
         c_file = f.name
 
     bin_file = c_file.replace(".c", "")
+
     os.system(f"gcc -o {bin_file} {c_file}")
 
     yield bin_file
@@ -83,16 +87,22 @@ async def invoke_tool_concurrently(server_binary_path):
     async with streamablehttp_client(f"{base_url}/mcp") as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            binary_name = os.path.basename(server_binary_path)
+            binary_name = PyGhidraContext._gen_unique_bin_name(
+                Path(server_binary_path))
 
             tasks = [
-                session.call_tool("decompile_function", {
-                                  "binary_name": binary_name, "name": "main"}),
-                session.call_tool("search_functions_by_name", {
-                                  "binary_name": binary_name, "query": "function"}),
+                session.call_tool(
+                    "decompile_function", {
+                        "binary_name": binary_name, "name": "main"}
+                ),
+                session.call_tool(
+                    "search_functions_by_name", {
+                        "binary_name": binary_name, "query": "function"}
+                ),
                 session.call_tool("list_project_binaries", {}),
                 session.call_tool("list_project_program_info", {}),
-                session.call_tool("list_exports", {"binary_name": binary_name}),
+                session.call_tool(
+                    "list_exports", {"binary_name": binary_name}),
             ]
 
             responses = await asyncio.gather(*tasks)
@@ -134,18 +144,19 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         # List project binaries
         binaries_result = client_responses[2].content
         assert isinstance(binaries_result, list)
-        assert os.path.basename(streamable_server) in [
-            name.text for name in binaries_result]
+        assert any([os.path.basename(streamable_server)
+                   in name.text for name in binaries_result])
 
         # List project program info
         program_infos_result = json.loads(client_responses[3].content[0].text)
         program_infos = ProgramInfos(**program_infos_result)
         assert len(program_infos.programs) >= 1
-        assert program_infos.programs[0].name == os.path.basename(
-            streamable_server)
+        assert os.path.basename(
+            streamable_server) in program_infos.programs[0].name
 
         # List exports
         export_infos_result = json.loads(client_responses[4].content[0].text)
         export_infos = ExportInfos(**export_infos_result)
         assert len(export_infos.exports) > 0
-        assert any("printf" in export.name for export in export_infos.exports)
+        assert any(
+            ["function_one" in export.name for export in export_infos.exports])

@@ -1,18 +1,19 @@
+import asyncio
 import json
 import os
 import subprocess
-import time
 import tempfile
+import time
 
+import aiohttp
 import pytest
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+
 from pyghidra_mcp.models import DecompiledFunction
-import aiohttp
-import asyncio
+from pyghidra_mcp.context import PyGhidraContext
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
-temp_file_name = None
 
 
 @pytest.fixture(scope="module")
@@ -34,7 +35,6 @@ int main() {
 
     # Compile to binary
     bin_file = c_file.replace(".c", "")
-    temp_file_name = bin_file
     os.system(f"gcc -o {bin_file} {c_file}")
 
     yield bin_file
@@ -86,11 +86,13 @@ async def test_streamable_client_smoke(streamable_server):
             await session.initialize()
             # Session initialized
 
+            binary_name = PyGhidraContext._gen_unique_bin_name(
+                streamable_server)
+
             # Decompile a function
             results = await session.call_tool(
                 "decompile_function",
-                {"binary_name": os.path.basename(
-                    streamable_server), "name": "main"},
+                {"binary_name": binary_name, "name": "main"},
             )
             # We have results!
             assert results is not None

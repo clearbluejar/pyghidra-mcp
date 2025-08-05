@@ -1,6 +1,7 @@
-import pytest
-import tempfile
 import os
+import tempfile
+
+import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -9,7 +10,7 @@ from mcp.client.stdio import stdio_client
 def test_binary():
     """Create a simple test binary for testing."""
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.c', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
         c_file = f.name
         f.write("""
 #include <stdio.h>
@@ -21,8 +22,8 @@ int main() {
 """)
 
     # Compile to binary
-    bin_file = c_file.replace('.c', '')
-    os.system(f'gcc -o {bin_file} {c_file}')
+    bin_file = c_file.replace(".c", "")
+    os.system(f"gcc -o {bin_file} {c_file}")
 
     yield bin_file
 
@@ -52,7 +53,7 @@ async def test_stdio_client_initialization(server_params):
 
             # Check that we got a proper response
             assert result is not None
-            assert hasattr(result, 'protocolVersion')
+            assert hasattr(result, "protocolVersion")
 
 
 @pytest.mark.asyncio
@@ -69,12 +70,9 @@ async def test_stdio_client_list_tools(server_params):
             # Check that we got a response
             assert tools is not None
             # Check that we have at least the decompile_function tool
-            assert any(
-                tool.name == "decompile_function" for tool in tools.tools)
-            assert any(
-                tool.name == "list_project_binaries" for tool in tools.tools)
-            assert any(
-                tool.name == "list_project_program_info" for tool in tools.tools)
+            assert any(tool.name == "decompile_function" for tool in tools.tools)
+            assert any(tool.name == "list_project_binaries" for tool in tools.tools)
+            assert any(tool.name == "list_project_program_info" for tool in tools.tools)
 
 
 @pytest.mark.asyncio

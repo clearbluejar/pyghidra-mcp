@@ -1,17 +1,17 @@
-import json
+import os
+import tempfile
+
 import pytest
-import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-import tempfile
-import os
+from pyghidra_mcp.context import PyGhidraContext
 
 
 # Create a simple test binary
 def create_test_binary():
     """Create a simple test binary for testing."""
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.c', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
         f.write("""
 #include <stdio.h>
 
@@ -23,8 +23,8 @@ int main() {
         c_file = f.name
 
     # Compile to binary
-    bin_file = c_file.replace('.c', '')
-    os.system(f'gcc -o {bin_file} {c_file}')
+    bin_file = c_file.replace(".c", "")
+    os.system(f"gcc -o {bin_file} {c_file}")
 
     return bin_file
 
@@ -55,13 +55,11 @@ async def test_decompile_function_tool():
 
             # Call the decompile_function tool
             try:
-                binary_name = os.path.basename(server_params.args[-1])
+                binary_name = PyGhidraContext._gen_unique_bin_name(
+                    server_params.args[-1])
                 results = await session.call_tool(
-                    "decompile_function",
-                    {
-                        "binary_name": binary_name,
-                        "name": "main"
-                    }
+                    "decompile_function", {
+                        "binary_name": binary_name, "name": "main"}
                 )
 
                 # Check that we got results
@@ -75,6 +73,7 @@ async def test_decompile_function_tool():
                 text_content = results.content[0].text
                 assert text_content is not None
                 assert len(text_content) > 0
+                assert "main" in text_content
             except Exception as e:
                 # If we get an error, it might be because the function wasn't found
                 # or because of issues with the binary analysis
@@ -90,5 +89,5 @@ def test_create_test_binary():
     assert os.path.exists(bin_file)
 
     # Clean up
-    os.unlink(bin_file + '.c')
+    os.unlink(bin_file + ".c")
     os.unlink(bin_file)

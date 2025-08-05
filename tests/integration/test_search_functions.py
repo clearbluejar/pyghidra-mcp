@@ -1,17 +1,18 @@
 import json
+import os
+import tempfile
+
 import pytest
-import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-import tempfile
-import os
+from pyghidra_mcp.context import PyGhidraContext
 
 
 # Create a simple test binary with multiple functions
 def create_test_binary_with_functions():
     """Create a test binary with multiple functions for testing."""
     # Create a temporary file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.c', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
         f.write("""
 #include <stdio.h>
 
@@ -32,8 +33,8 @@ int main() {
         c_file = f.name
 
     # Compile to binary
-    bin_file = c_file.replace('.c', '')
-    os.system(f'gcc -o {bin_file} {c_file}')
+    bin_file = c_file.replace(".c", "")
+    os.system(f"gcc -o {bin_file} {c_file}")
 
     return bin_file
 
@@ -64,13 +65,11 @@ async def test_search_functions_by_name_tool():
 
             # Call the search_functions_by_name tool
             try:
-                binary_name = os.path.basename(server_params.args[-1])
+                binary_name = PyGhidraContext._gen_unique_bin_name(
+                    server_params.args[-1])
                 results = await session.call_tool(
-                    "search_functions_by_name",
-                    {
-                        "binary_name": binary_name,
-                        "query": "function"
-                    }
+                    "search_functions_by_name", {
+                        "binary_name": binary_name, "query": "function"}
                 )
 
                 # Check that we got results
@@ -109,5 +108,5 @@ def test_create_test_binary_with_functions():
     assert os.path.exists(bin_file)
 
     # Clean up
-    os.unlink(bin_file + '.c')
+    os.unlink(bin_file + ".c")
     os.unlink(bin_file)

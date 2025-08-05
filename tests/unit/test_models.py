@@ -1,4 +1,3 @@
-import pytest
 from pyghidra_mcp.models import DecompiledFunction, FunctionInfo, FunctionSearchResults
 
 
@@ -7,7 +6,7 @@ def test_decompiled_function_model():
     func = DecompiledFunction(
         name="test_function",
         code="int test_function() { return 0; }",
-        signature="int test_function()"
+        signature="int test_function()",
     )
 
     assert func.name == "test_function"
@@ -17,10 +16,7 @@ def test_decompiled_function_model():
 
 def test_function_info_model():
     """Test the FunctionInfo model."""
-    func_info = FunctionInfo(
-        name="test_function",
-        entry_point="0x1000"
-    )
+    func_info = FunctionInfo(name="test_function", entry_point="0x1000")
 
     assert func_info.name == "test_function"
     assert func_info.entry_point == "0x1000"

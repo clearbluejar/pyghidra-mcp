@@ -1,18 +1,15 @@
-
 import json
 import os
-import subprocess
-import time
 import tempfile
-import pytest
-import asyncio
-import aiohttp
 
+import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
 # from mcp.client.session import ClientSession, StdioServerParameters
 # from mcp.client.streamable_http import streamablehttp_client
 from pyghidra_mcp.models import ExportInfos
+from pyghidra_mcp.context import PyGhidraContext
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
@@ -25,7 +22,7 @@ def test_shared_object():
     # 1. Write the C source to a temp file
     with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
         f.write(
-            '''
+            """
 #include <stdio.h>
 
 void function_one() {
@@ -37,7 +34,7 @@ void function_two() {
 }
 
 // No main() needed for a shared library
-'''
+"""
         )
         c_file = f.name
 
@@ -77,7 +74,9 @@ async def test_list_exports(server_params):
         async with ClientSession(read, write) as session:
             # Initialize the connection
             await session.initialize()
-            binary_name = os.path.basename(server_params.args[-1])
+
+            binary_name = PyGhidraContext._gen_unique_bin_name(
+                server_params.args[-1])
 
             response = await session.call_tool("list_exports", {"binary_name": binary_name})
 
