@@ -9,7 +9,7 @@ import asyncio
 import aiohttp
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-from pyghidra_mcp.models import DecompiledFunction, FunctionSearchResults, ProgramInfos
+from pyghidra_mcp.models import DecompiledFunction, FunctionSearchResults, ProgramInfos, ExportInfos
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
@@ -92,6 +92,7 @@ async def invoke_tool_concurrently(server_binary_path):
                                   "binary_name": binary_name, "query": "function"}),
                 session.call_tool("list_project_binaries", {}),
                 session.call_tool("list_project_program_info", {}),
+                session.call_tool("list_exports", {"binary_name": binary_name}),
             ]
 
             responses = await asyncio.gather(*tasks)
@@ -112,7 +113,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     assert len(results) == num_clients
 
     for client_responses in results:
-        assert len(client_responses) == 4
+        assert len(client_responses) == 5
 
         # Decompiled function
         decompiled_func_result = json.loads(
@@ -142,3 +143,9 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         assert len(program_infos.programs) >= 1
         assert program_infos.programs[0].name == os.path.basename(
             streamable_server)
+
+        # List exports
+        export_infos_result = json.loads(client_responses[4].content[0].text)
+        export_infos = ExportInfos(**export_infos_result)
+        assert len(export_infos.exports) > 0
+        assert any("printf" in export.name for export in export_infos.exports)

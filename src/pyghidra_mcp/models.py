@@ -1,3 +1,4 @@
+
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
@@ -40,3 +41,14 @@ class ProgramInfos(BaseModel):
     """Model for a list of program information."""
     programs: List[ProgramInfo] = Field(...,
                                         description="A list of program information.")
+
+
+class ExportInfo(BaseModel):
+    """Model for basic export information."""
+    name: str = Field(..., description="The name of the export.")
+    address: str = Field(..., description="The address of the export.")
+
+
+class ExportInfos(BaseModel):
+    """Model for a list of exports."""
+    exports: List[ExportInfo] = Field(..., description="A list of exports.")
