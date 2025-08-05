@@ -1,26 +1,30 @@
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any, List
-import asyncio
-import click
-import pyghidra
-from mcp.server import Server
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.server.fastmcp.utilities.logging import get_logger
-from mcp.shared.exceptions import McpError
-from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
-from pyghidra_mcp.__init__ import __version__
-from pyghidra_mcp.context import PyGhidraContext
-from pyghidra_mcp.decompile import decompile_func
-from pyghidra_mcp.models import (DecompiledFunction, ExportInfo, ExportInfos,
-                                 FunctionInfo, FunctionSearchResults,
-                                 ProgramInfo, ProgramInfos)
-
 # Server Logging
 # ---------------------------------------------------------------------------------
 import logging
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import click
+import pyghidra
+from mcp.server import Server
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.shared.exceptions import McpError
+from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
+
+from pyghidra_mcp.__init__ import __version__
+from pyghidra_mcp.context import PyGhidraContext
+from pyghidra_mcp.decompile import decompile_func
+from pyghidra_mcp.models import (
+    DecompiledFunction,
+    ExportInfo,
+    ExportInfos,
+    FunctionInfo,
+    FunctionSearchResults,
+    ProgramInfo,
+    ProgramInfos,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,18 +53,14 @@ mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
 # MCP Tools
 # ---------------------------------------------------------------------------------
 @mcp.tool()
-async def decompile_function(
-    binary_name: str, name: str, ctx: Context
-) -> DecompiledFunction:
+async def decompile_function(binary_name: str, name: str, ctx: Context) -> DecompiledFunction:
     """Decompile a specific function and return the psuedo-c code for the function"""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = pyghidra_context.programs.get(binary_name)
         if not program_info:
             raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS, message=f"Binary {binary_name} not found"
-                )
+                ErrorData(code=INVALID_PARAMS, message=f"Binary {binary_name} not found")
             )
         prog = program_info.program
         decompiler = program_info.decompiler
@@ -71,15 +71,10 @@ async def decompile_function(
             if name == func.name:
                 f_name, code, sig = decompile_func(func, decompiler)
                 return DecompiledFunction(name=f_name, code=code, signature=sig)
-        raise McpError(
-            ErrorData(code=INVALID_PARAMS,
-                      message=f"Function {name} not found")
-        )
+        raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Function {name} not found"))
     except Exception as e:
         raise McpError(
-            ErrorData(
-                code=INTERNAL_ERROR, message=f"Error decompiling function: {e!s}"
-            )
+            ErrorData(code=INTERNAL_ERROR, message=f"Error decompiling function: {e!s}")
         ) from e
 
 
@@ -94,17 +89,12 @@ def search_functions_by_name(
         from ghidra.program.model.listing import Function
 
         if not query:
-            raise McpError(
-                ErrorData(code=INVALID_PARAMS,
-                          message="Query string is required")
-            )
+            raise McpError(ErrorData(code=INVALID_PARAMS, message="Query string is required"))
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = pyghidra_context.programs.get(binary_name)
         if not program_info:
             raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS, message=f"Binary {binary_name} not found"
-                )
+                ErrorData(code=INVALID_PARAMS, message=f"Binary {binary_name} not found")
             )
         prog = program_info.program
         funcs = []
@@ -112,32 +102,25 @@ def search_functions_by_name(
         functions = fm.getFunctions(True)
         # Search for functions containing the query string
         for func in functions:
-            func: "Function"
+            func: Function
             if query.lower() in func.name.lower():
-                funcs.append(
-                    FunctionInfo(name=func.name, entry_point=str(
-                        func.getEntryPoint()))
-                )
-        return FunctionSearchResults(functions=funcs[offset: limit + offset])
+                funcs.append(FunctionInfo(name=func.name, entry_point=str(func.getEntryPoint())))
+        return FunctionSearchResults(functions=funcs[offset : limit + offset])
     except Exception as e:
         raise McpError(
-            ErrorData(
-                code=INTERNAL_ERROR, message=f"Error searching for functions: {e!s}"
-            )
+            ErrorData(code=INTERNAL_ERROR, message=f"Error searching for functions: {e!s}")
         ) from e
 
 
 @mcp.tool()
-def list_project_binaries(ctx: Context) -> List[str]:
+def list_project_binaries(ctx: Context) -> list[str]:
     """List all the binaries within the project."""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         return list(pyghidra_context.programs.keys())
     except Exception as e:
         raise McpError(
-            ErrorData(
-                code=INTERNAL_ERROR, message=f"Error listing project binaries: {e!s}"
-            )
+            ErrorData(code=INTERNAL_ERROR, message=f"Error listing project binaries: {e!s}")
         ) from e
 
 
@@ -147,7 +130,7 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_infos = []
-        for name, pi in pyghidra_context.programs.items():
+        for _name, pi in pyghidra_context.programs.items():
             program_infos.append(
                 ProgramInfo(
                     name=pi.name,
@@ -175,31 +158,26 @@ def list_exports(binary_name: str, ctx: Context) -> ExportInfos:
         program_info = pyghidra_context.programs.get(binary_name)
         if not program_info:
             raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS, message=f"Binary {binary_name} not found"
-                )
+                ErrorData(code=INVALID_PARAMS, message=f"Binary {binary_name} not found")
             )
         prog = program_info.program
         exports = []
-        symbols = prog.getSymbolTable().getAllSymbols(true)
+        symbols = prog.getSymbolTable().getAllSymbols(True)
         for symbol in symbols:
             if symbol.isExternalEntryPoint():
-                exports.append(
-                    ExportInfo(name=symbol.getName(),
-                               address=str(symbol.getAddress()))
-                )
+                exports.append(ExportInfo(name=symbol.getName(), address=str(symbol.getAddress())))
         return ExportInfos(exports=exports)
     except Exception as e:
         raise McpError(
-            ErrorData(code=INTERNAL_ERROR,
-                      message=f"Error listing exports: {e!s}")
+            ErrorData(code=INTERNAL_ERROR, message=f"Error listing exports: {e!s}")
         ) from e
 
 
-def init_pyghidra_context(mcp: FastMCP, input_paths: List[Path], project_name: str, project_directory: str) -> FastMCP:
-
+def init_pyghidra_context(
+    mcp: FastMCP, input_paths: list[Path], project_name: str, project_directory: str
+) -> FastMCP:
     if not input_paths:
-        raise ValueError('Missing Input Paths!')
+        raise ValueError("Missing Input Paths!")
 
     bin_paths = [Path(p) for p in input_paths]
 
@@ -220,6 +198,7 @@ def init_pyghidra_context(mcp: FastMCP, input_paths: List[Path], project_name: s
     mcp._pyghidra_context = pyghidra_context
 
     return mcp
+
 
 # MCP Server Entry Point
 # ---------------------------------------------------------------------------------
@@ -252,7 +231,9 @@ def init_pyghidra_context(mcp: FastMCP, input_paths: List[Path], project_name: s
     help="Directory to store the Ghidra project.",
 )
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1, required=True)
-def main(transport: str, input_paths: List[Path], project_name: str, project_directory: str) -> None:
+def main(
+    transport: str, input_paths: list[Path], project_name: str, project_directory: str
+) -> None:
     """PyGhidra Command-Line MCP server
 
     - input_paths: Path to one or more binaries to import, analyze, and expose with pyghidra-mcp
