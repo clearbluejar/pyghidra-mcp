@@ -1,4 +1,5 @@
 {
+    // reference https://github.com/astral-sh/ruff-vscode/issues/247
     "[python]": {
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
