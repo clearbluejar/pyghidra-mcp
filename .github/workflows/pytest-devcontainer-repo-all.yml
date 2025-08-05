@@ -27,7 +27,7 @@ jobs:
         image: [
           "latest",
           "11.3.2ghidra3.12python-bookworm",
-          "11.3.1ghidra3.11python-bookworm",
+          "11.4.1ghidra3.11python-bookworm",
           "11.3ghidra3.10python-bookworm",
           # "11.3ghidra3.9python-bookworm",
           ]
@@ -60,7 +60,6 @@ jobs:
           pip install -e ".[dev]"
 
           # install plugins before use
-          python tests/init_pyghidra.py
           python -m pytest tests/unit/ --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
           python -m pytest tests/integration/ --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
 
