@@ -51,3 +51,16 @@ class ExportInfos(BaseModel):
     """Model for a list of exports."""
 
     exports: list[ExportInfo] = Field(..., description="A list of exports.")
+
+
+class ImportInfo(BaseModel):
+    """Model for basic import information."""
+
+    name: str = Field(..., description="The name of the import.")
+    library: str = Field(..., description="The library of the import.")
+
+
+class ImportInfos(BaseModel):
+    """Model for a list of imports."""
+
+    imports: list[ImportInfo] = Field(..., description="A list of imports.")

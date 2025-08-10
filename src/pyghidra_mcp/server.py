@@ -22,6 +22,8 @@ from pyghidra_mcp.models import (
     ExportInfos,
     FunctionInfo,
     FunctionSearchResults,
+    ImportInfo,
+    ImportInfos,
     ProgramInfo,
     ProgramInfos,
 )
@@ -170,6 +172,31 @@ def list_exports(binary_name: str, ctx: Context) -> ExportInfos:
     except Exception as e:
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error listing exports: {e!s}")
+        ) from e
+
+
+@mcp.tool()
+def list_imports(binary_name: str, ctx: Context) -> ImportInfos:
+    """List all the imports from a binary."""
+    try:
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        program_info = pyghidra_context.programs.get(binary_name)
+        if not program_info:
+            raise McpError(
+                ErrorData(code=INVALID_PARAMS, message=f"Binary {binary_name} not found")
+            )
+        prog = program_info.program
+        imports = []
+
+        symbols = prog.getSymbolTable().getExternalSymbols()
+        for symbol in symbols:
+            imports.append(
+                ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace()))
+            )
+        return ImportInfos(imports=imports)
+    except Exception as e:
+        raise McpError(
+            ErrorData(code=INTERNAL_ERROR, message=f"Error listing imports: {e!s}")
         ) from e
 
 

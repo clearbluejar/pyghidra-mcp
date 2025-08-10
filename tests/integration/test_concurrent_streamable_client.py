@@ -11,8 +11,14 @@ import pytest
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from pyghidra_mcp.models import DecompiledFunction, ExportInfos, FunctionSearchResults, ProgramInfos
 from pyghidra_mcp.context import PyGhidraContext
+from pyghidra_mcp.models import (
+    DecompiledFunction,
+    ExportInfos,
+    FunctionSearchResults,
+    ImportInfos,
+    ProgramInfos,
+)
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
@@ -98,6 +104,7 @@ async def invoke_tool_concurrently(server_binary_path):
                 session.call_tool("list_project_binaries", {}),
                 session.call_tool("list_project_program_info", {}),
                 session.call_tool("list_exports", {"binary_name": binary_name}),
+                session.call_tool("list_imports", {"binary_name": binary_name}),
             ]
 
             responses = await asyncio.gather(*tasks)
@@ -110,14 +117,14 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     Tests concurrent client connections and tool invocations to the pyghidra-mcp server
     using streamable-http transport.
     """
-    num_clients = 5
+    num_clients = 6
     tasks = [invoke_tool_concurrently(streamable_server) for _ in range(num_clients)]
     results = await asyncio.gather(*tasks)
 
     assert len(results) == num_clients
 
     for client_responses in results:
-        assert len(client_responses) == 5
+        assert len(client_responses) == 6
 
         # Decompiled function
         decompiled_func_result = json.loads(client_responses[0].content[0].text)
@@ -148,3 +155,9 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         export_infos = ExportInfos(**export_infos_result)
         assert len(export_infos.exports) > 0
         assert any(["function_one" in export.name for export in export_infos.exports])
+
+        # List imports
+        import_infos_result = json.loads(client_responses[5].content[0].text)
+        import_infos = ImportInfos(**import_infos_result)
+        assert len(import_infos.imports) > 0
+        assert any(["printf" in imp.name for imp in import_infos.imports])
