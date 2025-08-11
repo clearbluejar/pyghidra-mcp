@@ -5,6 +5,7 @@ import tempfile
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
 from pyghidra_mcp.context import PyGhidraContext
 
 

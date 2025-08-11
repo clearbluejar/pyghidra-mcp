@@ -9,8 +9,8 @@ import pytest
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 
-from pyghidra_mcp.models import DecompiledFunction
 from pyghidra_mcp.context import PyGhidraContext
+from pyghidra_mcp.models import DecompiledFunction
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
