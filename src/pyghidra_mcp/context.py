@@ -146,7 +146,7 @@ class PyGhidraContext:
             logger.info(f"Importing new program: {program_name}")
             program = self.project.importProgram(binary_path)
             if program:
-                 self.project.saveAs(program, "/", program_name, True)
+                self.project.saveAs(program, "/", program_name, True)
             else:
                 raise ImportError(f"Failed to import binary: {binary_path}")
 
@@ -155,7 +155,7 @@ class PyGhidraContext:
 
     def import_binaries(self, binary_paths: list[str | Path]):
         """
-        Imports and optionally analyzes a list of binaries into the project.
+        Imports a list of binaries into the project.
 
         Args:
             binary_paths: A list of paths to the binary files.

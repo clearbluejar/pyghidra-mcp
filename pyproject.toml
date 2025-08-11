@@ -43,15 +43,28 @@ dev = [
     "aiohttp>=3.9.5",
     "pytest-cov>=6.2.1",
     "ghidra-stubs>=11.3.2",
+    "pytest-cov>=6.2.1",
+    "mcp[cli]>=1.11.0",
+    "ruff>=0.11.4",
+    "tomli>=2.0.1",
+    "tomli-w>=1.0.0",
+    "pre-commit>=3.0.0",
+    "pyright>=1.1.0",
 ]
 
 
 [project.optional-dependencies]
 dev = [
-  "pytest-asyncio>=0.23.0",
-  "aiohttp>=3.9.5",
-  "pytest>=8.4.1",
-  "pytest-cov>=6.2.1",
+    "pytest-asyncio>=0.23.0",
+    "aiohttp>=3.9.5",
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
+    "mcp[cli]>=1.11.0",
+    "ruff>=0.11.4",
+    "tomli>=2.0.1",
+    "tomli-w>=1.0.0",
+    "pre-commit>=3.0.0",
+    "pyright>=1.1.0",
 ]
 
 [project.scripts]

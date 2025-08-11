@@ -13,6 +13,7 @@ from mcp.client.streamable_http import streamablehttp_client
 
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
+    CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
     FunctionSearchResults,
@@ -105,6 +106,10 @@ async def invoke_tool_concurrently(server_binary_path):
                 session.call_tool("list_project_program_info", {}),
                 session.call_tool("list_exports", {"binary_name": binary_name}),
                 session.call_tool("list_imports", {"binary_name": binary_name}),
+                session.call_tool(
+                    "list_cross_references",
+                    {"binary_name": binary_name, "name_or_address": "function_one"},
+                ),
             ]
 
             responses = await asyncio.gather(*tasks)
@@ -124,7 +129,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     assert len(results) == num_clients
 
     for client_responses in results:
-        assert len(client_responses) == 6
+        assert len(client_responses) == 7
 
         # Decompiled function
         decompiled_func_result = json.loads(client_responses[0].content[0].text)
@@ -161,3 +166,9 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         import_infos = ImportInfos(**import_infos_result)
         assert len(import_infos.imports) > 0
         assert any(["printf" in imp.name for imp in import_infos.imports])
+
+        # List cross-references
+        cross_references_result = json.loads(client_responses[6].content[0].text)
+        cross_reference_infos = CrossReferenceInfos(**cross_references_result)
+        assert len(cross_reference_infos.cross_references) > 0
+        assert any([ref.function_name == "main" for ref in cross_reference_infos.cross_references])

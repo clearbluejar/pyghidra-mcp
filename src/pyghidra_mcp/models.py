@@ -64,3 +64,22 @@ class ImportInfos(BaseModel):
     """Model for a list of imports."""
 
     imports: list[ImportInfo] = Field(..., description="A list of imports.")
+
+
+class CrossReferenceInfo(BaseModel):
+    """Model for basic cross-reference information."""
+
+    function_name: str | None = Field(
+        None, description="The name of the function containing the cross-reference."
+    )
+    from_address: str = Field(..., description="The address of the cross-reference.")
+    to_address: str = Field(..., description="The to address of the cross-reference.")
+    type: str = Field(..., description="The type of the cross-reference.")
+
+
+class CrossReferenceInfos(BaseModel):
+    """Model for a list of cross-references."""
+
+    cross_references: list[CrossReferenceInfo] = Field(
+        ..., description="A list of cross-references."
+    )

@@ -14,9 +14,11 @@ from mcp.shared.exceptions import McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 
 from pyghidra_mcp.__init__ import __version__
-from pyghidra_mcp.context import PyGhidraContext
+from pyghidra_mcp.context import ProgramInfo as ContextProgramInfo, PyGhidraContext
 from pyghidra_mcp.decompile import decompile_func
 from pyghidra_mcp.models import (
+    CrossReferenceInfo,
+    CrossReferenceInfos,
     DecompiledFunction,
     ExportInfo,
     ExportInfos,
@@ -52,6 +54,22 @@ async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
 mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
 
 
+def _get_program_info_or_raise(
+    pyghidra_context: PyGhidraContext, binary_name: str
+) -> ContextProgramInfo:
+    """Get program info or raise McpError if not found."""
+    program_info = pyghidra_context.programs.get(binary_name)
+    if not program_info:
+        available_progs = list(pyghidra_context.programs.keys())
+        raise McpError(
+            ErrorData(
+                code=INVALID_PARAMS,
+                message=f"Binary {binary_name} not found. Available binaries: {available_progs}",
+            )
+        )
+    return program_info
+
+
 # MCP Tools
 # ---------------------------------------------------------------------------------
 @mcp.tool()
@@ -59,11 +77,7 @@ async def decompile_function(binary_name: str, name: str, ctx: Context) -> Decom
     """Decompile a specific function and return the psuedo-c code for the function"""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = pyghidra_context.programs.get(binary_name)
-        if not program_info:
-            raise McpError(
-                ErrorData(code=INVALID_PARAMS, message=f"Binary {binary_name} not found")
-            )
+        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
         prog = program_info.program
         decompiler = program_info.decompiler
         fm = prog.getFunctionManager()
@@ -93,11 +107,7 @@ def search_functions_by_name(
         if not query:
             raise McpError(ErrorData(code=INVALID_PARAMS, message="Query string is required"))
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = pyghidra_context.programs.get(binary_name)
-        if not program_info:
-            raise McpError(
-                ErrorData(code=INVALID_PARAMS, message=f"Binary {binary_name} not found")
-            )
+        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
         prog = program_info.program
         funcs = []
         fm = prog.getFunctionManager()
@@ -157,11 +167,7 @@ def list_exports(binary_name: str, ctx: Context) -> ExportInfos:
     """List all the exports from a binary."""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = pyghidra_context.programs.get(binary_name)
-        if not program_info:
-            raise McpError(
-                ErrorData(code=INVALID_PARAMS, message=f"Binary {binary_name} not found")
-            )
+        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
         prog = program_info.program
         exports = []
         symbols = prog.getSymbolTable().getAllSymbols(True)
@@ -180,11 +186,7 @@ def list_imports(binary_name: str, ctx: Context) -> ImportInfos:
     """List all the imports from a binary."""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = pyghidra_context.programs.get(binary_name)
-        if not program_info:
-            raise McpError(
-                ErrorData(code=INVALID_PARAMS, message=f"Binary {binary_name} not found")
-            )
+        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
         prog = program_info.program
         imports = []
 
@@ -197,6 +199,62 @@ def list_imports(binary_name: str, ctx: Context) -> ImportInfos:
     except Exception as e:
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error listing imports: {e!s}")
+        ) from e
+
+
+@mcp.tool()
+def list_cross_references(
+    binary_name: str, name_or_address: str, ctx: Context
+) -> CrossReferenceInfos:
+    """List all the cross-references to a function or address."""
+    try:
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
+        prog = program_info.program
+
+        # Get address from name or address
+        addr = None
+        try:
+            addr = prog.getAddressFactory().getAddress(name_or_address)
+        except Exception:
+            pass
+
+        if addr is None:
+            fm = prog.getFunctionManager()
+            functions = fm.getFunctions(True)
+            for func in functions:
+                if name_or_address == func.name:
+                    addr = func.getEntryPoint()
+                    break
+
+        if addr is None:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Could not find function or address: {name_or_address}",
+                )
+            )
+
+        cross_references = []
+
+        # Get references
+        rm = prog.getReferenceManager()
+        references = rm.getReferencesTo(addr)
+
+        for ref in references:
+            func = prog.getFunctionManager().getFunctionContaining(ref.getFromAddress())
+            cross_references.append(
+                CrossReferenceInfo(
+                    function_name=func.getName() if func else None,
+                    from_address=str(ref.getFromAddress()),
+                    to_address=str(ref.getToAddress()),
+                    type=str(ref.getReferenceType()),
+                )
+            )
+        return CrossReferenceInfos(cross_references=cross_references)
+    except Exception as e:
+        raise McpError(
+            ErrorData(code=INTERNAL_ERROR, message=f"Error listing cross-references: {e!s}")
         ) from e
 
 
