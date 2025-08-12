@@ -76,7 +76,12 @@ def _get_program_info_or_raise(
 # ---------------------------------------------------------------------------------
 @mcp.tool()
 async def decompile_function(binary_name: str, name: str, ctx: Context) -> DecompiledFunction:
-    """Decompile a specific function and return the psuedo-c code for the function"""
+    """Decompiles a function in a specified binary and returns its pseudo-C code.
+
+    Args:
+        binary_name: The name of the binary containing the function.
+        name: The name of the function to decompile.
+    """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
@@ -100,8 +105,13 @@ async def decompile_function(binary_name: str, name: str, ctx: Context) -> Decom
 def search_functions_by_name(
     binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 100
 ) -> FunctionSearchResults:
-    """
-    Search for functions whose name contains the given substring.
+    """Searches for functions within a binary by name.
+
+    Args:
+        binary_name: The name of the binary to search within.
+        query: The substring to search for in function names (case-insensitive).
+        offset: The number of results to skip.
+        limit: The maximum number of results to return.
     """
     try:
         from ghidra.program.model.listing import Function
@@ -130,8 +140,13 @@ def search_functions_by_name(
 def search_symbols_by_name(
     binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 100
 ) -> SymbolSearchResults:
-    """
-    Search for symbols whose name contains the given substring.
+    """Searches for symbols within a binary by name.
+
+    Args:
+        binary_name: The name of the binary to search within.
+        query: The substring to search for in symbol names (case-insensitive).
+        offset: The number of results to skip.
+        limit: The maximum number of results to return.
     """
     try:
         from ghidra.program.model.symbol import SymbolTable
@@ -169,7 +184,7 @@ def search_symbols_by_name(
 
 @mcp.tool()
 def list_project_binaries(ctx: Context) -> list[str]:
-    """List all the binaries within the project."""
+    """Lists the names of all binaries currently loaded in the Ghidra project."""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         return list(pyghidra_context.programs.keys())
@@ -181,7 +196,7 @@ def list_project_binaries(ctx: Context) -> list[str]:
 
 @mcp.tool()
 def list_project_program_info(ctx: Context) -> ProgramInfos:
-    """List all the program info within the project."""
+    """Retrieves detailed information for all programs (binaries) in the project."""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_infos = []
@@ -207,7 +222,11 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
 
 @mcp.tool()
 def list_exports(binary_name: str, ctx: Context) -> ExportInfos:
-    """List all the exports from a binary."""
+    """Lists all exported functions and symbols from a specified binary.
+
+    Args:
+        binary_name: The name of the binary to list exports from.
+    """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
@@ -226,7 +245,11 @@ def list_exports(binary_name: str, ctx: Context) -> ExportInfos:
 
 @mcp.tool()
 def list_imports(binary_name: str, ctx: Context) -> ImportInfos:
-    """List all the imports from a binary."""
+    """Lists all imported functions and symbols for a specified binary.
+
+    Args:
+        binary_name: The name of the binary to list imports from.
+    """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
@@ -249,7 +272,12 @@ def list_imports(binary_name: str, ctx: Context) -> ImportInfos:
 def list_cross_references(
     binary_name: str, name_or_address: str, ctx: Context
 ) -> CrossReferenceInfos:
-    """List all the cross-references to a function or address."""
+    """Finds and lists all cross-references (x-refs) to a given function or address within a binary. This is crucial for understanding how code and data are used and related.
+
+    Args:
+        binary_name: The name of the binary to search for cross-references in.
+        name_or_address: The name of the function or a specific address (e.g., '0x1004010') to find cross-references to.
+    """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
