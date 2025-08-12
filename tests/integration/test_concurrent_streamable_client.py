@@ -19,6 +19,7 @@ from pyghidra_mcp.models import (
     FunctionSearchResults,
     ImportInfos,
     ProgramInfos,
+    SymbolSearchResults,
 )
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
@@ -110,6 +111,9 @@ async def invoke_tool_concurrently(server_binary_path):
                     "list_cross_references",
                     {"binary_name": binary_name, "name_or_address": "function_one"},
                 ),
+                session.call_tool(
+                    "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
+                ),
             ]
 
             responses = await asyncio.gather(*tasks)
@@ -129,7 +133,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     assert len(results) == num_clients
 
     for client_responses in results:
-        assert len(client_responses) == 7
+        assert len(client_responses) == 8
 
         # Decompiled function
         decompiled_func_result = json.loads(client_responses[0].content[0].text)
@@ -172,3 +176,10 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         cross_reference_infos = CrossReferenceInfos(**cross_references_result)
         assert len(cross_reference_infos.cross_references) > 0
         assert any([ref.function_name == "main" for ref in cross_reference_infos.cross_references])
+
+        # Search symbols results
+        search_symbols_result = json.loads(client_responses[7].content[0].text)
+        search_symbols = SymbolSearchResults(**search_symbols_result)
+        assert len(search_symbols.symbols) >= 2
+        assert any("function_one" in s.name for s in search_symbols.symbols)
+        assert any("function_two" in s.name for s in search_symbols.symbols)

@@ -83,3 +83,22 @@ class CrossReferenceInfos(BaseModel):
     cross_references: list[CrossReferenceInfo] = Field(
         ..., description="A list of cross-references."
     )
+
+
+class SymbolInfo(BaseModel):
+    """Model for basic symbol information."""
+
+    name: str = Field(..., description="The name of the symbol.")
+    address: str = Field(..., description="The address of the symbol.")
+    type: str = Field(..., description="The type of the symbol.")
+    namespace: str = Field(..., description="The namespace of the symbol.")
+    source: str = Field(..., description="The source of the symbol.")
+    refcount: int = Field(..., description="The reference count of the symbol.")
+
+
+class SymbolSearchResults(BaseModel):
+    """Model for a list of symbols."""
+
+    symbols: list[SymbolInfo] = Field(
+        ..., description="A list of symbols that match the search criteria."
+    )

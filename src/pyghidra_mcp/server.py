@@ -28,6 +28,8 @@ from pyghidra_mcp.models import (
     ImportInfos,
     ProgramInfo,
     ProgramInfos,
+    SymbolInfo,
+    SymbolSearchResults,
 )
 
 logging.basicConfig(
@@ -121,6 +123,47 @@ def search_functions_by_name(
     except Exception as e:
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error searching for functions: {e!s}")
+        ) from e
+
+
+@mcp.tool()
+def search_symbols_by_name(
+    binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 100
+) -> SymbolSearchResults:
+    """
+    Search for symbols whose name contains the given substring.
+    """
+    try:
+        from ghidra.program.model.symbol import SymbolTable
+
+        if not query:
+            raise McpError(ErrorData(code=INVALID_PARAMS, message="Query string is required"))
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
+        prog = program_info.program
+        symbols_info = []
+        st: SymbolTable = prog.getSymbolTable()
+        symbols = st.getAllSymbols(True)
+        rm = prog.getReferenceManager()
+
+        # Search for symbols containing the query string
+        for symbol in symbols:
+            if query.lower() in symbol.name.lower():
+                ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
+                symbols_info.append(
+                    SymbolInfo(
+                        name=symbol.name,
+                        address=str(symbol.getAddress()),
+                        type=str(symbol.getSymbolType()),
+                        namespace=str(symbol.getParentNamespace()),
+                        source=str(symbol.getSource()),
+                        refcount=ref_count,
+                    )
+                )
+        return SymbolSearchResults(symbols=symbols_info[offset : limit + offset])
+    except Exception as e:
+        raise McpError(
+            ErrorData(code=INTERNAL_ERROR, message=f"Error searching for symbols: {e!s}")
         ) from e
 
 
