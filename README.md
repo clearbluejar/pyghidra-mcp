@@ -68,6 +68,8 @@ This project provides a Python-first experience optimized for local development,
       - [Python](#python-2)
       - [Docker](#docker-2)
   - [Integrations](#integrations)
+    - [Claude Desktop](#claude-desktop)
+  - [Imspiration](#imspiration)
   - [Contributing, community, and running from source](#contributing-community-and-running-from-source)
 
 ## Getting started
@@ -278,8 +280,31 @@ docker run -p 8000:8000 ghcr.io/clearbluejar/pyghidra-mcp -t sse
 > [!NOTE]
 > This section is a work in progress. We will be adding examples for specific integrations soon.
 
--  TODO
-(To be filled with specific integration examples for Cursor, VS Code, etc.)
+### Claude Desktop
+
+Add the following JSON block to your `claude_desktop_config.json` file:
+
+```json
+{
+  "mcpServers": {
+    "pyghidra-mcp": {
+      "command": "uvx",
+      "args": ["pyghidra-mcp", "/bin/ls", "/bin/jq", "/path/to/bin" ],
+      "env": {
+        "GHIDRA_INSTALL_DIR": "/path/to/ghidra"
+      }
+    }
+  }
+}
+```
+## Imspiration
+
+This project implementation and design was inspired by these awesome projects:
+
+* [GhidraMCP](https://github.com/lauriewired/GhidraMCP)
+* [semgrep-mcp](https://github.com/semgrep/mcp)
+* [ghidrecomp](https://github.com/clearbluejar/ghidrecomp)
+* [BinAssistMCP](https://github.com/jtang613/BinAssistMCP)
 
 ## Contributing, community, and running from source
 
@@ -294,8 +319,4 @@ ______________________________________________________________________
 
 Made with ❤️ by the [PyGhidra-MCP Team](https://github.com/clearbluejar/pyghidra-mcp)
 
-This project implementation and design was inspired by:
 
-* [GhidraMCP](https://github.com/lapets/GhidraMCP) – an early integration prototype for MCP and Ghidra
-* [semgrep-mcp](https://github.com/returntocorp/semgrep-mcp) – a robust implementation of MCP for static code analysis via Semgrep
-* [ghidrecomp](https://github.com/nccgroup/ghidrecomp) – a Ghidra command-;ine decompiler and programmatic analysis
