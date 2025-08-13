@@ -166,15 +166,13 @@ class PyGhidraContext:
     def _init_program_info(self, program, binary_path):
         from ghidra.program.flatapi import FlatProgramAPI
 
-        from .decompile import setup_decomplier
-
         assert program is not None
 
         program_info = ProgramInfo(
             name=program.name,
             program=program,
             flat_api=FlatProgramAPI(program),
-            decompiler=setup_decomplier(program),
+            decompiler=self.setup_decompiler(program),
             metadata=self.get_metadata(program),
             file_path=binary_path,
             load_time=time.time(),
@@ -494,3 +492,23 @@ class PyGhidraContext:
         """
         meta = prog.getMetadata()
         return dict(meta)
+
+    def setup_decompiler(
+        self, program: "ghidra.program.model.listing.Program"
+    ) -> "ghidra.app.decompiler.DecompInterface":
+        from ghidra.app.decompiler import DecompileOptions, DecompInterface
+
+        prog_options = DecompileOptions()
+
+        decomp = DecompInterface()
+
+        # grab default options from program
+        prog_options.grabFromProgram(program)
+
+        # increase maxpayload size to 100MB (default 50MB)
+        prog_options.setMaxPayloadMBytes(100)
+
+        decomp.setOptions(prog_options)
+        decomp.openProgram(program)
+
+        return decomp

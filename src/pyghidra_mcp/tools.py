@@ -1,0 +1,187 @@
+"""
+Comprehensive tool implementations for pyghidra-mcp.
+"""
+
+import functools
+import logging
+import typing
+
+from pyghidra_mcp.models import (
+    CrossReferenceInfo,
+    DecompiledFunction,
+    ExportInfo,
+    FunctionInfo,
+    ImportInfo,
+    SymbolInfo,
+)
+
+if typing.TYPE_CHECKING:
+    import ghidra
+    from pyghidra_mcp.context import ProgramInfo as ContextProgramInfo
+
+
+logger = logging.getLogger(__name__)
+
+
+def handle_exceptions(func):
+    """Decorator to handle exceptions in tool methods"""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {str(e)}")
+            raise
+
+    return wrapper
+
+
+class GhidraTools:
+    """Comprehensive tool handler for Ghidra MCP tools"""
+
+    def __init__(self, program_info: "ContextProgramInfo"):
+        """Initialize with a Ghidra ProgramInfo object"""
+        self.program_info = program_info
+        self.program = program_info.program
+        self.decompiler = program_info.decompiler
+
+    def _get_filename(self, func: "ghidra.program.model.listing.Function"):
+        max_path_len = 12
+        return f"{func.getName()[:max_path_len]}-{func.entryPoint}"
+
+    @handle_exceptions
+    def decompile_function(self, name: str, timeout: int = 0) -> DecompiledFunction:
+        """Decompiles a function in a specified binary and returns its pseudo-C code."""
+        from ghidra.app.decompiler import DecompileResults
+        from ghidra.util.task import ConsoleTaskMonitor
+
+        fm = self.program.getFunctionManager()
+        functions = fm.getFunctions(True)
+        for func in functions:
+            if name == func.name:
+                monitor = ConsoleTaskMonitor()
+                result: DecompileResults = self.decompiler.decompileFunction(
+                    func, timeout, monitor
+                )
+                if "" == result.getErrorMessage():
+                    code = result.decompiledFunction.getC()
+                    sig = result.decompiledFunction.getSignature()
+                else:
+                    code = result.getErrorMessage()
+                    sig = None
+                return DecompiledFunction(
+                    name=self._get_filename(func), code=code, signature=sig
+                )
+        raise ValueError(f"Function {name} not found")
+
+    @handle_exceptions
+    def search_functions_by_name(
+        self, query: str, offset: int = 0, limit: int = 100
+    ) -> list[FunctionInfo]:
+        """Searches for functions within a binary by name."""
+        from ghidra.program.model.listing import Function
+
+        if not query:
+            raise ValueError("Query string is required")
+
+        funcs = []
+        fm = self.program.getFunctionManager()
+        functions = fm.getFunctions(True)
+        # Search for functions containing the query string
+        for func in functions:
+            func: Function
+            if query.lower() in func.name.lower():
+                funcs.append(FunctionInfo(name=func.name, entry_point=str(func.getEntryPoint())))
+        return funcs[offset : limit + offset]
+
+    @handle_exceptions
+    def search_symbols_by_name(
+        self, query: str, offset: int = 0, limit: int = 100
+    ) -> list[SymbolInfo]:
+        """Searches for symbols within a binary by name."""
+        from ghidra.program.model.symbol import SymbolTable
+
+        if not query:
+            raise ValueError("Query string is required")
+
+        symbols_info = []
+        st: SymbolTable = self.program.getSymbolTable()
+        symbols = st.getAllSymbols(True)
+        rm = self.program.getReferenceManager()
+
+        # Search for symbols containing the query string
+        for symbol in symbols:
+            if query.lower() in symbol.name.lower():
+                ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
+                symbols_info.append(
+                    SymbolInfo(
+                        name=symbol.name,
+                        address=str(symbol.getAddress()),
+                        type=str(symbol.getSymbolType()),
+                        namespace=str(symbol.getParentNamespace()),
+                        source=str(symbol.getSource()),
+                        refcount=ref_count,
+                    )
+                )
+        return symbols_info[offset : limit + offset]
+
+    @handle_exceptions
+    def list_exports(self) -> list[ExportInfo]:
+        """Lists all exported functions and symbols from a specified binary."""
+        exports = []
+        symbols = self.program.getSymbolTable().getAllSymbols(True)
+        for symbol in symbols:
+            if symbol.isExternalEntryPoint():
+                exports.append(ExportInfo(name=symbol.getName(), address=str(symbol.getAddress())))
+        return exports
+
+    @handle_exceptions
+    def list_imports(self) -> list[ImportInfo]:
+        """Lists all imported functions and symbols for a specified binary."""
+        imports = []
+        symbols = self.program.getSymbolTable().getExternalSymbols()
+        for symbol in symbols:
+            imports.append(
+                ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace()))
+            )
+        return imports
+
+    @handle_exceptions
+    def list_cross_references(self, name_or_address: str) -> list[CrossReferenceInfo]:
+        """Finds and lists all cross-references (x-refs) to a given function or address within a binary."""
+        # Get address from name or address
+        addr = None
+        try:
+            addr = self.program.getAddressFactory().getAddress(name_or_address)
+        except Exception:
+            pass
+
+        if addr is None:
+            fm = self.program.getFunctionManager()
+            functions = fm.getFunctions(True)
+            for func in functions:
+                if name_or_address == func.name:
+                    addr = func.getEntryPoint()
+                    break
+
+        if addr is None:
+            raise ValueError(f"Could not find function or address: {name_or_address}")
+
+        cross_references = []
+
+        # Get references
+        rm = self.program.getReferenceManager()
+        references = rm.getReferencesTo(addr)
+
+        for ref in references:
+            func = self.program.getFunctionManager().getFunctionContaining(ref.getFromAddress())
+            cross_references.append(
+                CrossReferenceInfo(
+                    function_name=func.getName() if func else None,
+                    from_address=str(ref.getFromAddress()),
+                    to_address=str(ref.getToAddress()),
+                    type=str(ref.getReferenceType()),
+                )
+            )
+        return cross_references

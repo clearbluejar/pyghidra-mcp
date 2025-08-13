@@ -15,22 +15,17 @@ from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 
 from pyghidra_mcp.__init__ import __version__
 from pyghidra_mcp.context import ProgramInfo as ContextProgramInfo, PyGhidraContext
-from pyghidra_mcp.decompile import decompile_func
 from pyghidra_mcp.models import (
-    CrossReferenceInfo,
     CrossReferenceInfos,
     DecompiledFunction,
-    ExportInfo,
     ExportInfos,
-    FunctionInfo,
     FunctionSearchResults,
-    ImportInfo,
     ImportInfos,
     ProgramInfo,
     ProgramInfos,
-    SymbolInfo,
     SymbolSearchResults,
 )
+from pyghidra_mcp.tools import GhidraTools
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,16 +80,8 @@ async def decompile_function(binary_name: str, name: str, ctx: Context) -> Decom
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
-        prog = program_info.program
-        decompiler = program_info.decompiler
-        fm = prog.getFunctionManager()
-        functions = fm.getFunctions(True)
-        await ctx.info(f"Analyzing function {name} for {prog.name}")
-        for func in functions:
-            if name == func.name:
-                f_name, code, sig = decompile_func(func, decompiler)
-                return DecompiledFunction(name=f_name, code=code, signature=sig)
-        raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Function {name} not found"))
+        tools = GhidraTools(program_info)
+        return tools.decompile_function(name)
     except Exception as e:
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error decompiling function: {e!s}")
@@ -114,22 +101,11 @@ def search_functions_by_name(
         limit: The maximum number of results to return.
     """
     try:
-        from ghidra.program.model.listing import Function
-
-        if not query:
-            raise McpError(ErrorData(code=INVALID_PARAMS, message="Query string is required"))
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
-        prog = program_info.program
-        funcs = []
-        fm = prog.getFunctionManager()
-        functions = fm.getFunctions(True)
-        # Search for functions containing the query string
-        for func in functions:
-            func: Function
-            if query.lower() in func.name.lower():
-                funcs.append(FunctionInfo(name=func.name, entry_point=str(func.getEntryPoint())))
-        return FunctionSearchResults(functions=funcs[offset : limit + offset])
+        tools = GhidraTools(program_info)
+        functions = tools.search_functions_by_name(query, offset, limit)
+        return FunctionSearchResults(functions=functions)
     except Exception as e:
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error searching for functions: {e!s}")
@@ -149,33 +125,11 @@ def search_symbols_by_name(
         limit: The maximum number of results to return.
     """
     try:
-        from ghidra.program.model.symbol import SymbolTable
-
-        if not query:
-            raise McpError(ErrorData(code=INVALID_PARAMS, message="Query string is required"))
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
-        prog = program_info.program
-        symbols_info = []
-        st: SymbolTable = prog.getSymbolTable()
-        symbols = st.getAllSymbols(True)
-        rm = prog.getReferenceManager()
-
-        # Search for symbols containing the query string
-        for symbol in symbols:
-            if query.lower() in symbol.name.lower():
-                ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
-                symbols_info.append(
-                    SymbolInfo(
-                        name=symbol.name,
-                        address=str(symbol.getAddress()),
-                        type=str(symbol.getSymbolType()),
-                        namespace=str(symbol.getParentNamespace()),
-                        source=str(symbol.getSource()),
-                        refcount=ref_count,
-                    )
-                )
-        return SymbolSearchResults(symbols=symbols_info[offset : limit + offset])
+        tools = GhidraTools(program_info)
+        symbols = tools.search_symbols_by_name(query, offset, limit)
+        return SymbolSearchResults(symbols=symbols)
     except Exception as e:
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error searching for symbols: {e!s}")
@@ -230,12 +184,8 @@ def list_exports(binary_name: str, ctx: Context) -> ExportInfos:
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
-        prog = program_info.program
-        exports = []
-        symbols = prog.getSymbolTable().getAllSymbols(True)
-        for symbol in symbols:
-            if symbol.isExternalEntryPoint():
-                exports.append(ExportInfo(name=symbol.getName(), address=str(symbol.getAddress())))
+        tools = GhidraTools(program_info)
+        exports = tools.list_exports()
         return ExportInfos(exports=exports)
     except Exception as e:
         raise McpError(
@@ -253,14 +203,8 @@ def list_imports(binary_name: str, ctx: Context) -> ImportInfos:
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
-        prog = program_info.program
-        imports = []
-
-        symbols = prog.getSymbolTable().getExternalSymbols()
-        for symbol in symbols:
-            imports.append(
-                ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace()))
-            )
+        tools = GhidraTools(program_info)
+        imports = tools.list_imports()
         return ImportInfos(imports=imports)
     except Exception as e:
         raise McpError(
@@ -281,47 +225,8 @@ def list_cross_references(
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
-        prog = program_info.program
-
-        # Get address from name or address
-        addr = None
-        try:
-            addr = prog.getAddressFactory().getAddress(name_or_address)
-        except Exception:
-            pass
-
-        if addr is None:
-            fm = prog.getFunctionManager()
-            functions = fm.getFunctions(True)
-            for func in functions:
-                if name_or_address == func.name:
-                    addr = func.getEntryPoint()
-                    break
-
-        if addr is None:
-            raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS,
-                    message=f"Could not find function or address: {name_or_address}",
-                )
-            )
-
-        cross_references = []
-
-        # Get references
-        rm = prog.getReferenceManager()
-        references = rm.getReferencesTo(addr)
-
-        for ref in references:
-            func = prog.getFunctionManager().getFunctionContaining(ref.getFromAddress())
-            cross_references.append(
-                CrossReferenceInfo(
-                    function_name=func.getName() if func else None,
-                    from_address=str(ref.getFromAddress()),
-                    to_address=str(ref.getToAddress()),
-                    type=str(ref.getReferenceType()),
-                )
-            )
+        tools = GhidraTools(program_info)
+        cross_references = tools.list_cross_references(name_or_address)
         return CrossReferenceInfos(cross_references=cross_references)
     except Exception as e:
         raise McpError(
