@@ -69,7 +69,7 @@ This project provides a Python-first experience optimized for local development,
       - [Docker](#docker-2)
   - [Integrations](#integrations)
     - [Claude Desktop](#claude-desktop)
-  - [Imspiration](#imspiration)
+  - [Inspiration](#inspiration)
   - [Contributing, community, and running from source](#contributing-community-and-running-from-source)
 
 ## Getting started
@@ -297,7 +297,7 @@ Add the following JSON block to your `claude_desktop_config.json` file:
   }
 }
 ```
-## Imspiration
+## Inspiration
 
 This project implementation and design was inspired by these awesome projects:
 
