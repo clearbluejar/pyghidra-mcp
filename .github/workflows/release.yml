@@ -3,6 +3,13 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      run-tests:
+        description: 'Run tests before publishing'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   build-and-publish:
@@ -21,6 +28,7 @@ jobs:
           pip install -e .[dev]
 
       - name: Run tests
+        if: ${{ inputs.run-tests == 'true' }}
         run: pytest
 
       - name: Build package
