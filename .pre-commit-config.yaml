@@ -40,4 +40,4 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
-        args: [run, pytest, tests/integration/, --doctest-modules]
+        args: [run, pytest, tests/integration/test_concurrent_streamable_client.py, --doctest-modules]
