@@ -4,6 +4,7 @@ Comprehensive tool implementations for pyghidra-mcp.
 
 import functools
 import logging
+import re
 import typing
 
 from pyghidra_mcp.models import (
@@ -17,6 +18,7 @@ from pyghidra_mcp.models import (
 
 if typing.TYPE_CHECKING:
     import ghidra
+
     from pyghidra_mcp.context import ProgramInfo as ContextProgramInfo
 
 
@@ -31,7 +33,7 @@ def handle_exceptions(func):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            logger.error(f"Error in {func.__name__}: {str(e)}")
+            logger.error(f"Error in {func.__name__}: {e!s}")
             raise
 
     return wrapper
@@ -61,18 +63,14 @@ class GhidraTools:
         for func in functions:
             if name == func.name:
                 monitor = ConsoleTaskMonitor()
-                result: DecompileResults = self.decompiler.decompileFunction(
-                    func, timeout, monitor
-                )
+                result: DecompileResults = self.decompiler.decompileFunction(func, timeout, monitor)
                 if "" == result.getErrorMessage():
                     code = result.decompiledFunction.getC()
                     sig = result.decompiledFunction.getSignature()
                 else:
                     code = result.getErrorMessage()
                     sig = None
-                return DecompiledFunction(
-                    name=self._get_filename(func), code=code, signature=sig
-                )
+                return DecompiledFunction(name=self._get_filename(func), code=code, signature=sig)
         raise ValueError(f"Function {name} not found")
 
     @handle_exceptions
@@ -127,29 +125,39 @@ class GhidraTools:
         return symbols_info[offset : limit + offset]
 
     @handle_exceptions
-    def list_exports(self) -> list[ExportInfo]:
+    def list_exports(
+        self, query: str | None = None, offset: int = 0, limit: int = 25
+    ) -> list[ExportInfo]:
         """Lists all exported functions and symbols from a specified binary."""
         exports = []
         symbols = self.program.getSymbolTable().getAllSymbols(True)
         for symbol in symbols:
             if symbol.isExternalEntryPoint():
+                if query and not re.search(query, symbol.getName(), re.IGNORECASE):
+                    continue
                 exports.append(ExportInfo(name=symbol.getName(), address=str(symbol.getAddress())))
-        return exports
+        return exports[offset : limit + offset]
 
     @handle_exceptions
-    def list_imports(self) -> list[ImportInfo]:
+    def list_imports(
+        self, query: str | None = None, offset: int = 0, limit: int = 25
+    ) -> list[ImportInfo]:
         """Lists all imported functions and symbols for a specified binary."""
         imports = []
         symbols = self.program.getSymbolTable().getExternalSymbols()
         for symbol in symbols:
+            if query and not re.search(query, symbol.getName(), re.IGNORECASE):
+                continue
             imports.append(
                 ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace()))
             )
-        return imports
+        return imports[offset : limit + offset]
 
     @handle_exceptions
     def list_cross_references(self, name_or_address: str) -> list[CrossReferenceInfo]:
-        """Finds and lists all cross-references (x-refs) to a given function or address within a binary."""
+        """Finds and lists all cross-references (x-refs) to a given function
+        or address within a binary.
+        """
         # Get address from name or address
         addr = None
         try:

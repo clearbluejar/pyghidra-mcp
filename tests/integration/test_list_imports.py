@@ -1,4 +1,3 @@
-import json
 import os
 import tempfile
 
@@ -68,8 +67,40 @@ async def test_list_imports(server_params):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
+
+            # Test without params
             response = await session.call_tool("list_imports", {"binary_name": binary_name})
-            import_infos_result = json.loads(response.content[0].text)
-            import_infos = ImportInfos(**import_infos_result)
+            import_infos = ImportInfos.model_validate_json(response.content[0].text)
             assert len(import_infos.imports) > 0
             assert any("printf" in imp.name for imp in import_infos.imports)
+            all_imports_list = import_infos.imports
+
+            # Test limit
+            response = await session.call_tool(
+                "list_imports", {"binary_name": binary_name, "limit": 1}
+            )
+            import_infos = ImportInfos.model_validate_json(response.content[0].text)
+            assert len(import_infos.imports) == 1
+
+            # Test offset
+            response = await session.call_tool(
+                "list_imports", {"binary_name": binary_name, "offset": 1, "limit": 1}
+            )
+            import_infos = ImportInfos.model_validate_json(response.content[0].text)
+            assert len(import_infos.imports) == 1
+            assert import_infos.imports[0].name == all_imports_list[1].name
+
+            # Test query
+            response = await session.call_tool(
+                "list_imports", {"binary_name": binary_name, "query": "printf"}
+            )
+            import_infos = ImportInfos.model_validate_json(response.content[0].text)
+            assert len(import_infos.imports) >= 1
+            assert "printf" in import_infos.imports[0].name
+
+            # Test query with no results
+            response = await session.call_tool(
+                "list_imports", {"binary_name": binary_name, "query": "non_existent_import"}
+            )
+            import_infos = ImportInfos.model_validate_json(response.content[0].text)
+            assert len(import_infos.imports) == 0

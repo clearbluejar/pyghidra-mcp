@@ -33,7 +33,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
-logger.info("Server initialized")
 
 
 # Init Pyghidra
@@ -90,7 +89,7 @@ async def decompile_function(binary_name: str, name: str, ctx: Context) -> Decom
 
 @mcp.tool()
 def search_functions_by_name(
-    binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 100
+    binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
 ) -> FunctionSearchResults:
     """Searches for functions within a binary by name.
 
@@ -114,7 +113,7 @@ def search_functions_by_name(
 
 @mcp.tool()
 def search_symbols_by_name(
-    binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 100
+    binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
 ) -> SymbolSearchResults:
     """Searches for symbols within a binary by name.
 
@@ -175,17 +174,26 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
 
 
 @mcp.tool()
-def list_exports(binary_name: str, ctx: Context) -> ExportInfos:
+def list_exports(
+    binary_name: str,
+    ctx: Context,
+    query: str | None = None,
+    offset: int = 0,
+    limit: int = 25,
+) -> ExportInfos:
     """Lists all exported functions and symbols from a specified binary.
 
     Args:
         binary_name: The name of the binary to list exports from.
+        query: An optional query to filter exports by name (regex supported).
+        offset: The number of results to skip.
+        limit: The maximum number of results to return.
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
         tools = GhidraTools(program_info)
-        exports = tools.list_exports()
+        exports = tools.list_exports(query=query, offset=offset, limit=limit)
         return ExportInfos(exports=exports)
     except Exception as e:
         raise McpError(
@@ -194,17 +202,26 @@ def list_exports(binary_name: str, ctx: Context) -> ExportInfos:
 
 
 @mcp.tool()
-def list_imports(binary_name: str, ctx: Context) -> ImportInfos:
+def list_imports(
+    binary_name: str,
+    ctx: Context,
+    query: str | None = None,
+    offset: int = 0,
+    limit: int = 25,
+) -> ImportInfos:
     """Lists all imported functions and symbols for a specified binary.
 
     Args:
         binary_name: The name of the binary to list imports from.
+        query: An optional query to filter imports by name (regex supported).
+        offset: The number of results to skip.
+        limit: The maximum number of results to return.
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
         tools = GhidraTools(program_info)
-        imports = tools.list_imports()
+        imports = tools.list_imports(query=query, offset=offset, limit=limit)
         return ImportInfos(imports=imports)
     except Exception as e:
         raise McpError(
@@ -216,11 +233,13 @@ def list_imports(binary_name: str, ctx: Context) -> ImportInfos:
 def list_cross_references(
     binary_name: str, name_or_address: str, ctx: Context
 ) -> CrossReferenceInfos:
-    """Finds and lists all cross-references (x-refs) to a given function or address within a binary. This is crucial for understanding how code and data are used and related.
+    """Finds and lists all cross-references (x-refs) to a given function or address within a binary.
+    This is crucial for understanding how code and data are used and related.
 
     Args:
         binary_name: The name of the binary to search for cross-references in.
-        name_or_address: The name of the function or a specific address (e.g., '0x1004010') to find cross-references to.
+        name_or_address: The name of the function or a specific address (e.g., '0x1004010') to find
+          cross-references to.
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
@@ -250,13 +269,15 @@ def init_pyghidra_context(
     pyghidra.start(False)  # setting Verbose output
 
     # init PyGhidraContext / import + analyze binaries
+    logger.info("Server initializing...")
     pyghidra_context = PyGhidraContext(project_name, project_directory)
     logger.info(f"Importing binaries: {project_directory}")
     pyghidra_context.import_binaries(bin_paths)
-    logger.info(f"Analyize project: {pyghidra_context.project}")
+    logger.info(f"Analyzing project: {pyghidra_context.project}")
     pyghidra_context.analyze_project()
 
     mcp._pyghidra_context = pyghidra_context
+    logger.info("Server intialized")
 
     return mcp
 
