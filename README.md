@@ -37,6 +37,58 @@ Yes, the original [ghidra-mcp](https://github.com/LaurieWired/GhidraMCP) is fant
 
 This project provides a Python-first experience optimized for local development, headless environments, and testable workflows.
 
+```mermaid
+graph TD
+    subgraph Clients
+        A[🤖 LLM / Agent]
+        B[💻 Local CLI User]
+        C[🔧 CI/CD Pipeline]
+    end
+
+    subgraph Startup Command
+        direction LR
+        cmd("`pyghidra-mcp /path/to/binary1 /path/to/binary2`")
+    end
+
+    subgraph "pyghidra-mcp Server"
+        D[MCP Server]
+        E[pyghidra ]
+        F[Ghidra Headless]
+
+      subgraph "Ghidra Project Analysis"
+          G[Binary 1]
+          H[Binary 2]
+          I[...]
+      end
+    end
+
+
+
+    cmd --> D
+
+    A -- "MCP (stdio/http)" --> D
+    B -- "stdio/http" --> D
+    C -- "stdio/sse" --> D
+
+    D -- "Initializes" --> E
+    E -- "Controls" --> F
+
+    F -- "Analyzes Concurrently" --> G
+    F -- "Analyzes Concurrently" --> H
+    F -- "Analyzes Concurrently" --> I
+
+    subgraph "Exposed MCP API"
+        J[decompile_function]
+        K[search_functions_by_name]
+    end
+
+    D -- "Exposes Tools" --> J
+    D -- "Exposes Tools" --> K
+
+    J -- "Results" --> A
+    K -- "Results" --> A
+```
+
 ## Contents
 
 - [PyGhidra-MCP - Ghidra Model Context Protocol Server](#pyghidra-mcp---ghidra-model-context-protocol-server)
