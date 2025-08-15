@@ -200,6 +200,16 @@ class PyGhidraContext:
 
         return "-".join((path.name, _sha1_file(path.absolute())[:6]))
 
+    def get_program_info(self, binary_name: str) -> "ProgramInfo":
+        """Get program info or raise ValueError if not found."""
+        program_info = self.programs.get(binary_name)
+        if not program_info:
+            available_progs = list(self.programs.keys())
+            raise ValueError(
+                f"Binary {binary_name} not found. Available binaries: {available_progs}"
+            )
+        return program_info
+
     def analyze_project(
         self,
         require_symbols: bool = True,

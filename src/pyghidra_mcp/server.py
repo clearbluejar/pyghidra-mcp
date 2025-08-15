@@ -14,7 +14,7 @@ from mcp.shared.exceptions import McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 
 from pyghidra_mcp.__init__ import __version__
-from pyghidra_mcp.context import ProgramInfo as ContextProgramInfo, PyGhidraContext
+from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
     CrossReferenceInfos,
     DecompiledFunction,
@@ -50,22 +50,6 @@ async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
 mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
 
 
-def _get_program_info_or_raise(
-    pyghidra_context: PyGhidraContext, binary_name: str
-) -> ContextProgramInfo:
-    """Get program info or raise McpError if not found."""
-    program_info = pyghidra_context.programs.get(binary_name)
-    if not program_info:
-        available_progs = list(pyghidra_context.programs.keys())
-        raise McpError(
-            ErrorData(
-                code=INVALID_PARAMS,
-                message=f"Binary {binary_name} not found. Available binaries: {available_progs}",
-            )
-        )
-    return program_info
-
-
 # MCP Tools
 # ---------------------------------------------------------------------------------
 @mcp.tool()
@@ -78,10 +62,12 @@ async def decompile_function(binary_name: str, name: str, ctx: Context) -> Decom
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
+        program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         return tools.decompile_function(name)
     except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error decompiling function: {e!s}")
         ) from e
@@ -101,11 +87,13 @@ def search_functions_by_name(
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
+        program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         functions = tools.search_functions_by_name(query, offset, limit)
         return FunctionSearchResults(functions=functions)
     except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error searching for functions: {e!s}")
         ) from e
@@ -125,11 +113,13 @@ def search_symbols_by_name(
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
+        program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         symbols = tools.search_symbols_by_name(query, offset, limit)
         return SymbolSearchResults(symbols=symbols)
     except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error searching for symbols: {e!s}")
         ) from e
@@ -191,11 +181,13 @@ def list_exports(
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
+        program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         exports = tools.list_exports(query=query, offset=offset, limit=limit)
         return ExportInfos(exports=exports)
     except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error listing exports: {e!s}")
         ) from e
@@ -219,11 +211,13 @@ def list_imports(
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
+        program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         imports = tools.list_imports(query=query, offset=offset, limit=limit)
         return ImportInfos(imports=imports)
     except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error listing imports: {e!s}")
         ) from e
@@ -243,11 +237,13 @@ def list_cross_references(
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = _get_program_info_or_raise(pyghidra_context, binary_name)
+        program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         cross_references = tools.list_cross_references(name_or_address)
         return CrossReferenceInfos(cross_references=cross_references)
     except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error listing cross-references: {e!s}")
         ) from e
