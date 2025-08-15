@@ -245,6 +245,10 @@ docker run -i --rm \
 
 You can integrate `pyghidra-mcp` with [OpenWeb-UI](https://github.com/open-webui/open-webui) using [MCPO](https://github.com/open-webui/mcpo), an MCP-to-OpenAPI proxy. This allows you to expose `pyghidra-mcp`'s tools through a standard RESTful API, making them accessible to web interfaces and other tools.
 
+
+https://github.com/user-attachments/assets/3d56ea08-ed2d-471d-9ed2-556fb8ee4c95
+
+
 #### With `uvx`
 
 You can run `pyghidra-mcp` and `mcpo` together using `uvx`:
