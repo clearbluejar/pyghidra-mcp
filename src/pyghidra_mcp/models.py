@@ -127,3 +127,17 @@ class CodeSearchResults(BaseModel):
     """A container for a list of code search results."""
 
     results: list[CodeSearchResult] = Field(..., description="A list of code search results.")
+
+class StringInfo(BaseModel):
+    """Represents a string found within the binary."""
+
+    value: str = Field(..., description="The value of the string.")
+    address: str = Field(..., description="The address of the string.")
+
+
+class StringSearchResults(BaseModel):
+    """A container for a list of strings found during a search."""
+
+    strings: list[StringInfo] = Field(
+        ..., description="A list of strings that match the search criteria."
+    )

@@ -329,7 +329,7 @@ class PyGhidraContext:
         logger.info("Ghidra Program Analysis complete")
         self._init_chroma_code_collections()
 
-    def analyze_program(  # noqa: C901
+    def analyze_program(  # noqa: C901 # noqa: C901
         self,
         df_or_prog: Union[
             "ghidra.framework.model.DomainFile", "ghidra.program.model.listing.Program"
@@ -429,7 +429,7 @@ class PyGhidraContext:
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
         return df_or_prog
 
-    def set_analysis_option(  # noqa: C901
+    def set_analysis_option(  # noqa: C901 # noqa: C901
         self,
         prog: "ghidra.program.model.listing.Program",
         option_name: str,
@@ -542,12 +542,13 @@ class PyGhidraContext:
         """
         Apply GDT to program
         """
+        from java.io import File
+        from java.util import List
+
         from ghidra.app.cmd.function import ApplyFunctionDataTypesCmd
         from ghidra.program.model.data import FileDataTypeManager
         from ghidra.program.model.symbol import SourceType
         from ghidra.util.task import ConsoleTaskMonitor
-        from java.io import File
-        from java.util import List
 
         gdt_path = Path(gdt_path)
 

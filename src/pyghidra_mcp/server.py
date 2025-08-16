@@ -24,6 +24,7 @@ from pyghidra_mcp.models import (
     ImportInfos,
     ProgramInfo,
     ProgramInfos,
+    StringSearchResults,
     SymbolSearchResults,
 )
 from pyghidra_mcp.tools import GhidraTools
@@ -270,6 +271,37 @@ def list_cross_references(
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error listing cross-references: {e!s}")
+        ) from e
+
+
+@mcp.tool()
+def search_strings(
+    binary_name: str,
+    ctx: Context,
+    query: str | None = None,
+    offset: int = 0,
+    limit: int = 25,
+) -> StringSearchResults:
+    """Searches for strings within a binary by name.
+    This can be very useful to gain general understanding of behaviors.
+
+    Args:
+        binary_name: The name of the binary to search within.
+        query: An optional query to filter strings by value (regex supported).
+        offset: The number of results to skip.
+        limit: The maximum number of results to return.
+    """
+    try:
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        program_info = pyghidra_context.get_program_info(binary_name)
+        tools = GhidraTools(program_info)
+        strings = tools.search_strings(query=query, offset=offset, limit=limit)
+        return StringSearchResults(strings=strings)
+    except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
+        raise McpError(
+            ErrorData(code=INTERNAL_ERROR, message=f"Error searching for strings: {e!s}")
         ) from e
 
 

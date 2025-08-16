@@ -108,8 +108,9 @@ select = [
     "C90",
     "RUF",
 ]
-ignore = ["F821"] 
+ignore = ["F821", "E402"]
 # this is because of Java / Python import issues (see Jpype)
+# top of file must be ignored as well
 
 
 [tool.ruff.lint.isort]

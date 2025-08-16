@@ -208,3 +208,9 @@ __marimo__/
 
 
 pyghidra_mcp_projects/** 
+tests/pyghidra_mcp_projects/**
+
+# Personal
+ghidra
+notes-*.txt
+*.code-workspace

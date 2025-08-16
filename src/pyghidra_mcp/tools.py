@@ -14,12 +14,12 @@ from pyghidra_mcp.models import (
     ExportInfo,
     FunctionInfo,
     ImportInfo,
+    StringInfo,
     SymbolInfo,
 )
 
 if typing.TYPE_CHECKING:
     import ghidra
-
     from pyghidra_mcp.context import ProgramInfo as ContextProgramInfo
 
 
@@ -228,3 +228,22 @@ class GhidraTools:
                     )
                 )
         return search_results
+
+    @handle_exceptions
+    def search_strings(
+        self, query: str | None = None, offset: int = 0, limit: int = 25
+    ) -> list[StringInfo]:
+        """Searches for strings within a binary."""
+        from ghidra.program.util import DefinedStringIterator
+
+        strings = []
+        data_iterator = DefinedStringIterator.forProgram(self.program)
+        for data in data_iterator:
+            try:
+                string_value = data.getValue()
+                if query and not re.search(query, string_value, re.IGNORECASE):
+                    continue
+                strings.append(StringInfo(value=str(string_value), address=str(data.getAddress())))
+            except Exception as e:
+                logger.debug(f"Could not get string value from data at {data.getAddress()}: {e}")
+        return strings[offset : limit + offset]
