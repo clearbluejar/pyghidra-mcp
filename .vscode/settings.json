@@ -6,10 +6,9 @@
             "source.fixAll": "explicit",
         }
     },
-    "ruff.lint.args": [
-        "--config=pyproject.toml"
-    ],
+    "ruff.configuration": "pyproject.toml",
     "ruff.organizeImports": true,
     "ruff.fixAll": true,
     "editor.formatOnSave": true,
+    "editor.defaultFormatter": "charliermarsh.ruff"
 }
