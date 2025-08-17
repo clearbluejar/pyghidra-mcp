@@ -24,3 +24,4 @@ async def test_search_strings_hello(server_params):
 
             search_results = StringSearchResults.model_validate_json(response.content[0].text)
             assert len(search_results.strings) >= 1
+            assert any("World" in s.value for s in search_results.strings)
