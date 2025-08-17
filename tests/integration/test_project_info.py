@@ -85,7 +85,7 @@ async def test_list_project_program_info_tool():
     """Test the list_project_program_info tool."""
     bin_file = create_test_binary()
     server_params = get_server_params(bin_file)
-    binary_name = os.path.basename(bin_file)
+    binary_name = PyGhidraContext._gen_unique_bin_name(bin_file)
 
     try:
         async with stdio_client(server_params) as (read, write):

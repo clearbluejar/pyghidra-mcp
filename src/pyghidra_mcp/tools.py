@@ -8,6 +8,7 @@ import re
 import typing
 
 from pyghidra_mcp.models import (
+    CodeSearchResult,
     CrossReferenceInfo,
     DecompiledFunction,
     ExportInfo,
@@ -72,6 +73,19 @@ class GhidraTools:
                     sig = None
                 return DecompiledFunction(name=self._get_filename(func), code=code, signature=sig)
         raise ValueError(f"Function {name} not found")
+
+    @handle_exceptions
+    def get_all_functions(self) -> list["ghidra.program.model.listing.Function"]:
+        """Gets all functions within a binary."""
+        from ghidra.program.model.listing import Function
+
+        funcs = []
+        fm = self.program.getFunctionManager()
+        functions = fm.getFunctions(True)
+        for func in functions:
+            func: Function
+            funcs.append(func)
+        return funcs
 
     @handle_exceptions
     def search_functions_by_name(
@@ -193,3 +207,24 @@ class GhidraTools:
                 )
             )
         return cross_references
+
+    @handle_exceptions
+    def search_code(self, query: str, limit: int = 10) -> list[CodeSearchResult]:
+        """Searches the code in the binary for a given query."""
+        if not self.program_info.collection:
+            raise ValueError("Chromadb collection not initialized")
+
+        results = self.program_info.collection.query(query_texts=[query], n_results=limit)
+        search_results = []
+        if results:
+            for i, doc in enumerate(results["documents"][0]):
+                metadata = results["metadatas"][0][i]
+                distance = results["distances"][0][i]
+                search_results.append(
+                    CodeSearchResult(
+                        function_name=metadata["function_name"],
+                        code=doc,
+                        similarity=1 - distance,
+                    )
+                )
+        return search_results

@@ -1,6 +1,6 @@
 [project]
 name = "pyghidra-mcp"
-version = "0.1.6"
+version = "0.1.7"
 description = "Python Command-Line Ghidra MCP"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -8,6 +8,7 @@ dependencies = [
     "click>=8.2.1",
     "mcp[cli]>=1.9.4",
     "pyghidra>=2.1.0",
+    "chromadb>=0.5.5",
 ]
 authors = [
     { name = "clearbluejar", email = "3752074+clearbluejar@users.noreply.github.com" },

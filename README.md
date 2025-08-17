@@ -34,6 +34,7 @@ Yes, the original [ghidra-mcp](https://github.com/LaurieWired/GhidraMCP) is fant
 - 🚀 **Quick startup** – Supports fast command-line launching with minimal setup.
 - 📦 **Project-wide analysis** – Enables concurrent reverse engineering of all binaries in a Ghidra project
 - 🤖 **Agent-ready** – Built for intelligent agent-driven workflows and large-scale reverse engineering automation.
+- 🔍 Semantic code search – Uses vector embeddings (via ChromaDB) to enable fast, fuzzy lookup across decompiled functions, comments, and symbols—perfect for pseudo-C exploration and agent-driven triage.
 
 This project provides a Python-first experience optimized for local development, headless environments, and testable workflows.
 
@@ -101,8 +102,15 @@ graph TD
     - [Testing and Quality](#testing-and-quality)
   - [API](#api)
     - [Tools](#tools)
+      - [Code Search](#code-search)
+      - [Cross-References](#cross-references)
       - [Decompile Function](#decompile-function)
+      - [List Exports](#list-exports)
+      - [List Imports](#list-imports)
+      - [List Project Binaries](#list-project-binaries)
+      - [List Project Program Info](#list-project-program-info)
       - [Search Functions](#search-functions)
+      - [Search Symbols](#search-symbols)
     - [Prompts](#prompts)
     - [Resources](#resources)
   - [Usage](#usage)
@@ -184,13 +192,41 @@ The `Makefile` provides several targets for testing and code quality:
 
 Enable LLMs to perform actions, make deterministic computations, and interact with external services.
 
+#### Code Search
+
+- `search_code(binary_name: str, query: str, limit: int = 10)`: Search for code within a binary by similarity using vector embeddings.
+
+#### Cross-References
+
+- `list_cross_references(binary_name: str, name_or_address: str)`: Finds and lists all cross-references (x-refs) to a given function or address.
+
 #### Decompile Function
 
 - `decompile_function(binary_name: str, name: str)`: Decompile a function from a given binary.
 
+#### List Exports
+
+- `list_exports(binary_name: str, query: str | None = None, offset: int = 0, limit: int = 25)`: Lists all exported functions and symbols from a specified binary (regex supported for query).
+
+#### List Imports
+
+- `list_imports(binary_name: str, query: str | None = None, offset: int = 0, limit: int = 25)`: Lists all imported functions and symbols for a specified binary (regex supported for query).
+
+#### List Project Binaries
+
+- `list_project_binaries()`: Lists the names of all binaries currently loaded in the Ghidra project.
+
+#### List Project Program Info
+
+- `list_project_program_info()`: Retrieves detailed information for all programs (binaries) in the project.
+
 #### Search Functions
 
-- `search_functions_by_name(binary_name: str, name_regex: str)`: Search for functions within a binary based on a regular expression.
+- `search_functions_by_name(binary_name: str, query: str, offset: int = 0, limit: int = 25)`: Search for functions within a binary by name (case-insensitive substring).
+
+#### Search Symbols
+
+- `search_symbols_by_name(binary_name: str, query: str, offset: int = 0, limit: int = 25)`: Search for symbols within a binary by name (case-insensitive substring).
 
 ### Prompts
 

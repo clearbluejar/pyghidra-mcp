@@ -8,8 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
+import chromadb
+from chromadb.config import Settings
+
+from pyghidra_mcp.tools import GhidraTools
+
 if typing.TYPE_CHECKING:
     import ghidra
+    from ghidra.ghidra_builtins import *  # noqa: F403
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +34,7 @@ class ProgramInfo:
     file_path: Path | None = None
     load_time: float | None = None
     analysis_complete: bool = False
+    collection: chromadb.Collection | None = None
 
 
 class PyGhidraContext:
@@ -67,6 +74,12 @@ class PyGhidraContext:
         self.project_path = Path(project_path)
         self.project: ghidra.base.project.GhidraProject = self._get_or_create_project()
         self.programs: dict[str, ProgramInfo] = {}
+
+        project_dir = self.project_path / self.project_name
+        chromadb_path = project_dir / "chromadb"
+        self.chroma_client = chromadb.PersistentClient(
+            path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
+        )
 
         # From GhidraDiffEngine
         self.force_analysis = force_analysis
@@ -119,7 +132,7 @@ class PyGhidraContext:
             return GhidraProject.createProject(project_dir, self.project_name, False)
 
     def list_binaries(self) -> list[str]:
-        """List all the binaries within the project."""
+        """List all the binaries within the Ghidra project."""
         return [f.getName() for f in self.project.getRootFolder().getFiles()]
 
     def import_binary(self, binary_path: str | Path) -> "ghidra.program.model.listing.Program":
@@ -145,13 +158,14 @@ class PyGhidraContext:
         else:
             logger.info(f"Importing new program: {program_name}")
             program = self.project.importProgram(binary_path)
+            program.name = program_name
             if program:
                 self.project.saveAs(program, "/", program_name, True)
             else:
                 raise ImportError(f"Failed to import binary: {binary_path}")
 
         if program:
-            self.programs[program_name] = self._init_program_info(program, binary_path)
+            self.programs[program_name] = self._init_program_info(program)
 
     def import_binaries(self, binary_paths: list[str | Path]):
         """
@@ -163,20 +177,33 @@ class PyGhidraContext:
         for bin_path in binary_paths:
             self.import_binary(bin_path)
 
-    def _init_program_info(self, program, binary_path):
+    def get_program_info(self, binary_name: str) -> "ProgramInfo":
+        """Get program info or raise ValueError if not found."""
+        program_info = self.programs.get(binary_name)
+        if not program_info:
+            available_progs = list(self.programs.keys())
+            raise ValueError(
+                f"Binary {binary_name} not found. Available binaries: {available_progs}"
+            )
+        return program_info
+
+    def _init_program_info(self, program):
         from ghidra.program.flatapi import FlatProgramAPI
 
         assert program is not None
+
+        metadata = self.get_metadata(program)
 
         program_info = ProgramInfo(
             name=program.name,
             program=program,
             flat_api=FlatProgramAPI(program),
             decompiler=self.setup_decompiler(program),
-            metadata=self.get_metadata(program),
-            file_path=binary_path,
+            metadata=metadata,
+            file_path=metadata["Executable Location"],
             load_time=time.time(),
             analysis_complete=False,
+            collection=None,
         )
 
         return program_info
@@ -200,15 +227,55 @@ class PyGhidraContext:
 
         return "-".join((path.name, _sha1_file(path.absolute())[:6]))
 
-    def get_program_info(self, binary_name: str) -> "ProgramInfo":
-        """Get program info or raise ValueError if not found."""
-        program_info = self.programs.get(binary_name)
-        if not program_info:
-            available_progs = list(self.programs.keys())
-            raise ValueError(
-                f"Binary {binary_name} not found. Available binaries: {available_progs}"
-            )
-        return program_info
+    def _init_chroma_code_collections(self):
+        """
+        Initialize per-program Chroma collections and ingest decompiled functions.
+
+        For each ProgramInfo in self.programs:
+        - Attempts to get an existing Chroma collection by program name. If found, assigns it
+        to program_info.collection and skips ingestion (idempotent on re-runs).
+        - If not found, creates a new collection, decompiles all functions via GhidraTools,
+        and adds each functions decompiled code as a document with metadata:
+        {"function_name": <name>, "entry_point": <address>}, using the function name as the ID.
+        """
+
+        logger.info("Creating chromadb collections...")
+        for program_info in self.programs.values():
+            logger.info(f"Creating or getting collection for {program_info.name}")
+
+            # Prefer an explicit existence check over get_or_create
+            try:
+                # If this succeeds, the collection already exists — skip ingest
+                collection = self.chroma_client.get_collection(name=program_info.name)
+                logger.info(f"Collection '{program_info.name}' exists; skipping ingest.")
+                program_info.collection = collection
+                continue
+            except Exception:
+                # Not found — create and ingest
+                collection = self.chroma_client.create_collection(name=program_info.name)
+                logger.info(f"Created new collection '{program_info.name}'")
+
+            tools = GhidraTools(program_info)
+            functions = tools.get_all_functions()
+            for func in functions:
+                try:
+                    decompiled = tools.decompile_function(func.name)
+                    if decompiled and decompiled.code:
+                        collection.add(
+                            documents=[decompiled.code],
+                            metadatas=[
+                                {
+                                    "function_name": func.name,
+                                    "entry_point": str(func.getEntryPoint()),
+                                }
+                            ],
+                            ids=[func.name],
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to decompile or add function {func.name} to collection: {e}"
+                    )
+            program_info.collection = collection
 
     def analyze_project(
         self,
@@ -217,7 +284,7 @@ class PyGhidraContext:
         verbose_analysis: bool = False,
     ) -> None:
         """
-        Analyzes all files found within the project
+        Analyzes all files found within the Ghidra project
         """
         logger.info(
             f"Starting analysis for {len(self.project.getRootFolder().getFiles())} binaries"
@@ -254,11 +321,15 @@ class PyGhidraContext:
                         self.programs[program.name].analysis_complete = True
                     except Exception as exc:
                         logger.error(f"{futures[future].getName()} generated an exception: {exc}")
+                        raise exc
         else:
             for domain_file in domain_files:
                 self.analyze_program(domain_file, require_symbols, force_analysis, verbose_analysis)
 
-    def analyze_program(
+        logger.info("Ghidra Program Analysis complete")
+        self._init_chroma_code_collections()
+
+    def analyze_program(  # noqa: C901
         self,
         df_or_prog: Union[
             "ghidra.framework.model.DomainFile", "ghidra.program.model.listing.Program"
@@ -274,10 +345,12 @@ class PyGhidraContext:
         from ghidra.util.task import ConsoleTaskMonitor
 
         if self.programs.get(df_or_prog.name):
+            # program already opened and intialized
             program = self.programs[df_or_prog.name].program
         else:
+            # open program from Ghidra Project
             program = self.project.openProgram("/", df_or_prog.getName(), False)
-            self.programs[df_or_prog.name] = self._init_program_info(program, program.name)
+            self.programs[df_or_prog.name] = self._init_program_info(program)
 
         assert isinstance(program, Program)
 
@@ -356,7 +429,7 @@ class PyGhidraContext:
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
         return df_or_prog
 
-    def set_analysis_option(
+    def set_analysis_option(  # noqa: C901
         self,
         prog: "ghidra.program.model.listing.Program",
         option_name: str,

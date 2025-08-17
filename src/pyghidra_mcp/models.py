@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -36,6 +38,7 @@ class ProgramInfo(BaseModel):
         ..., description="Indicates if Ghidra's analysis of the program has completed."
     )
     metadata: dict = Field(..., description="A dictionary of metadata associated with the program.")
+    collection: Any | None = Field(None, description="The chromadb collection for the program.")
 
 
 class ProgramInfos(BaseModel):
@@ -108,3 +111,19 @@ class SymbolSearchResults(BaseModel):
     symbols: list[SymbolInfo] = Field(
         ..., description="A list of symbols that match the search criteria."
     )
+
+
+class CodeSearchResult(BaseModel):
+    """Represents a single search result from the codebase."""
+
+    function_name: str = Field(
+        ..., description="The name of the function where the code was found."
+    )
+    code: str = Field(..., description="The code snippet that matched the search query.")
+    similarity: float = Field(..., description="The similarity score of the search result.")
+
+
+class CodeSearchResults(BaseModel):
+    """A container for a list of code search results."""
+
+    results: list[CodeSearchResult] = Field(..., description="A list of code search results.")

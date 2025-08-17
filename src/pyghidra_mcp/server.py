@@ -16,6 +16,7 @@ from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 from pyghidra_mcp.__init__ import __version__
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
+    CodeSearchResults,
     CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
@@ -122,6 +123,29 @@ def search_symbols_by_name(
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error searching for symbols: {e!s}")
+        ) from e
+
+
+@mcp.tool()
+def search_code(binary_name: str, query: str, ctx: Context, limit: int = 10) -> CodeSearchResults:
+    """Searches for code within a binary by similarity.
+
+    Args:
+        binary_name: The name of the binary to search within.
+        query: The code to search for.
+        limit: The maximum number of results to return.
+    """
+    try:
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        program_info = pyghidra_context.get_program_info(binary_name)
+        tools = GhidraTools(program_info)
+        results = tools.search_code(query, limit)
+        return CodeSearchResults(results=results)
+    except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
+        raise McpError(
+            ErrorData(code=INTERNAL_ERROR, message=f"Error searching for code: {e!s}")
         ) from e
 
 
