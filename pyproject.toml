@@ -12,6 +12,7 @@ dependencies = [
 ]
 authors = [
     { name = "clearbluejar", email = "3752074+clearbluejar@users.noreply.github.com" },
+    { name = "notoriousrip", email = "3935212+unimpossible@users.noreply.github.com" },
 ]
 keywords = [
     "security",

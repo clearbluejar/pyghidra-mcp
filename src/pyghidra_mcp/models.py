@@ -134,10 +134,12 @@ class StringInfo(BaseModel):
     value: str = Field(..., description="The value of the string.")
     address: str = Field(..., description="The address of the string.")
 
+class StringSearchResult(StringInfo):
+    """Represents a string search result found within the binary."""
+
+    similarity: float = Field(..., description="The similarity score of the search result.")
 
 class StringSearchResults(BaseModel):
-    """A container for a list of strings found during a search."""
+    """A container for a list of string search results."""
 
-    strings: list[StringInfo] = Field(
-        ..., description="A list of strings that match the search criteria."
-    )
+    strings: list[StringSearchResult] = Field(..., description="A list of string search results.")

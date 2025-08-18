@@ -278,8 +278,7 @@ def list_cross_references(
 def search_strings(
     binary_name: str,
     ctx: Context,
-    query: str | None = None,
-    offset: int = 0,
+    query: str,
     limit: int = 25,
 ) -> StringSearchResults:
     """Searches for strings within a binary by name.
@@ -287,15 +286,14 @@ def search_strings(
 
     Args:
         binary_name: The name of the binary to search within.
-        query: An optional query to filter strings by value (regex supported).
-        offset: The number of results to skip.
+        query: A query to filter strings by.
         limit: The maximum number of results to return.
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
-        strings = tools.search_strings(query=query, offset=offset, limit=limit)
+        strings = tools.search_strings(query=query, limit=limit)
         return StringSearchResults(strings=strings)
     except Exception as e:
         if isinstance(e, ValueError):

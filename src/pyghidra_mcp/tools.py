@@ -15,6 +15,7 @@ from pyghidra_mcp.models import (
     FunctionInfo,
     ImportInfo,
     StringInfo,
+    StringSearchResult,
     SymbolInfo,
 )
 
@@ -86,6 +87,21 @@ class GhidraTools:
             func: Function
             funcs.append(func)
         return funcs
+
+    def get_all_strings(self) -> list[StringInfo]:
+        """Gets all defined strings for a binary"""
+        from ghidra.program.util import DefinedStringIterator
+
+        strings = []
+        data_iterator = DefinedStringIterator.forProgram(self.program)
+        for data in data_iterator:
+            try:
+                string_value = data.getValue()
+                strings.append(StringInfo(value=str(string_value), address=str(data.getAddress())))
+            except Exception as e:
+                logger.debug(f"Could not get string value from data at {data.getAddress()}: {e}")
+
+        return strings
 
     @handle_exceptions
     def search_functions_by_name(
@@ -231,19 +247,25 @@ class GhidraTools:
 
     @handle_exceptions
     def search_strings(
-        self, query: str | None = None, offset: int = 0, limit: int = 25
-    ) -> list[StringInfo]:
+        self, query: str | None = None, limit: int = 25
+    ) -> list[StringSearchResult]:
         """Searches for strings within a binary."""
-        from ghidra.program.util import DefinedStringIterator
 
-        strings = []
-        data_iterator = DefinedStringIterator.forProgram(self.program)
-        for data in data_iterator:
-            try:
-                string_value = data.getValue()
-                if query and not re.search(query, string_value, re.IGNORECASE):
-                    continue
-                strings.append(StringInfo(value=str(string_value), address=str(data.getAddress())))
-            except Exception as e:
-                logger.debug(f"Could not get string value from data at {data.getAddress()}: {e}")
-        return strings[offset : limit + offset]
+        if not self.program_info.strings_collection:
+            raise ValueError("Chromadb string collection not initialized")
+
+        search_results = []
+        results = self.program_info.strings_collection.query(query_texts=[query], n_results=limit)
+        if results:
+            for i, doc in enumerate(results["documents"][0]):
+                metadata = results["metadatas"][0][i]
+                distance = results["distances"][0][i]
+                search_results.append(
+                    StringSearchResult(
+                        value=doc,
+                        address=metadata["address"],
+                        similarity=1 - distance,
+                    )
+                )
+
+        return search_results
