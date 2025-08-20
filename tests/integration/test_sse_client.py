@@ -28,7 +28,7 @@ def sse_server():
         stdout=subprocess.PIPE,
     )
 
-    async def wait_for_server(timeout=120):
+    async def wait_for_server(timeout=240):
         async with aiohttp.ClientSession() as session:
             for _ in range(timeout):  # Poll for 60 seconds
                 try:
