@@ -90,10 +90,15 @@ class GhidraTools:
 
     def get_all_strings(self) -> list[StringInfo]:
         """Gets all defined strings for a binary"""
-        from ghidra.program.util import DefinedStringIterator
+        try:
+            from ghidra.program.util import DefinedStringIterator
+            data_iterator = DefinedStringIterator.forProgram(self.program)
+        except ImportError:
+            # Support Ghidra 11.3.2
+            from ghidra.program.util import DefinedDataIterator
+            data_iterator = DefinedDataIterator.definedStrings(self.program)
 
         strings = []
-        data_iterator = DefinedStringIterator.forProgram(self.program)
         for data in data_iterator:
             try:
                 string_value = data.getValue()

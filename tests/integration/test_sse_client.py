@@ -24,6 +24,8 @@ def sse_server():
     proc = subprocess.Popen(
         ["python", "-m", "pyghidra_mcp", "--transport", "sse", binary_name],
         env={**os.environ, "GHIDRA_INSTALL_DIR": "/ghidra"},
+        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
     )
 
     async def wait_for_server(timeout=120):

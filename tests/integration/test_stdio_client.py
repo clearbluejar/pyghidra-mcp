@@ -1,46 +1,7 @@
-import os
-import tempfile
 
 import pytest
-from mcp import ClientSession, StdioServerParameters
+from mcp import ClientSession
 from mcp.client.stdio import stdio_client
-
-
-@pytest.fixture(scope="module")
-def test_binary():
-    """Create a simple test binary for testing."""
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
-        c_file = f.name
-        f.write("""
-#include <stdio.h>
-
-int main() {
-    printf(\"Hello, World!\\n\");
-    return 0;
-}
-""")
-
-    # Compile to binary
-    bin_file = c_file.replace(".c", "")
-    os.system(f"gcc -o {bin_file} {c_file}")
-
-    yield bin_file
-
-    # Clean up
-    os.unlink(c_file)
-    os.unlink(bin_file)
-
-
-@pytest.fixture(scope="module")
-def server_params(test_binary):
-    """Get server parameters with a test binary."""
-    return StdioServerParameters(
-        command="python",  # Executable
-        args=["-m", "pyghidra_mcp", test_binary],  # Run with test binary
-        # Optional environment variables
-        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
-    )
 
 
 @pytest.mark.asyncio

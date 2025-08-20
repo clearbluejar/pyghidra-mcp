@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 
@@ -20,46 +19,11 @@ from pyghidra_mcp.models import (
     FunctionSearchResults,
     ImportInfos,
     ProgramInfos,
+    StringSearchResults,
     SymbolSearchResults,
 )
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
-
-
-@pytest.fixture(scope="module")
-def test_binary():
-    """Create a simple test binary for testing."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
-        f.write(
-            """
-#include <stdio.h>
-
-void function_one() {
-    printf("Function One");
-}
-
-void function_two() {
-    printf("Function Two");
-}
-
-int main() {
-    printf("Hello, World!");
-    function_one();
-    function_two();
-    return 0;
-}
-"""
-        )
-        c_file = f.name
-
-    bin_file = c_file.replace(".c", "")
-
-    os.system(f"gcc -o {bin_file} {c_file}")
-
-    yield bin_file
-
-    os.unlink(c_file)
-    os.unlink(bin_file)
 
 
 @pytest.fixture(scope="module")
@@ -118,6 +82,9 @@ async def invoke_tool_concurrently(server_binary_path):
                 session.call_tool(
                     "search_code", {"binary_name": binary_name, "query": "Function One", "limit": 1}
                 ),
+                session.call_tool(
+                    "search_strings", {"binary_name": binary_name, "query": "hello", "limit": 1}
+                ),
             ]
 
             responses = await asyncio.gather(*tasks)
@@ -137,7 +104,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     assert len(results) == num_clients
 
     for client_responses in results:
-        assert len(client_responses) == 9
+        assert len(client_responses) == 10
 
         # Decompiled function
         decompiled_func_result = json.loads(client_responses[0].content[0].text)
@@ -193,3 +160,9 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         code_search_results = CodeSearchResults(**search_code_result)
         assert len(code_search_results.results) > 0
         assert code_search_results.results[0].function_name == "function_one"
+
+        # Search strings
+        search_string_result = json.loads(client_responses[9].content[0].text)
+        string_search_results = StringSearchResults(**search_string_result)
+        assert len(string_search_results.strings) > 0
+        assert "World" in string_search_results.strings[0].value
