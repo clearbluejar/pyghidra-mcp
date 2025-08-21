@@ -21,8 +21,8 @@ from pyghidra_mcp.models import (
 
 if typing.TYPE_CHECKING:
     import ghidra
-    from pyghidra_mcp.context import ProgramInfo as ContextProgramInfo
 
+    from .context import ProgramInfo
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def handle_exceptions(func):
 class GhidraTools:
     """Comprehensive tool handler for Ghidra MCP tools"""
 
-    def __init__(self, program_info: "ContextProgramInfo"):
+    def __init__(self, program_info: "ProgramInfo"):
         """Initialize with a Ghidra ProgramInfo object"""
         self.program_info = program_info
         self.program = program_info.program
@@ -92,10 +92,12 @@ class GhidraTools:
         """Gets all defined strings for a binary"""
         try:
             from ghidra.program.util import DefinedStringIterator
+
             data_iterator = DefinedStringIterator.forProgram(self.program)
         except ImportError:
             # Support Ghidra 11.3.2
             from ghidra.program.util import DefinedDataIterator
+
             data_iterator = DefinedDataIterator.definedStrings(self.program)
 
         strings = []
@@ -190,10 +192,9 @@ class GhidraTools:
 
     @handle_exceptions
     def list_cross_references(self, name_or_address: str) -> list[CrossReferenceInfo]:
-        """Finds and lists all cross-references (x-refs) to a given function
+        """Finds and lists all cross-references (x-refs) to a given function, symbol,
         or address within a binary.
         """
-        # Get address from name or address
         addr = None
         try:
             addr = self.program.getAddressFactory().getAddress(name_or_address)
@@ -201,15 +202,38 @@ class GhidraTools:
             pass
 
         if addr is None:
-            fm = self.program.getFunctionManager()
-            functions = fm.getFunctions(True)
-            for func in functions:
-                if name_or_address == func.name:
-                    addr = func.getEntryPoint()
+            # Search for exact match in symbols. Functions are symbols, so this covers them.
+            st = self.program.getSymbolTable()
+            symbols = st.getAllSymbols(True)
+            for symbol in symbols:
+                if name_or_address.lower() == symbol.name.lower():
+                    addr = symbol.getAddress()
                     break
 
+        # If no exact match is found, find close matches and raise an error
         if addr is None:
-            raise ValueError(f"Could not find function or address: {name_or_address}")
+            close_matches = []
+            st = self.program.getSymbolTable()
+            symbols = st.getAllSymbols(True)
+            for symbol in symbols:
+                if name_or_address.lower() in symbol.name.lower():
+                    close_matches.append(symbol.name)
+
+            if close_matches:
+                unique_matches = sorted(list(set(close_matches)))
+                total_matches = len(unique_matches)
+
+                # Sort by length to get potentially more relevant matches first, and take top 10
+                display_matches = sorted(unique_matches, key=len)[:10]
+
+                suggestions = ", ".join(display_matches)
+                message = (
+                    f"Could not find '{name_or_address}'. Did you mean one of these: {suggestions}"
+                )
+                message += f" (total similar symbols {total_matches})?"
+                raise ValueError(message)
+            else:
+                raise ValueError(f"Could not find function, symbol, or address: {name_or_address}")
 
         cross_references = []
 
@@ -251,9 +275,7 @@ class GhidraTools:
         return search_results
 
     @handle_exceptions
-    def search_strings(
-        self, query: str | None = None, limit: int = 25
-    ) -> list[StringSearchResult]:
+    def search_strings(self, query: str | None = None, limit: int = 25) -> list[StringSearchResult]:
         """Searches for strings within a binary."""
 
         if not self.program_info.strings_collection:
