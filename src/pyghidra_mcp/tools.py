@@ -21,6 +21,7 @@ from pyghidra_mcp.models import (
 
 if typing.TYPE_CHECKING:
     import ghidra
+
     from pyghidra_mcp.context import ProgramInfo as ContextProgramInfo
 
 
@@ -92,10 +93,12 @@ class GhidraTools:
         """Gets all defined strings for a binary"""
         try:
             from ghidra.program.util import DefinedStringIterator
+
             data_iterator = DefinedStringIterator.forProgram(self.program)
         except ImportError:
             # Support Ghidra 11.3.2
             from ghidra.program.util import DefinedDataIterator
+
             data_iterator = DefinedDataIterator.definedStrings(self.program)
 
         strings = []
@@ -251,9 +254,7 @@ class GhidraTools:
         return search_results
 
     @handle_exceptions
-    def search_strings(
-        self, query: str | None = None, limit: int = 25
-    ) -> list[StringSearchResult]:
+    def search_strings(self, query: str | None = None, limit: int = 25) -> list[StringSearchResult]:
         """Searches for strings within a binary."""
 
         if not self.program_info.strings_collection:
