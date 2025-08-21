@@ -1,4 +1,4 @@
-# Server Logging
+# Server
 # ---------------------------------------------------------------------------------
 import logging
 import sys
@@ -352,12 +352,30 @@ def search_strings(
         ) from e
 
 
+@mcp.tool()
+def import_binary(binary_path: str, ctx: Context) -> str:
+    """Imports a binary from a designated path into the current Ghidra project.
+
+    Args:
+        binary_path: The path to the binary file to import.
+    """
+    try:
+        # We would like to do context progress updates, but until that is more
+        # widely supported by clients, we will restort to this
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context.import_binary_backgrounded(binary_path)
+        return f"Importing of {binary_path} is running in the background. It will eventually show in list_project_binaries."
+    except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
+        raise McpError(
+            ErrorData(code=INTERNAL_ERROR, message=f"Error importing binary: {e!s}")
+        ) from e
+
+
 def init_pyghidra_context(
     mcp: FastMCP, input_paths: list[Path], project_name: str, project_directory: str
 ) -> FastMCP:
-    if not input_paths:
-        raise ValueError("Missing Input Paths!")
-
     bin_paths = [Path(p) for p in input_paths]
 
     logger.info(f"Analyzing {', '.join(map(str, bin_paths))}")
@@ -374,6 +392,9 @@ def init_pyghidra_context(
     pyghidra_context.import_binaries(bin_paths)
     logger.info(f"Analyzing project: {pyghidra_context.project}")
     pyghidra_context.analyze_project()
+
+    if len(pyghidra_context.list_binaries()) == 0 and len(input_paths) == 0:
+        logger.warning("No binaries were imported and none exist in the project.")
 
     mcp._pyghidra_context = pyghidra_context
     logger.info("Server intialized")
@@ -411,7 +432,7 @@ def init_pyghidra_context(
     type=click.Path(),
     help="Directory to store the Ghidra project.",
 )
-@click.argument("input_paths", type=click.Path(exists=True), nargs=-1, required=True)
+@click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
 def main(
     transport: str, input_paths: list[Path], project_name: str, project_directory: str
 ) -> None:

@@ -2,6 +2,7 @@ import concurrent.futures
 import hashlib
 import logging
 import multiprocessing
+import threading
 import time
 import typing
 from dataclasses import dataclass
@@ -136,12 +137,15 @@ class PyGhidraContext:
         """List all the binaries within the Ghidra project."""
         return [f.getName() for f in self.project.getRootFolder().getFiles()]
 
-    def import_binary(self, binary_path: str | Path) -> "ghidra.program.model.listing.Program":
+    def import_binary(
+        self, binary_path: str | Path, analyze: bool = False
+    ) -> "ghidra.program.model.listing.Program":
         """
         Imports a single binary into the project.
 
         Args:
             binary_path: Path to the binary file.
+            analyze: Perform analysis on this binary. Useful if not importing in bulk.
 
         Returns:
             None
@@ -165,8 +169,17 @@ class PyGhidraContext:
             else:
                 raise ImportError(f"Failed to import binary: {binary_path}")
 
+        program_info = self._init_program_info(program)
+
+        if analyze:
+            self.analyze_program(program_info.program)
+            self._init_chroma_collections_for_program(program_info)
+
         if program:
-            self.programs[program_name] = self._init_program_info(program)
+            # This marks it ready in list_project_binaries
+            self.programs[program_name] = program_info
+
+        logger.info(f"Program {program_name} is ready for use.")
 
     def import_binaries(self, binary_paths: list[str | Path]):
         """
@@ -177,6 +190,19 @@ class PyGhidraContext:
         """
         for bin_path in binary_paths:
             self.import_binary(bin_path)
+
+    def import_binary_backgrounded(self, binary_path: str | Path):
+        """
+        Spawns a thread and imports a binary into the project.
+        When the binary is analyzed it will be added to the project.
+
+        Args:
+            binary_path: The path of the binary to import.
+        """
+        if not Path(binary_path).exists():
+            raise FileNotFoundError(f"The file {binary_path} cannot be found")
+
+        threading.Thread(target=self.import_binary, args=(binary_path,)).start()
 
     def get_program_info(self, binary_name: str) -> "ProgramInfo":
         """Get program info or raise ValueError if not found."""
@@ -228,34 +254,18 @@ class PyGhidraContext:
 
         return "-".join((path.name, _sha1_file(path.absolute())[:6]))
 
-    def _init_chroma_code_collections(self):
+    def _init_chroma_code_collection_for_program(self, program_info: ProgramInfo):
         """
-        Initialize per-program Chroma collections and ingest decompiled functions.
-
-        For each ProgramInfo in self.programs:
-        - Attempts to get an existing Chroma collection by program name. If found, assigns it
-        to program_info.collection and skips ingestion (idempotent on re-runs).
-        - If not found, creates a new collection, decompiles all functions via GhidraTools,
-        and adds each functions decompiled code as a document with metadata:
-        {"function_name": <name>, "entry_point": <address>}, using the function name as the ID.
+        Initialize Chroma code collection for a single program.
         """
-
-        logger.info("Creating chromadb collections...")
-        for program_info in self.programs.values():
-            logger.info(f"Creating collection for {program_info.name}")
-
-            # Prefer an explicit existence check over get_or_create
-            try:
-                # If this succeeds, the collection already exists — skip ingest
-                collection = self.chroma_client.get_collection(name=program_info.name)
-                logger.info(f"Collection '{program_info.name}' exists; skipping ingest.")
-                program_info.collection = collection
-                continue
-            except Exception:
-                # Not found — create and ingest
-                collection = self.chroma_client.create_collection(name=program_info.name)
-                logger.info(f"Created new collection '{program_info.name}'")
-
+        logger.info(f"Initializing Chroma code collection for {program_info.name}")
+        try:
+            collection = self.chroma_client.get_collection(name=program_info.name)
+            logger.info(f"Collection '{program_info.name}' exists; skipping code ingest.")
+            program_info.collection = collection
+        except Exception:
+            collection = self.chroma_client.create_collection(name=program_info.name)
+            logger.info(f"Created new code collection '{program_info.name}'")
             tools = GhidraTools(program_info)
             functions = tools.get_all_functions()
             for func in functions:
@@ -278,29 +288,24 @@ class PyGhidraContext:
                     )
             program_info.collection = collection
 
-    def _init_chroma_strings_collections(self):
+    def _init_chroma_strings_collection_for_program(self, program_info: ProgramInfo):
         """
-        Initialize per-program Chroma collections and ingest strings.
+        Initialize Chroma strings collection for a single program.
         """
-        logger.info("Creating chromadb strings collections...")
-        for program_info in self.programs.values():
-            collection_name = f"{program_info.name}_strings"
-            logger.info(f"Creating or getting strings collection for {program_info.name}")
-
-            try:
-                collection = self.chroma_client.get_collection(name=collection_name)
-                logger.info(f"Collection '{program_info.name}_strings' exists; skipping ingest.")
-                program_info.strings_collection = collection
-                continue
-            except Exception:
-                collection = self.chroma_client.create_collection(name=collection_name)
-                logger.info(f"Created new collection '{program_info.name}_strings'")
-
+        collection_name = f"{program_info.name}_strings"
+        logger.info(f"Initializing Chroma strings collection for {program_info.name}")
+        try:
+            strings_collection = self.chroma_client.get_collection(name=collection_name)
+            logger.info(f"Collection '{collection_name}' exists; skipping strings ingest.")
+            program_info.strings_collection = strings_collection
+        except Exception:
+            strings_collection = self.chroma_client.create_collection(name=collection_name)
+            logger.info(f"Created new strings collection '{collection_name}'")
             tools = GhidraTools(program_info)
             strings = tools.get_all_strings()
             for s in strings:
                 try:
-                    collection.add(
+                    strings_collection.add(
                         documents=[s.value],
                         metadatas=[
                             {
@@ -313,7 +318,23 @@ class PyGhidraContext:
                     logger.error(
                         f"Failed to add string {s.value} at {s.address} to collection: {e}"
                     )
-            program_info.strings_collection = collection
+            program_info.strings_collection = strings_collection
+
+    def _init_chroma_collections_for_program(self, program_info: ProgramInfo):
+        """
+        Initializes all Chroma collections (code and strings) for a single program.
+        """
+        self._init_chroma_code_collection_for_program(program_info)
+        self._init_chroma_strings_collection_for_program(program_info)
+
+    def _init_all_chroma_collections(self):
+        """
+        Initializes Chroma collections for all programs in the project.
+        """
+        logger.info("Initializing all Chroma DB collections for the project...")
+        for program_info in self.programs.values():
+            self._init_chroma_collections_for_program(program_info)
+        logger.info("All Chroma DB collections initialized.")
 
     def analyze_project(
         self,
@@ -346,34 +367,33 @@ class PyGhidraContext:
                         require_symbols,
                         force_analysis,
                         verbose_analysis,
-                    ): domainFile
+                    )
                     for domainFile in domain_files
                 }
+
                 for future in concurrent.futures.as_completed(futures):
-                    completed_count += 1
-                    logger.info(
-                        f"Analysis % complete: {round(completed_count / prog_count, 2) * 100}"
-                    )
                     try:
-                        program = future.result()
-                        self.programs[program.name].analysis_complete = True
+                        result = future.result()
+                        logger.info(f"Analysis complete for {result.getName()}")
+                        completed_count += 1
+                        logger.info(f"Completed {completed_count}/{prog_count} programs")
                     except Exception as exc:
-                        logger.error(f"{futures[future].getName()} generated an exception: {exc}")
-                        raise exc
+                        logger.error(f"Program analysis generated an exception: {exc}")
         else:
-            for domain_file in domain_files:
-                self.analyze_program(domain_file, require_symbols, force_analysis, verbose_analysis)
+            for domainFile in domain_files:
+                self.analyze_program(domainFile, require_symbols, force_analysis, verbose_analysis)
+                completed_count += 1
+                logger.info(f"Completed {completed_count}/{prog_count} programs")
 
-        logger.info("Ghidra Program Analysis complete")
-        self._init_chroma_code_collections()
-        self._init_chroma_strings_collections()
+        logger.info("All programs analyzed.")
+        self._init_all_chroma_collections()
 
-    def analyze_program(  # noqa: C901
+    def analyze_program(
         self,
         df_or_prog: Union[
             "ghidra.framework.model.DomainFile", "ghidra.program.model.listing.Program"
         ],
-        require_symbols: bool,
+        require_symbols: bool = True,
         force_analysis: bool = False,
         verbose_analysis: bool = False,
     ):
@@ -384,7 +404,7 @@ class PyGhidraContext:
         from ghidra.util.task import ConsoleTaskMonitor
 
         if self.programs.get(df_or_prog.name):
-            # program already opened and intialized
+            # program already opened and initialized
             program = self.programs[df_or_prog.name].program
         else:
             # open program from Ghidra Project

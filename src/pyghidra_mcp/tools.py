@@ -21,7 +21,6 @@ from pyghidra_mcp.models import (
 
 if typing.TYPE_CHECKING:
     import ghidra
-
     from .context import ProgramInfo
 
 logger = logging.getLogger(__name__)
