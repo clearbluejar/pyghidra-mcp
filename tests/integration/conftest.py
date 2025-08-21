@@ -40,6 +40,7 @@ int main() {
     os.unlink(c_file)
     os.unlink(bin_file)
 
+
 @pytest.fixture(scope="module")
 def test_shared_object():
     """
