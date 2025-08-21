@@ -1,8 +1,8 @@
 from . import server
-from .context import PyGhidraContext
+from .context import ProgramInfo, PyGhidraContext
 from .tools import GhidraTools
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 __author__ = "clearbluejar"
 
 
@@ -12,4 +12,4 @@ def main() -> None:
 
 
 # Optionally expose other important items at package level
-__all__ = ["GhidraTools", "PyGhidraContext", "main", "server"]
+__all__ = ["GhidraTools", "ProgramInfo", "PyGhidraContext", "main", "server"]
