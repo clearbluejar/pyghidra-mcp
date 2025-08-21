@@ -12,6 +12,7 @@ dependencies = [
 ]
 authors = [
     { name = "clearbluejar", email = "3752074+clearbluejar@users.noreply.github.com" },
+    { name = "notoriousrip", email = "3935212+unimpossible@users.noreply.github.com" },
 ]
 keywords = [
     "security",
@@ -108,8 +109,9 @@ select = [
     "C90",
     "RUF",
 ]
-ignore = ["F821"] 
+ignore = ["F821", "E402"]
 # this is because of Java / Python import issues (see Jpype)
+# top of file must be ignored as well
 
 
 [tool.ruff.lint.isort]

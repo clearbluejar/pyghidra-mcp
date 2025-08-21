@@ -35,6 +35,7 @@ class ProgramInfo:
     load_time: float | None = None
     analysis_complete: bool = False
     collection: chromadb.Collection | None = None
+    strings_collection: chromadb.Collection | None = None
 
 
 class PyGhidraContext:
@@ -277,6 +278,43 @@ class PyGhidraContext:
                     )
             program_info.collection = collection
 
+    def _init_chroma_strings_collections(self):
+        """
+        Initialize per-program Chroma collections and ingest strings.
+        """
+        logger.info("Creating chromadb strings collections...")
+        for program_info in self.programs.values():
+            collection_name = f"{program_info.name}_strings"
+            logger.info(f"Creating or getting strings collection for {program_info.name}")
+
+            try:
+                collection = self.chroma_client.get_collection(name=collection_name)
+                logger.info(f"Collection '{program_info.name}_strings' exists; skipping ingest.")
+                program_info.strings_collection = collection
+                continue
+            except Exception:
+                collection = self.chroma_client.create_collection(name=collection_name)
+                logger.info(f"Created new collection '{program_info.name}_strings'")
+
+            tools = GhidraTools(program_info)
+            strings = tools.get_all_strings()
+            for s in strings:
+                try:
+                    collection.add(
+                        documents=[s.value],
+                        metadatas=[
+                            {
+                                "address": str(s.address),
+                            }
+                        ],
+                        ids=[str(s.address)],
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to add string {s.value} at {s.address} to collection: {e}"
+                    )
+            program_info.strings_collection = collection
+
     def analyze_project(
         self,
         require_symbols: bool = True,
@@ -328,6 +366,7 @@ class PyGhidraContext:
 
         logger.info("Ghidra Program Analysis complete")
         self._init_chroma_code_collections()
+        self._init_chroma_strings_collections()
 
     def analyze_program(  # noqa: C901
         self,
@@ -542,12 +581,13 @@ class PyGhidraContext:
         """
         Apply GDT to program
         """
+        from java.io import File
+        from java.util import List
+
         from ghidra.app.cmd.function import ApplyFunctionDataTypesCmd
         from ghidra.program.model.data import FileDataTypeManager
         from ghidra.program.model.symbol import SourceType
         from ghidra.util.task import ConsoleTaskMonitor
-        from java.io import File
-        from java.util import List
 
         gdt_path = Path(gdt_path)
 

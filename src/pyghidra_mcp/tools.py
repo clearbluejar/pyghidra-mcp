@@ -14,12 +14,13 @@ from pyghidra_mcp.models import (
     ExportInfo,
     FunctionInfo,
     ImportInfo,
+    StringInfo,
+    StringSearchResult,
     SymbolInfo,
 )
 
 if typing.TYPE_CHECKING:
     import ghidra
-
     from pyghidra_mcp.context import ProgramInfo as ContextProgramInfo
 
 
@@ -86,6 +87,26 @@ class GhidraTools:
             func: Function
             funcs.append(func)
         return funcs
+
+    def get_all_strings(self) -> list[StringInfo]:
+        """Gets all defined strings for a binary"""
+        try:
+            from ghidra.program.util import DefinedStringIterator
+            data_iterator = DefinedStringIterator.forProgram(self.program)
+        except ImportError:
+            # Support Ghidra 11.3.2
+            from ghidra.program.util import DefinedDataIterator
+            data_iterator = DefinedDataIterator.definedStrings(self.program)
+
+        strings = []
+        for data in data_iterator:
+            try:
+                string_value = data.getValue()
+                strings.append(StringInfo(value=str(string_value), address=str(data.getAddress())))
+            except Exception as e:
+                logger.debug(f"Could not get string value from data at {data.getAddress()}: {e}")
+
+        return strings
 
     @handle_exceptions
     def search_functions_by_name(
@@ -227,4 +248,29 @@ class GhidraTools:
                         similarity=1 - distance,
                     )
                 )
+        return search_results
+
+    @handle_exceptions
+    def search_strings(
+        self, query: str | None = None, limit: int = 25
+    ) -> list[StringSearchResult]:
+        """Searches for strings within a binary."""
+
+        if not self.program_info.strings_collection:
+            raise ValueError("Chromadb string collection not initialized")
+
+        search_results = []
+        results = self.program_info.strings_collection.query(query_texts=[query], n_results=limit)
+        if results:
+            for i, doc in enumerate(results["documents"][0]):
+                metadata = results["metadatas"][0][i]
+                distance = results["distances"][0][i]
+                search_results.append(
+                    StringSearchResult(
+                        value=doc,
+                        address=metadata["address"],
+                        similarity=1 - distance,
+                    )
+                )
+
         return search_results
