@@ -105,7 +105,12 @@ def search_functions_by_name(
 def search_symbols_by_name(
     binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
 ) -> SymbolSearchResults:
-    """Searches for symbols within a binary by name.
+    """
+    Search for symbols by case insensitive substring within a specific binary
+    Symbols include Functions, Labels, Classes, Namespaces, Externals,
+    Dynamics, Libraries, Global Variables, Parameters, and Local Variables
+
+    Return: A paginatedlist of matches.
 
     Args:
         binary_name: The name of the binary to search within.
@@ -128,13 +133,23 @@ def search_symbols_by_name(
 
 
 @mcp.tool()
-def search_code(binary_name: str, query: str, ctx: Context, limit: int = 10) -> CodeSearchResults:
-    """Searches for code within a binary by similarity.
+def search_code(binary_name: str, query: str, ctx: Context, limit: int = 5) -> CodeSearchResults:
+    """
+    Perform a semantic code search over a binarys decompiled pseudo C output
+    powered by a vector database for similarity matching.
+
+    This returns the most relevant functions or code blocks whose semantics
+    match the provided query even if the exact text differs. Results are
+    Ghidra generated pseudo C enabling natural language like exploration of
+    binary code structure.
+
+    For best results provide a short distinctive query such as a function
+    signature or key logic snippet to minimize irrelevant matches.
 
     Args:
-        binary_name: The name of the binary to search within.
-        query: The code to search for.
-        limit: The maximum number of results to return.
+        binary_name: Name of the binary to search within.
+        query: Code snippet signature or description to match via semantic search.
+        limit: Maximum number of top scoring results to return (default: 5).
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
@@ -164,7 +179,21 @@ def list_project_binaries(ctx: Context) -> list[str]:
 
 @mcp.tool()
 def list_project_program_info(ctx: Context) -> ProgramInfos:
-    """Retrieves detailed information for all programs (binaries) in the project."""
+    """
+    Retrieve metadata and analysis status for every program (binary) currently
+    loaded in the active project.
+
+    Returns a structured list of program entries, each containing:
+    - name: The display name of the program
+    - file_path: Absolute path to the binary file (if available)
+    - load_time: Timestamp when the program was loaded into the project
+    - analysis_complete: Boolean indicating if automated analysis has finished
+    - metadata: Additional attributes or annotations provided by the analysis toolchain
+
+    Use this to inspect the full set of binaries in the project, monitor analysis
+    progress, or drive follow up actions such as listing imports/exports or running
+    code searches on specific programs.
+    """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_infos = []
@@ -192,17 +221,26 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
 def list_exports(
     binary_name: str,
     ctx: Context,
-    query: str | None = None,
+    query: str = ".*",
     offset: int = 0,
     limit: int = 25,
 ) -> ExportInfos:
-    """Lists all exported functions and symbols from a specified binary.
+    """
+    Retrieve exported functions and symbols from a given binary,
+    with optional regex filtering to focus on only the most relevant items.
+
+    For large binaries, using the `query` parameter is strongly recommended
+    to reduce noise and improve downstream reasoning. Specify a substring
+    or regex to match export names. For example: `query="init"`
+    to list only initialization-related exports.
 
     Args:
-        binary_name: The name of the binary to list exports from.
-        query: An optional query to filter exports by name (regex supported).
-        offset: The number of results to skip.
-        limit: The maximum number of results to return.
+        binary_name: Name of the binary to inspect.
+        query: Strongly recommended. Regex pattern to match specific
+               export names. Use to limit irrelevant results and narrow
+               context for analysis.
+        offset: Number of matching results to skip (for pagination).
+        limit: Maximum number of results to return.
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
@@ -222,17 +260,26 @@ def list_exports(
 def list_imports(
     binary_name: str,
     ctx: Context,
-    query: str | None = None,
+    query: str = ".*",
     offset: int = 0,
     limit: int = 25,
 ) -> ImportInfos:
-    """Lists all imported functions and symbols for a specified binary.
+    """
+    Retrieve imported functions and symbols from a given binary,
+    with optional filtering to return only the most relevant matches.
+
+    This tool is most effective when you use the `query` parameter to
+    focus results — especially for large binaries — by specifying a
+    substring or regex that matches the desired import names.
+    For example: `query="socket"` to only see socket-related imports.
 
     Args:
-        binary_name: The name of the binary to list imports from.
-        query: An optional query to filter imports by name (regex supported).
-        offset: The number of results to skip.
-        limit: The maximum number of results to return.
+        binary_name: Name of the binary to inspect.
+        query: Strongly recommended. Regex pattern to match specific
+               import names. Use to reduce irrelevant results and narrow
+               context for downstream reasoning.
+        offset: Number of matching results to skip (for pagination).
+        limit: Maximum number of results to return.
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
@@ -252,13 +299,15 @@ def list_imports(
 def list_cross_references(
     binary_name: str, name_or_address: str, ctx: Context
 ) -> CrossReferenceInfos:
-    """Finds and lists all cross-references (x-refs) to a given function or address within a binary.
-    This is crucial for understanding how code and data are used and related.
+    """Finds and lists all cross-references (x-refs) to a given function, symbol, or address within
+    a binary. This is crucial for understanding how code and data are used and related.
+    If an exact match for a function or symbol is not found,
+    the error message will suggest other symbols that are close matches.
 
     Args:
         binary_name: The name of the binary to search for cross-references in.
-        name_or_address: The name of the function or a specific address (e.g., '0x1004010') to find
-          cross-references to.
+        name_or_address: The name of the function, symbol, or a specific address (e.g., '0x1004010')
+        to find cross-references to.
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context

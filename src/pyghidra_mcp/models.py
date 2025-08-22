@@ -128,16 +128,19 @@ class CodeSearchResults(BaseModel):
 
     results: list[CodeSearchResult] = Field(..., description="A list of code search results.")
 
+
 class StringInfo(BaseModel):
     """Represents a string found within the binary."""
 
     value: str = Field(..., description="The value of the string.")
     address: str = Field(..., description="The address of the string.")
 
+
 class StringSearchResult(StringInfo):
     """Represents a string search result found within the binary."""
 
     similarity: float = Field(..., description="The similarity score of the search result.")
+
 
 class StringSearchResults(BaseModel):
     """A container for a list of string search results."""

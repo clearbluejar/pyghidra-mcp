@@ -242,7 +242,7 @@ class PyGhidraContext:
 
         logger.info("Creating chromadb collections...")
         for program_info in self.programs.values():
-            logger.info(f"Creating or getting collection for {program_info.name}")
+            logger.info(f"Creating collection for {program_info.name}")
 
             # Prefer an explicit existence check over get_or_create
             try:
@@ -581,13 +581,12 @@ class PyGhidraContext:
         """
         Apply GDT to program
         """
-        from java.io import File
-        from java.util import List
-
         from ghidra.app.cmd.function import ApplyFunctionDataTypesCmd
         from ghidra.program.model.data import FileDataTypeManager
         from ghidra.program.model.symbol import SourceType
         from ghidra.util.task import ConsoleTaskMonitor
+        from java.io import File
+        from java.util import List
 
         gdt_path = Path(gdt_path)
 

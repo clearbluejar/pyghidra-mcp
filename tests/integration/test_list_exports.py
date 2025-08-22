@@ -9,6 +9,7 @@ from pyghidra_mcp.models import ExportInfos
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
+
 @pytest.mark.asyncio
 async def test_list_exports(server_params_shared_object):
     """
