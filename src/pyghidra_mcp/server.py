@@ -22,6 +22,8 @@ from pyghidra_mcp.models import (
     ExportInfos,
     FunctionSearchResults,
     ImportInfos,
+    ProgramBasicInfo,
+    ProgramBasicInfos,
     ProgramInfo,
     ProgramInfos,
     StringSearchResults,
@@ -166,11 +168,14 @@ def search_code(binary_name: str, query: str, ctx: Context, limit: int = 5) -> C
 
 
 @mcp.tool()
-def list_project_binaries(ctx: Context) -> list[str]:
-    """Lists the names of all binaries currently loaded in the Ghidra project."""
+def list_project_binaries(ctx: Context) -> ProgramBasicInfos:
+    """Lists the names and analysis status of all binaries currently loaded in the Ghidra project."""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        return list(pyghidra_context.programs.keys())
+        results = []
+        for name, pi in pyghidra_context.programs.items():
+            results.append(ProgramBasicInfo(name=name, analysis_complete=pi.analysis_complete))
+        return ProgramBasicInfos(programs=results)
     except Exception as e:
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error listing project binaries: {e!s}")
@@ -361,10 +366,10 @@ def import_binary(binary_path: str, ctx: Context) -> str:
     """
     try:
         # We would like to do context progress updates, but until that is more
-        # widely supported by clients, we will restort to this
+        # widely supported by clients, we will resort to this
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         pyghidra_context.import_binary_backgrounded(binary_path)
-        return f"Importing of {binary_path} is running in the background. It will eventually show in list_project_binaries."
+        return f"Importing {binary_path} occuring in the background. When it is ready, it will show as analyzed in binary list."
     except Exception as e:
         if isinstance(e, ValueError):
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
