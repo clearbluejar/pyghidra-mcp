@@ -32,11 +32,19 @@ class ProgramInfo:
     flat_api: Optional["ghidra.program.flatapi.FlatProgramAPI"]
     decompiler: "ghidra.app.decompiler.DecompInterface"
     metadata: dict  # Ghidra program metadata
+    ghidra_analysis_complete: bool
     file_path: Path | None = None
     load_time: float | None = None
-    analysis_complete: bool = False
     collection: chromadb.Collection | None = None
     strings_collection: chromadb.Collection | None = None
+
+    @property
+    def analysis_complete(self) -> bool:
+        return (
+            self.ghidra_analysis_complete
+            and self.collection is not None
+            and self.strings_collection is not None
+        )
 
 
 class PyGhidraContext:
@@ -166,18 +174,17 @@ class PyGhidraContext:
             program.name = program_name
             if program:
                 self.project.saveAs(program, "/", program_name, True)
-            else:
-                raise ImportError(f"Failed to import binary: {binary_path}")
+
+        if not program:
+            raise ImportError(f"Failed to import binary: {binary_path}")
 
         program_info = self._init_program_info(program)
+
+        self.programs[program_name] = program_info
 
         if analyze:
             self.analyze_program(program_info.program)
             self._init_chroma_collections_for_program(program_info)
-
-        if program:
-            # This marks it ready in list_project_binaries
-            self.programs[program_name] = program_info
 
         logger.info(f"Program {program_name} is ready for use.")
 
@@ -202,7 +209,7 @@ class PyGhidraContext:
         if not Path(binary_path).exists():
             raise FileNotFoundError(f"The file {binary_path} cannot be found")
 
-        threading.Thread(target=self.import_binary, args=(binary_path,)).start()
+        threading.Thread(target=self.import_binary, args=(binary_path, True)).start()
 
     def get_program_info(self, binary_name: str) -> "ProgramInfo":
         """Get program info or raise ValueError if not found."""
@@ -227,9 +234,9 @@ class PyGhidraContext:
             flat_api=FlatProgramAPI(program),
             decompiler=self.setup_decompiler(program),
             metadata=metadata,
+            ghidra_analysis_complete=False,
             file_path=metadata["Executable Location"],
             load_time=time.time(),
-            analysis_complete=False,
             collection=None,
         )
 
@@ -265,7 +272,7 @@ class PyGhidraContext:
             program_info.collection = collection
         except Exception:
             collection = self.chroma_client.create_collection(name=program_info.name)
-            logger.info(f"Created new code collection '{program_info.name}'")
+            logger.info(f"Creating new code collection '{program_info.name}'")
             tools = GhidraTools(program_info)
             functions = tools.get_all_functions()
             for func in functions:
@@ -286,6 +293,7 @@ class PyGhidraContext:
                     logger.error(
                         f"Failed to decompile or add function {func.name} to collection: {e}"
                     )
+            logger.info(f"Code analysis complete for collection '{program_info.name}'")
             program_info.collection = collection
 
     def _init_chroma_strings_collection_for_program(self, program_info: ProgramInfo):
@@ -300,7 +308,7 @@ class PyGhidraContext:
             program_info.strings_collection = strings_collection
         except Exception:
             strings_collection = self.chroma_client.create_collection(name=collection_name)
-            logger.info(f"Created new strings collection '{collection_name}'")
+            logger.info(f"Creating new strings collection '{collection_name}'")
             tools = GhidraTools(program_info)
             strings = tools.get_all_strings()
             for s in strings:
@@ -318,6 +326,7 @@ class PyGhidraContext:
                     logger.error(
                         f"Failed to add string {s.value} at {s.address} to collection: {e}"
                     )
+            logger.info(f"Strings analysis complete for collection '{collection_name}'")
             program_info.strings_collection = strings_collection
 
     def _init_chroma_collections_for_program(self, program_info: ProgramInfo):
@@ -486,6 +495,7 @@ class PyGhidraContext:
                 self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
 
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
+        self.programs[df_or_prog.name].ghidra_analysis_complete = True
         return df_or_prog
 
     def set_analysis_option(  # noqa: C901

@@ -26,6 +26,21 @@ class FunctionSearchResults(BaseModel):
     )
 
 
+class ProgramBasicInfo(BaseModel):
+    """Basic information about a program: name and analysis status"""
+
+    name: str = Field(..., description="The name of the program.")
+    analysis_complete: bool = Field(..., description="Indicates if program is ready to be used.")
+
+
+class ProgramBasicInfos(BaseModel):
+    """A container for a list of basic program information objects."""
+
+    programs: list[ProgramBasicInfo] = Field(
+        ..., description="A list of basic program information."
+    )
+
+
 class ProgramInfo(BaseModel):
     """Detailed information about a program (binary) loaded in Ghidra."""
 
@@ -128,16 +143,19 @@ class CodeSearchResults(BaseModel):
 
     results: list[CodeSearchResult] = Field(..., description="A list of code search results.")
 
+
 class StringInfo(BaseModel):
     """Represents a string found within the binary."""
 
     value: str = Field(..., description="The value of the string.")
     address: str = Field(..., description="The address of the string.")
 
+
 class StringSearchResult(StringInfo):
     """Represents a string search result found within the binary."""
 
     similarity: float = Field(..., description="The similarity score of the search result.")
+
 
 class StringSearchResults(BaseModel):
     """A container for a list of string search results."""

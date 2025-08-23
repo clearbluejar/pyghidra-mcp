@@ -40,6 +40,7 @@ int main() {
     os.unlink(c_file)
     os.unlink(bin_file)
 
+
 @pytest.fixture(scope="module")
 def test_shared_object():
     """
@@ -77,6 +78,18 @@ void function_two() {
     # 4. Clean up
     os.unlink(c_file)
     os.unlink(so_file)
+
+
+@pytest.fixture(scope="module")
+def server_params_no_input():
+    """Get server parameters with no test binary."""
+    return StdioServerParameters(
+        command="python",  # Executable
+        # Run with test binary
+        args=["-m", "pyghidra_mcp"],
+        # Optional environment variables
+        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+    )
 
 
 @pytest.fixture(scope="module")
