@@ -265,34 +265,48 @@ class PyGhidraContext:
         """
         Initialize Chroma code collection for a single program.
         """
+        from ghidra.program.model.listing import Function
+
         logger.info(f"Initializing Chroma code collection for {program_info.name}")
         try:
             collection = self.chroma_client.get_collection(name=program_info.name)
             logger.info(f"Collection '{program_info.name}' exists; skipping code ingest.")
             program_info.collection = collection
         except Exception:
-            collection = self.chroma_client.create_collection(name=program_info.name)
             logger.info(f"Creating new code collection '{program_info.name}'")
             tools = GhidraTools(program_info)
             functions = tools.get_all_functions()
-            for func in functions:
+            decompiles = []
+            ids = []
+            metadatas = []
+
+            for i, func in enumerate(functions):
+                func: Function
                 try:
+                    if i % 10 == 0:
+                        logger.debug(f"Decompiling {i}/{len(functions)}")
                     decompiled = tools.decompile_function(func.name)
-                    if decompiled and decompiled.code:
-                        collection.add(
-                            documents=[decompiled.code],
-                            metadatas=[
-                                {
-                                    "function_name": func.name,
-                                    "entry_point": str(func.getEntryPoint()),
-                                }
-                            ],
-                            ids=[func.name],
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to decompile or add function {func.name} to collection: {e}"
+                    decompiles.append(decompiled.code)
+                    ids.append(func.name)
+                    metadatas.append(
+                        {
+                            "function_name": func.name,
+                            "entry_point": str(func.getEntryPoint()),
+                        }
                     )
+                except Exception as e:
+                    logger.error(f"Failed to decompile {func.name}: {e}")
+
+            collection = self.chroma_client.create_collection(name=program_info.name)
+            try:
+                collection.add(
+                    documents=decompiles,
+                    metadatas=metadatas,
+                    ids=ids,
+                )
+            except Exception as e:
+                logger.error(f"Failed add decompiles to collection: {e}")
+
             logger.info(f"Code analysis complete for collection '{program_info.name}'")
             program_info.collection = collection
 
@@ -307,25 +321,25 @@ class PyGhidraContext:
             logger.info(f"Collection '{collection_name}' exists; skipping strings ingest.")
             program_info.strings_collection = strings_collection
         except Exception:
-            strings_collection = self.chroma_client.create_collection(name=collection_name)
             logger.info(f"Creating new strings collection '{collection_name}'")
             tools = GhidraTools(program_info)
+
+            ids = []
             strings = tools.get_all_strings()
-            for s in strings:
-                try:
-                    strings_collection.add(
-                        documents=[s.value],
-                        metadatas=[
-                            {
-                                "address": str(s.address),
-                            }
-                        ],
-                        ids=[str(s.address)],
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to add string {s.value} at {s.address} to collection: {e}"
-                    )
+            metadatas = [{"address": str(s.address)} for s in strings]
+            ids = [str(s.address) for s in strings]
+            strings = [s.value for s in strings]
+
+            strings_collection = self.chroma_client.create_collection(name=collection_name)
+            try:
+                strings_collection.add(
+                    documents=strings,
+                    metadatas=metadatas,
+                    ids=ids,
+                )
+            except Exception as e:
+                logger.error(f"Failed to add strings to collection: {e}")
+
             logger.info(f"Strings analysis complete for collection '{collection_name}'")
             program_info.strings_collection = strings_collection
 

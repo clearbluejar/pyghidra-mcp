@@ -333,7 +333,7 @@ def search_strings(
     binary_name: str,
     ctx: Context,
     query: str,
-    limit: int = 25,
+    limit: int = 100,
 ) -> StringSearchResults:
     """Searches for strings within a binary by name.
     This can be very useful to gain general understanding of behaviors.
@@ -427,20 +427,13 @@ def init_pyghidra_context(
     help="Transport protocol to use: stdio, streamable-http, or sse (legacy)",
 )
 @click.option(
-    "--project-name",
-    default="pyghidra_mcp",
-    help="Name of the Ghidra project.",
-)
-@click.option(
-    "--project-directory",
-    default="pyghidra_mcp_projects",
+    "--project-path",
     type=click.Path(),
-    help="Directory to store the Ghidra project.",
+    default=Path("pyghidra_mcp_projects/pyghidra_mcp"),
+    help="Location on disk which points to the Ghidra project to use. Can be an existing file.",
 )
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
-def main(
-    transport: str, input_paths: list[Path], project_name: str, project_directory: str
-) -> None:
+def main(transport: str, input_paths: list[Path], project_path: Path) -> None:
     """PyGhidra Command-Line MCP server
 
     - input_paths: Path to one or more binaries to import, analyze, and expose with pyghidra-mcp
@@ -449,6 +442,8 @@ def main(
     For streamable-http and sse, it will start an HTTP server on port 8000.
 
     """
+    project_name = project_path.stem
+    project_directory = str(project_path.parent)
 
     init_pyghidra_context(mcp, input_paths, project_name, project_directory)
 
