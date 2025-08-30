@@ -76,7 +76,9 @@ class GhidraTools:
         raise ValueError(f"Function {name} not found")
 
     @handle_exceptions
-    def get_all_functions(self) -> list["ghidra.program.model.listing.Function"]:
+    def get_all_functions(
+        self, include_externals=False
+    ) -> list["ghidra.program.model.listing.Function"]:
         """Gets all functions within a binary."""
         from ghidra.program.model.listing import Function
 
@@ -85,6 +87,10 @@ class GhidraTools:
         functions = fm.getFunctions(True)
         for func in functions:
             func: Function
+            if not include_externals and func.isExternal():
+                continue
+            if not include_externals and func.thunk:
+                continue
             funcs.append(func)
         return funcs
 
