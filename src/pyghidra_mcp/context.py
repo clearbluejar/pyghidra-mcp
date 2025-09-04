@@ -4,19 +4,20 @@ import logging
 import multiprocessing
 import threading
 import time
-import typing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Any, Union
 
 import chromadb
 from chromadb.config import Settings
 
 from pyghidra_mcp.tools import GhidraTools
 
-if typing.TYPE_CHECKING:
-    import ghidra
-    from ghidra.ghidra_builtins import *  # noqa: F403
+if TYPE_CHECKING:
+    from ghidra.app.decompiler import DecompInterface
+    from ghidra.base.project import GhidraProject
+    from ghidra.framework.model import DomainFile
+    from ghidra.program.model.listing import Program
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -27,10 +28,14 @@ logger = logging.getLogger(__name__)
 class ProgramInfo:
     """Information about a loaded program"""
 
+    from ghidra.app.decompiler import DecompInterface
+    from ghidra.program.flatapi import FlatProgramAPI
+    from ghidra.program.model.listing import Program
+
     name: str
-    program: "ghidra.program.model.listing.Program"
-    flat_api: Optional["ghidra.program.flatapi.FlatProgramAPI"]
-    decompiler: "ghidra.app.decompiler.DecompInterface"
+    program: Program
+    flat_api: FlatProgramAPI | None
+    decompiler: DecompInterface
     metadata: dict  # Ghidra program metadata
     ghidra_analysis_complete: bool
     file_path: Path | None = None
@@ -80,9 +85,11 @@ class PyGhidraContext:
             threaded: Use threading during analysis.
             max_workers: Number of workers for threaded analysis.
         """
+        from ghidra.base.project import GhidraProject
+
         self.project_name = project_name
         self.project_path = Path(project_path)
-        self.project: ghidra.base.project.GhidraProject = self._get_or_create_project()
+        self.project: GhidraProject = self._get_or_create_project()
         self.programs: dict[str, ProgramInfo] = {}
 
         project_dir = self.project_path / self.project_name
@@ -118,7 +125,7 @@ class PyGhidraContext:
         self.project.close()
         logger.info(f"Project {self.project_name} closed.")
 
-    def _get_or_create_project(self) -> "ghidra.framework.model.GhidraProject":
+    def _get_or_create_project(self) -> "GhidraProject":
         """
         Creates a new Ghidra project if it doesn't exist, otherwise opens the existing project.
 
@@ -131,23 +138,22 @@ class PyGhidraContext:
 
         project_dir = self.project_path / self.project_name
         project_dir.mkdir(exist_ok=True, parents=True)
+        project_dir_str = str(project_dir)
 
-        locator = ProjectLocator(project_dir, self.project_name)
+        locator = ProjectLocator(project_dir_str, self.project_name)
 
         if locator.exists():
             logger.info(f"Opening existing project: {self.project_name}")
-            return GhidraProject.openProject(project_dir, self.project_name, True)
+            return GhidraProject.openProject(project_dir_str, self.project_name, True)
         else:
             logger.info(f"Creating new project: {self.project_name}")
-            return GhidraProject.createProject(project_dir, self.project_name, False)
+            return GhidraProject.createProject(project_dir_str, self.project_name, False)
 
     def list_binaries(self) -> list[str]:
         """List all the binaries within the Ghidra project."""
         return [f.getName() for f in self.project.getRootFolder().getFiles()]
 
-    def import_binary(
-        self, binary_path: str | Path, analyze: bool = False
-    ) -> "ghidra.program.model.listing.Program":
+    def import_binary(self, binary_path: str | Path, analyze: bool = False) -> None:
         """
         Imports a single binary into the project.
 
@@ -158,12 +164,13 @@ class PyGhidraContext:
         Returns:
             None
         """
+        from ghidra.program.model.listing import Program
 
         binary_path = Path(binary_path)
         program_name = PyGhidraContext._gen_unique_bin_name(binary_path)
 
         root_folder = self.project.getRootFolder()
-        program: ghidra.program.model.listing.Program = None
+        program: Program
 
         if root_folder.getFile(program_name):
             logger.info(f"Opening existing program: {program_name}")
@@ -243,14 +250,14 @@ class PyGhidraContext:
         return program_info
 
     @staticmethod
-    def _gen_unique_bin_name(path: str | Path):
+    def _gen_unique_bin_name(path: Path):
         """
         Generate unique program name from binary for Ghidra Project
         """
 
         path = Path(path)
 
-        def _sha1_file(path: str) -> str:
+        def _sha1_file(path: Path) -> str:
             sha1 = hashlib.sha1()
 
             with path.open("rb") as f:
@@ -334,7 +341,7 @@ class PyGhidraContext:
             try:
                 strings_collection.add(
                     documents=strings,
-                    metadatas=metadatas,
+                    metadatas=metadatas,  # type: ignore
                     ids=ids,
                 )
             except Exception as e:
@@ -403,19 +410,17 @@ class PyGhidraContext:
                     except Exception as exc:
                         logger.error(f"Program analysis generated an exception: {exc}")
         else:
-            for domainFile in domain_files:
-                self.analyze_program(domainFile, require_symbols, force_analysis, verbose_analysis)
+            for domain_file in domain_files:
+                self.analyze_program(domain_file, require_symbols, force_analysis, verbose_analysis)
                 completed_count += 1
                 logger.info(f"Completed {completed_count}/{prog_count} programs")
 
         logger.info("All programs analyzed.")
         self._init_all_chroma_collections()
 
-    def analyze_program(
+    def analyze_program(  # noqa C901
         self,
-        df_or_prog: Union[
-            "ghidra.framework.model.DomainFile", "ghidra.program.model.listing.Program"
-        ],
+        df_or_prog: Union["DomainFile", "Program"],
         require_symbols: bool = True,
         force_analysis: bool = False,
         verbose_analysis: bool = False,
@@ -503,7 +508,7 @@ class PyGhidraContext:
                 logger.info(f"Analysis already complete.. skipping {program}!")
         finally:
             if self.gzfs_path is not None:
-                from java.io import File
+                from java.io import File  # type: ignore
 
                 gzf_file = self.gzfs_path / f"{program.getDomainFile().getName()}.gzf"
                 self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
@@ -514,9 +519,9 @@ class PyGhidraContext:
 
     def set_analysis_option(  # noqa: C901
         self,
-        prog: "ghidra.program.model.listing.Program",
+        prog: "Program",
         option_name: str,
-        value: bool,
+        value: Any,
     ) -> None:
         """
         Set boolean program analysis options
@@ -555,7 +560,7 @@ class PyGhidraContext:
                     raise ValueError(f"Failed to setBoolean on {option_name} {option_type}")
             case "ENUM_TYPE":
                 logger.debug("Setting type: ENUM")
-                from java.lang import Enum
+                from java.lang import Enum  # type: ignore
 
                 enum_for_option = prog_options.getEnum(option_name, None)
                 if enum_for_option is None:
@@ -567,7 +572,7 @@ class PyGhidraContext:
                 try:
                     new_enum = Enum.valueOf(enum_for_option.getClass(), value)
                 except Exception:
-                    for enum_value in enum_for_option.values():
+                    for enum_value in enum_for_option.values():  # type: ignore
                         if value == enum_value.toString():
                             new_enum = enum_value
                             break
@@ -589,8 +594,11 @@ class PyGhidraContext:
         """
         Configures symbol servers and attempts to load PDBs for programs.
         """
-        from ghidra.app.plugin.core.analysis import PdbAnalyzer, PdbUniversalAnalyzer
-        from ghidra.app.util.pdb import PdbProgramAttributes
+        from ghidra.app.plugin.core.analysis import (
+            PdbAnalyzer,  # type: ignore
+            PdbUniversalAnalyzer,  # type: ignore
+        )
+        from ghidra.app.util.pdb import PdbProgramAttributes  # type: ignore
 
         logger.info("Configuring symbol search paths...")
         # This is a simplification. A real implementation would need to configure the symbol server
@@ -618,7 +626,7 @@ class PyGhidraContext:
 
     def apply_gdt(
         self,
-        program: "ghidra.program.model.listing.Program",
+        program: "Program",
         gdt_path: str | Path,
         verbose: bool = False,
     ):
@@ -629,8 +637,8 @@ class PyGhidraContext:
         from ghidra.program.model.data import FileDataTypeManager
         from ghidra.program.model.symbol import SourceType
         from ghidra.util.task import ConsoleTaskMonitor
-        from java.io import File
-        from java.util import List
+        from java.io import File  # type: ignore
+        from java.util import List  # type: ignore
 
         gdt_path = Path(gdt_path)
 
@@ -645,23 +653,21 @@ class PyGhidraContext:
         create_bookmarks_enabled = True
         cmd = ApplyFunctionDataTypesCmd(
             List.of(archive_dtm),
-            None,
+            None,  # type: ignore
             SourceType.USER_DEFINED,
             always_replace,
             create_bookmarks_enabled,
         )
         cmd.applyTo(program, monitor)
 
-    def get_metadata(self, prog: "ghidra.program.model.listing.Program") -> dict:
+    def get_metadata(self, prog: "Program") -> dict:
         """
         Generate dict from program metadata
         """
         meta = prog.getMetadata()
         return dict(meta)
 
-    def setup_decompiler(
-        self, program: "ghidra.program.model.listing.Program"
-    ) -> "ghidra.app.decompiler.DecompInterface":
+    def setup_decompiler(self, program: "Program") -> "DecompInterface":
         from ghidra.app.decompiler import DecompileOptions, DecompInterface
 
         prog_options = DecompileOptions()

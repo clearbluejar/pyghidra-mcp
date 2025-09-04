@@ -45,13 +45,13 @@ logger = logging.getLogger(__name__)
 async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
     """Manage server startup and shutdown lifecycle."""
     try:
-        yield server._pyghidra_context
+        yield server._pyghidra_context  # type: ignore
     finally:
         # pyghidra_context.close()
         pass
 
 
-mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
+mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
 
 
 # MCP Tools
@@ -169,7 +169,8 @@ def search_code(binary_name: str, query: str, ctx: Context, limit: int = 5) -> C
 
 @mcp.tool()
 def list_project_binaries(ctx: Context) -> ProgramBasicInfos:
-    """Lists the names and analysis status of all binaries currently loaded in the Ghidra project."""
+    """Lists the names and analysis status of all binaries currently loaded in
+    the Ghidra project."""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         results = []
@@ -210,6 +211,7 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
                     load_time=pi.load_time,
                     analysis_complete=pi.analysis_complete,
                     metadata=pi.metadata,
+                    collection=None,
                 )
             )
         return ProgramInfos(programs=program_infos)
@@ -369,7 +371,10 @@ def import_binary(binary_path: str, ctx: Context) -> str:
         # widely supported by clients, we will resort to this
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         pyghidra_context.import_binary_backgrounded(binary_path)
-        return f"Importing {binary_path} occuring in the background. When it is ready, it will show as analyzed in binary list."
+        return (
+            f"Importing {binary_path} in the background."
+            "When ready, it will appear analyzed in binary list."
+        )
     except Exception as e:
         if isinstance(e, ValueError):
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
@@ -381,7 +386,7 @@ def import_binary(binary_path: str, ctx: Context) -> str:
 def init_pyghidra_context(
     mcp: FastMCP, input_paths: list[Path], project_name: str, project_directory: str
 ) -> FastMCP:
-    bin_paths = [Path(p) for p in input_paths]
+    bin_paths: list[str | Path] = [Path(p) for p in input_paths]
 
     logger.info(f"Analyzing {', '.join(map(str, bin_paths))}")
     logger.info(f"Project: {project_name}")
@@ -401,7 +406,7 @@ def init_pyghidra_context(
     if len(pyghidra_context.list_binaries()) == 0 and len(input_paths) == 0:
         logger.warning("No binaries were imported and none exist in the project.")
 
-    mcp._pyghidra_context = pyghidra_context
+    mcp._pyghidra_context = pyghidra_context  # type: ignore
     logger.info("Server intialized")
 
     return mcp
@@ -457,7 +462,7 @@ def main(transport: str, input_paths: list[Path], project_path: Path) -> None:
         else:
             raise ValueError(f"Invalid transport: {transport}")
     finally:
-        mcp._pyghidra_context.close()
+        mcp._pyghidra_context.close()  # type: ignore
 
 
 if __name__ == "__main__":

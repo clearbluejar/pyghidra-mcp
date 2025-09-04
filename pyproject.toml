@@ -123,3 +123,6 @@ split-on-trailing-comma = true
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
+
+[tool.pyright]
+reportMissingModuleSource = false
