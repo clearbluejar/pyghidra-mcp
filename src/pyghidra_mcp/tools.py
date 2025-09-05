@@ -20,7 +20,8 @@ from pyghidra_mcp.models import (
 )
 
 if typing.TYPE_CHECKING:
-    import ghidra
+    from ghidra.app.decompiler import DecompileResults
+    from ghidra.program.model.listing import Function
 
     from .context import ProgramInfo
 
@@ -50,14 +51,13 @@ class GhidraTools:
         self.program = program_info.program
         self.decompiler = program_info.decompiler
 
-    def _get_filename(self, func: "ghidra.program.model.listing.Function"):
+    def _get_filename(self, func: "Function"):
         max_path_len = 12
         return f"{func.getName()[:max_path_len]}-{func.entryPoint}"
 
     @handle_exceptions
     def decompile_function(self, name: str, timeout: int = 0) -> DecompiledFunction:
         """Decompiles a function in a specified binary and returns its pseudo-C code."""
-        from ghidra.app.decompiler import DecompileResults
         from ghidra.util.task import ConsoleTaskMonitor
 
         fm = self.program.getFunctionManager()
@@ -76,22 +76,25 @@ class GhidraTools:
         raise ValueError(f"Function {name} not found")
 
     @handle_exceptions
-    def get_all_functions(self) -> list["ghidra.program.model.listing.Function"]:
+    def get_all_functions(self, include_externals=False) -> list["Function"]:
         """Gets all functions within a binary."""
-        from ghidra.program.model.listing import Function
 
         funcs = []
         fm = self.program.getFunctionManager()
         functions = fm.getFunctions(True)
         for func in functions:
             func: Function
+            if not include_externals and func.isExternal():
+                continue
+            if not include_externals and func.thunk:
+                continue
             funcs.append(func)
         return funcs
 
     def get_all_strings(self) -> list[StringInfo]:
         """Gets all defined strings for a binary"""
         try:
-            from ghidra.program.util import DefinedStringIterator
+            from ghidra.program.util import DefinedStringIterator  # type: ignore
 
             data_iterator = DefinedStringIterator.forProgram(self.program)
         except ImportError:
@@ -261,13 +264,13 @@ class GhidraTools:
 
         results = self.program_info.collection.query(query_texts=[query], n_results=limit)
         search_results = []
-        if results:
+        if results and results["documents"]:
             for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i]
-                distance = results["distances"][0][i]
+                metadata = results["metadatas"][0][i]  # type: ignore
+                distance = results["distances"][0][i]  # type: ignore
                 search_results.append(
                     CodeSearchResult(
-                        function_name=metadata["function_name"],
+                        function_name=str(metadata["function_name"]),
                         code=doc,
                         similarity=1 - distance,
                     )
@@ -275,7 +278,7 @@ class GhidraTools:
         return search_results
 
     @handle_exceptions
-    def search_strings(self, query: str | None = None, limit: int = 25) -> list[StringSearchResult]:
+    def search_strings(self, query: str, limit: int = 25) -> list[StringSearchResult]:
         """Searches for strings within a binary."""
 
         if not self.program_info.strings_collection:
@@ -283,14 +286,14 @@ class GhidraTools:
 
         search_results = []
         results = self.program_info.strings_collection.query(query_texts=[query], n_results=limit)
-        if results:
+        if results and results["documents"]:
             for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i]
-                distance = results["distances"][0][i]
+                metadata = results["metadatas"][0][i]  # type: ignore
+                distance = results["distances"][0][i]  # type: ignore
                 search_results.append(
                     StringSearchResult(
                         value=doc,
-                        address=metadata["address"],
+                        address=str(metadata["address"]),
                         similarity=1 - distance,
                     )
                 )
