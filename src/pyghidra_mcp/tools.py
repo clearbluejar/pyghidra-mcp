@@ -20,6 +20,7 @@ from pyghidra_mcp.models import (
 )
 
 if typing.TYPE_CHECKING:
+    from ghidra.app.decompiler import DecompileResults
     from ghidra.program.model.listing import Function
 
     from .context import ProgramInfo
@@ -57,7 +58,6 @@ class GhidraTools:
     @handle_exceptions
     def decompile_function(self, name: str, timeout: int = 0) -> DecompiledFunction:
         """Decompiles a function in a specified binary and returns its pseudo-C code."""
-        from ghidra.app.decompiler import DecompileResults
         from ghidra.util.task import ConsoleTaskMonitor
 
         fm = self.program.getFunctionManager()
@@ -78,7 +78,6 @@ class GhidraTools:
     @handle_exceptions
     def get_all_functions(self, include_externals=False) -> list["Function"]:
         """Gets all functions within a binary."""
-        from ghidra.program.model.listing import Function
 
         funcs = []
         fm = self.program.getFunctionManager()

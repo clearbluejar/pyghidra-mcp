@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
 import chromadb
+import pyghidra  # noqa
 from chromadb.config import Settings
 
 from pyghidra_mcp.tools import GhidraTools
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from ghidra.app.decompiler import DecompInterface
     from ghidra.base.project import GhidraProject
     from ghidra.framework.model import DomainFile
+    from ghidra.program.flatapi import FlatProgramAPI
     from ghidra.program.model.listing import Program
 
 # Configure logging
@@ -28,14 +30,10 @@ logger = logging.getLogger(__name__)
 class ProgramInfo:
     """Information about a loaded program"""
 
-    from ghidra.app.decompiler import DecompInterface
-    from ghidra.program.flatapi import FlatProgramAPI
-    from ghidra.program.model.listing import Program
-
     name: str
-    program: Program
-    flat_api: FlatProgramAPI | None
-    decompiler: DecompInterface
+    program: "Program"
+    flat_api: "FlatProgramAPI | None"
+    decompiler: "DecompInterface"
     metadata: dict  # Ghidra program metadata
     ghidra_analysis_complete: bool
     file_path: Path | None = None
@@ -138,7 +136,7 @@ class PyGhidraContext:
 
         project_dir = self.project_path / self.project_name
         project_dir.mkdir(exist_ok=True, parents=True)
-        project_dir_str = str(project_dir)
+        project_dir_str = str(project_dir.absolute())
 
         locator = ProjectLocator(project_dir_str, self.project_name)
 
