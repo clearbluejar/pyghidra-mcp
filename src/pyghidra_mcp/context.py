@@ -1,5 +1,6 @@
 import concurrent.futures
 import hashlib
+import json
 import logging
 import multiprocessing
 import threading
@@ -193,15 +194,19 @@ class PyGhidraContext:
 
         logger.info(f"Program {program_name} is ready for use.")
 
-    def import_binaries(self, binary_paths: list[str | Path]):
+    def import_binaries(self, binary_paths: list[str | Path], threaded: bool = False):
         """
         Imports a list of binaries into the project.
 
         Args:
             binary_paths: A list of paths to the binary files.
+            threaded: If True, imports each binary in a background thread.
         """
         for bin_path in binary_paths:
-            self.import_binary(bin_path)
+            if threaded:
+                self.import_binary_backgrounded(bin_path)
+            else:
+                self.import_binary(bin_path)
 
     def import_binary_backgrounded(self, binary_path: str | Path):
         """
@@ -224,6 +229,19 @@ class PyGhidraContext:
             raise ValueError(
                 f"Binary {binary_name} not found. Available binaries: {available_progs}"
             )
+        if not program_info.analysis_complete:
+            raise RuntimeError(
+                json.dumps(
+                    {
+                        "message": f"Analysis incomplete for binary '{binary_name}'.",
+                        "binary_name": binary_name,
+                        "ghidra_analysis_complete": program_info.ghidra_analysis_complete,
+                        "code_collection": program_info.collection,
+                        "strings_collection": program_info.strings_collection,
+                        "suggestion": "Wait and try tool call again.",
+                    }
+                )
+            )
         return program_info
 
     def _init_program_info(self, program):
@@ -243,6 +261,7 @@ class PyGhidraContext:
             file_path=metadata["Executable Location"],
             load_time=time.time(),
             collection=None,
+            strings_collection=None,
         )
 
         return program_info
