@@ -398,8 +398,6 @@ This project implementation and design was inspired by these awesome projects:
 * [ghidrecomp](https://github.com/clearbluejar/ghidrecomp)
 * [BinAssistMCP](https://github.com/jtang613/BinAssistMCP)
 
-Here’s the revised section with the emojis removed and the contributor instructions integrated cleanly:
-
 ---
 
 ## Contributing, community, and running from source
@@ -424,9 +422,6 @@ If you're adding a new tool or integration, here’s the recommended workflow:
 
 This ensures consistency across the codebase and helps us maintain robust, scalable tooling for reverse engineering workflows.
 
----
-
-Let me know if you'd like to modularize this into an MDX component or link it to a contributor guide.
 ______________________________________________________________________
 
 Made with ❤️ by the [PyGhidra-MCP Team](https://github.com/clearbluejar/pyghidra-mcp)
