@@ -278,13 +278,28 @@ class GhidraTools:
         return search_results
 
     @handle_exceptions
-    def search_strings(self, query: str, limit: int = 25) -> list[StringSearchResult]:
+    def search_strings(self, query: str, limit: int = 100) -> list[StringSearchResult]:
         """Searches for strings within a binary."""
 
         if not self.program_info.strings_collection:
             raise ValueError("Chromadb string collection not initialized")
 
         search_results = []
+        results = self.program_info.strings_collection.get(
+            where_document={"$contains": query}, limit=limit
+        )
+        if results and results["documents"]:
+            for i, doc in enumerate(results["documents"]):
+                metadata = results["metadatas"][i]  # type: ignore
+                search_results.append(
+                    StringSearchResult(
+                        value=doc,
+                        address=str(metadata["address"]),
+                        similarity=1,
+                    )
+                )
+            limit -= len(results["documents"])
+
         results = self.program_info.strings_collection.query(query_texts=[query], n_results=limit)
         if results and results["documents"]:
             for i, doc in enumerate(results["documents"][0]):
