@@ -7,6 +7,8 @@ import logging
 import re
 import typing
 
+from jpype import JByte
+
 from pyghidra_mcp.models import (
     BytesReadResult,
     CodeSearchResult,
@@ -316,11 +318,9 @@ class GhidraTools:
         try:
             # Handle common hex address formats
             addr_str = address
-            if address.startswith("0x"):
+            if address.lower().startswith("0x"):
                 addr_str = address[2:]
-            elif address.startswith("0X"):
-                addr_str = address[2:]
-                
+
             addr = af.getAddress(addr_str)
             if addr is None:
                 raise ValueError(f"Invalid address: {address}")
@@ -333,30 +333,15 @@ class GhidraTools:
             raise ValueError(f"Address {address} is not in mapped memory")
 
         # Use JPype to handle byte arrays properly for PyGhidra
-        try:
-            from jpype import JByte
-            
-            # Create Java byte array
-            buf = JByte[size]
-            n = mem.getBytes(addr, buf)
-            
-            # Convert to Python bytes, handling the signed byte issue
-            if n > 0:
-                data = bytes([b & 0xff for b in buf[:n]])
-            else:
-                data = b''
-                
-        except ImportError:
-            # Fallback for cases where jpype is not available
-            # This shouldn't happen in PyGhidra but provides a backup
-            data = bytearray(size)
-            try:
-                n = mem.getBytes(addr, data)
-                if n is None:
-                    n = 0
-                data = bytes(data[:n])
-            except Exception:
-                raise ValueError(f"Failed to read memory at address {address}")
+        # Create Java byte array
+        buf = JByte[size]
+        n = mem.getBytes(addr, buf)
+
+        # Convert Java signed bytes (-128 to 127) to Python unsigned (0 to 255)
+        if n > 0:
+            data = bytes([b & 0xff for b in buf[:n]])
+        else:
+            data = b''
 
         return BytesReadResult(
             address=str(addr),
