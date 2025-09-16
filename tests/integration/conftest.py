@@ -81,6 +81,18 @@ void function_two() {
 
 
 @pytest.fixture(scope="module")
+def server_params_no_input():
+    """Get server parameters with no test binary."""
+    return StdioServerParameters(
+        command="python",  # Executable
+        # Run with test binary
+        args=["-m", "pyghidra_mcp"],
+        # Optional environment variables
+        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+    )
+
+
+@pytest.fixture(scope="module")
 def server_params(test_binary):
     """Get server parameters with a test binary."""
     return StdioServerParameters(

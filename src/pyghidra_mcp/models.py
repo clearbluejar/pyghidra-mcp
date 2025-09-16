@@ -26,6 +26,21 @@ class FunctionSearchResults(BaseModel):
     )
 
 
+class ProgramBasicInfo(BaseModel):
+    """Basic information about a program: name and analysis status"""
+
+    name: str = Field(..., description="The name of the program.")
+    analysis_complete: bool = Field(..., description="Indicates if program is ready to be used.")
+
+
+class ProgramBasicInfos(BaseModel):
+    """A container for a list of basic program information objects."""
+
+    programs: list[ProgramBasicInfo] = Field(
+        ..., description="A list of basic program information."
+    )
+
+
 class ProgramInfo(BaseModel):
     """Detailed information about a program (binary) loaded in Ghidra."""
 

@@ -14,6 +14,15 @@
             "args": "/bin/ls"
         },
         {
+            "name": "pyghidra streamablehttp server",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/pyghidra_mcp/server.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": "--transport streamable-http"
+        },
+        {
             "name": "Python: Current File (with pytest)",
             "type": "debugpy",
             "request": "launch",
