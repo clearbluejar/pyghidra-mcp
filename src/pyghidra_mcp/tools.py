@@ -8,6 +8,7 @@ import re
 import typing
 
 from pyghidra_mcp.models import (
+    BytesReadResult,
     CodeSearchResult,
     CrossReferenceInfo,
     DecompiledFunction,
@@ -296,3 +297,106 @@ class GhidraTools:
                 )
 
         return search_results
+
+    @handle_exceptions
+    def read_bytes(self, address: str, size: int = 32) -> BytesReadResult:
+        """Reads raw bytes from memory at a specified address."""
+        # Maximum size limit to prevent excessive memory reads
+        MAX_READ_SIZE = 8192
+        
+        if size <= 0:
+            raise ValueError("size must be > 0")
+        
+        if size > MAX_READ_SIZE:
+            raise ValueError(f"Size {size} exceeds maximum {MAX_READ_SIZE}")
+
+        # Get address factory and parse address
+        af = self.program.getAddressFactory()
+        
+        try:
+            # Handle common hex address formats
+            addr_str = address
+            if address.startswith("0x"):
+                addr_str = address[2:]
+            elif address.startswith("0X"):
+                addr_str = address[2:]
+                
+            addr = af.getAddress(addr_str)
+            if addr is None:
+                raise ValueError(f"Invalid address: {address}")
+        except Exception as e:
+            raise ValueError(f"Invalid address format '{address}': {e}")
+
+        # Check if address is in valid memory
+        mem = self.program.getMemory()
+        if not mem.contains(addr):
+            raise ValueError(f"Address {address} is not in mapped memory")
+
+        # Use JPype to handle byte arrays properly for PyGhidra
+        try:
+            from jpype import JByte
+            
+            # Create Java byte array
+            buf = JByte[size]
+            n = mem.getBytes(addr, buf)
+            
+            # Convert to Python bytes, handling the signed byte issue
+            if n > 0:
+                data = bytes([b & 0xff for b in buf[:n]])
+            else:
+                data = b''
+                
+        except ImportError:
+            # Fallback for cases where jpype is not available
+            # This shouldn't happen in PyGhidra but provides a backup
+            data = bytearray(size)
+            try:
+                n = mem.getBytes(addr, data)
+                if n is None:
+                    n = 0
+                data = bytes(data[:n])
+            except Exception:
+                raise ValueError(f"Failed to read memory at address {address}")
+
+        return BytesReadResult(
+            address=str(addr),
+            size=len(data),
+            bytes_hex=data.hex(),
+            hexdump=self._hexdump(addr, data),
+            ascii_preview=self._ascii_preview(data),
+        )
+
+    def _hexdump(self, base_addr, data: bytes) -> list[str]:
+        """Create a hexdump representation of the bytes."""
+        HEX_LINE_WIDTH = 16
+        lines = []
+        
+        for offset in range(0, len(data), HEX_LINE_WIDTH):
+            chunk = data[offset:offset + HEX_LINE_WIDTH]
+            
+            # Format hex bytes with spaces
+            hex_cols = " ".join(f"{b:02x}" for b in chunk)
+            
+            # Pad final line to maintain alignment
+            pad = "   " * (HEX_LINE_WIDTH - len(chunk))
+            
+            # ASCII representation
+            ascii_cols = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+            
+            # Calculate address for this line
+            try:
+                line_addr = base_addr.add(offset)
+            except Exception:
+                # Fallback if address arithmetic fails
+                line_addr = f"{base_addr}+{offset:x}"
+                
+            lines.append(f"{line_addr}  {hex_cols}{pad}  {ascii_cols}")
+            
+        return lines
+
+    def _ascii_preview(self, data: bytes) -> str:
+        """Create an ASCII preview of the bytes."""
+        # Convert bytes to printable ASCII, replacing non-printable with '.'
+        preview = "".join(chr(b) if 32 <= b < 127 else "." for b in data)
+        # Limit length to prevent excessive output
+        return preview[:128]
