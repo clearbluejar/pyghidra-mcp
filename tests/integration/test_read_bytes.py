@@ -4,7 +4,6 @@ Integration test for the read_bytes functionality.
 Simple smoke test to verify read_bytes works through the MCP interface.
 """
 
-import json
 
 import pytest
 from mcp import ClientSession
@@ -25,8 +24,7 @@ async def test_read_bytes_tool(server_params):
 
             # Try reading from 0x100000 (Ghidra's default ELF analysis base address)
             response = await session.call_tool(
-                "read_bytes",
-                {"binary_name": binary_name, "address": "100000", "size": 4}
+                "read_bytes", {"binary_name": binary_name, "address": "100000", "size": 4}
             )
 
             result = BytesReadResult.model_validate_json(response.content[0].text)
