@@ -1,0 +1,68 @@
+name: Pytest PyPI Package Devcontainer Across Versions
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: '30 5,15 * * *'
+  workflow_dispatch:
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [
+          "latest",
+          "11.3.2ghidra3.12python-bookworm",
+          "11.4.1ghidra3.11python-bookworm",
+          "11.3ghidra3.10python-bookworm",
+          # "11.3ghidra3.9python-bookworm",
+        ]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Overwrite original devcontainer with workflow devcontainer
+      run: |
+        cp .github/workflows/devcontainer.json .devcontainer/devcontainer.json
+
+    - name: Test with pytest on devcontainer
+      env:
+        DC_IMAGE_TAG: ${{ matrix.image }}
+      uses: devcontainers/ci@v0.3
+      with:
+        imageName: ghcr.io/clearbluejar/ghidra-python
+        cacheFrom: ghcr.io/clearbluejar/ghidra-python
+        imageTag: ${{ matrix.image }}
+        push: never
+        runCmd: |
+          env
+          ls /usr/local/include/
+          pip install --upgrade pip
+          python -m venv env
+          source env/bin/activate
+          # Install package from PyPI with dev extras
+          pip install pyghidra-mcp[dev]
+
+          # Run tests
+          python -m pytest tests/unit/ --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
+          python -m pytest tests/integration/ --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
+
+    - name: Upload unit test results
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results-${{ matrix.image }}
+        path: junit/unit-test-results-${{ matrix.image }}.xml
+        retention-days: 7
+
+    - name: Upload integration test results
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-results-${{ matrix.image }}
+        path: junit/integration-test-results-${{ matrix.image }}.xml
+        retention-days: 7
