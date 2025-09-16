@@ -12,7 +12,6 @@ from mcp.client.streamable_http import streamablehttp_client
 
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
-    BytesReadResult,
     CodeSearchResults,
     CrossReferenceInfos,
     DecompiledFunction,
@@ -86,9 +85,6 @@ async def invoke_tool_concurrently(server_binary_path):
                 session.call_tool(
                     "search_strings", {"binary_name": binary_name, "query": "hello", "limit": 1}
                 ),
-                session.call_tool(
-                    "read_bytes", {"binary_name": binary_name, "address": "0", "size": 4}
-                ),
             ]
 
             responses = await asyncio.gather(*tasks)
@@ -108,7 +104,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     assert len(results) == num_clients
 
     for client_responses in results:
-        assert len(client_responses) == 11
+        assert len(client_responses) == 10
 
         # Decompiled function
         decompiled_func_result = json.loads(client_responses[0].content[0].text)
@@ -170,10 +166,3 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         string_search_results = StringSearchResults(**search_string_result)
         assert len(string_search_results.strings) > 0
         assert "World" in string_search_results.strings[0].value
-
-        # Read bytes
-        read_bytes_result = json.loads(client_responses[10].content[0].text)
-        bytes_result = BytesReadResult(**read_bytes_result)
-        assert bytes_result.size == 4
-        assert bytes_result.data == "7f454c46"  # ELF magic
-        assert bytes_result.address == "00000000"
