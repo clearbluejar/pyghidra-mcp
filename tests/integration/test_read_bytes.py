@@ -50,15 +50,13 @@ async def test_read_bytes_happy_path(server_params):
             assert result.address is not None
             assert result.size > 0
             assert result.size <= 16
-            assert len(result.bytes_hex) == result.size * 2  # Hex string is 2 chars per byte
-            assert len(result.hexdump) > 0
-            assert len(result.ascii_preview) <= 128
-            
+            assert len(result.data) == result.size * 2  # Hex string is 2 chars per byte
+
             # Verify hex string contains valid hex characters
             try:
-                bytes.fromhex(result.bytes_hex)
+                bytes.fromhex(result.data)
             except ValueError:
-                pytest.fail("Invalid hex string in bytes_hex")
+                pytest.fail("Invalid hex string in data")
 
 
 @pytest.mark.asyncio
@@ -100,9 +98,9 @@ async def test_read_bytes_with_hex_prefix(server_params):
 
             result_text = response.content[0].text
             result = BytesReadResult.model_validate_json(result_text)
-            
+
             assert result.size > 0
-            assert len(result.bytes_hex) == result.size * 2
+            assert len(result.data) == result.size * 2
 
 
 @pytest.mark.asyncio
@@ -261,7 +259,7 @@ async def test_read_bytes_default_size(server_params):
             
             # Size should be 32 or less (if we hit memory boundary)
             assert 0 < result.size <= 32
-            assert len(result.bytes_hex) == result.size * 2
+            assert len(result.data) == result.size * 2
 
 
 @pytest.mark.asyncio

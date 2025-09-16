@@ -361,42 +361,6 @@ class GhidraTools:
         return BytesReadResult(
             address=str(addr),
             size=len(data),
-            bytes_hex=data.hex(),
-            hexdump=self._hexdump(addr, data),
-            ascii_preview=self._ascii_preview(data),
+            data=data.hex(),
         )
 
-    def _hexdump(self, base_addr, data: bytes) -> list[str]:
-        """Create a hexdump representation of the bytes."""
-        HEX_LINE_WIDTH = 16
-        lines = []
-        
-        for offset in range(0, len(data), HEX_LINE_WIDTH):
-            chunk = data[offset:offset + HEX_LINE_WIDTH]
-            
-            # Format hex bytes with spaces
-            hex_cols = " ".join(f"{b:02x}" for b in chunk)
-            
-            # Pad final line to maintain alignment
-            pad = "   " * (HEX_LINE_WIDTH - len(chunk))
-            
-            # ASCII representation
-            ascii_cols = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-            
-            # Calculate address for this line
-            try:
-                line_addr = base_addr.add(offset)
-            except Exception:
-                # Fallback if address arithmetic fails
-                line_addr = f"{base_addr}+{offset:x}"
-                
-            lines.append(f"{line_addr}  {hex_cols}{pad}  {ascii_cols}")
-            
-        return lines
-
-    def _ascii_preview(self, data: bytes) -> str:
-        """Create an ASCII preview of the bytes."""
-        # Convert bytes to printable ASCII, replacing non-printable with '.'
-        preview = "".join(chr(b) if 32 <= b < 127 else "." for b in data)
-        # Limit length to prevent excessive output
-        return preview[:128]
