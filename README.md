@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img align="center" alt="GitHub Workflow Status (with event)" src="https://img.shields.io/github/actions/workflow/status/clearbluejar/pyghidra-mcp/actions/workflows/pytest-devcontainer-repo-all.yml?label=pytest&style=for-the-badge">
+  <img align="center" alt="GitHub Workflow Status (with event)" src="https://img.shields.io/github/actions/workflow/status/clearbluejar/pyghidra-mcp/pytest-devcontainer-repo-all.yml?style=for-the-badge&label=pytest">
   <img align="center" alt="PyPI - Downloads" src="https://img.shields.io/pypi/dm/pyghidra-mcp?color=yellow&label=PyPI%20downloads&style=for-the-badge">
   <img align="center" src="https://img.shields.io/github/stars/clearbluejar/pyghidra-mcp?style=for-the-badge">
 </p>
@@ -402,15 +402,30 @@ This project implementation and design was inspired by these awesome projects:
 * [ghidrecomp](https://github.com/clearbluejar/ghidrecomp)
 * [BinAssistMCP](https://github.com/jtang613/BinAssistMCP)
 
+---
+
 ## Contributing, community, and running from source
 
-We believe the future of reverse engineering is agentic, contextual, and scalable.
+We believe the future of reverse engineering is agentic, contextual, and scalable.  
 `pyghidra-mcp` is a step toward that future—making full Ghidra projects accessible to AI agents and automation pipelines.
 
 We’re actively developing the project and welcome feedback, issues, and contributions.
 
 > [!NOTE]
 > We love your feedback, bug reports, feature requests, and code.
+
+### Contributor workflow
+
+If you're adding a new tool or integration, here’s the recommended workflow:
+
+- Label your branch with the prefix `feature/` to indicate a new capability.
+- Add your tool using the same style and structure as existing tools in `pyghidra/tools/`.
+- Write an integration test that exercises your tool using a `StdioClient` instance. Place it in `tests/integration/`.
+- Extend concurrent testing by adding a call to your tool in `tests/integration/test_concurrent_streamable_client.py`.
+- Run make test and make format to ensure your changes pass all tests and conform to linting rules.
+
+This ensures consistency across the codebase and helps us maintain robust, scalable tooling for reverse engineering workflows.
+
 ______________________________________________________________________
 
 Made with ❤️ by the [PyGhidra-MCP Team](https://github.com/clearbluejar/pyghidra-mcp)

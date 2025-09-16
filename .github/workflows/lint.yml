@@ -33,6 +33,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyright
+          pip install ghidra-stubs
           pip install -e .
       - name: Run Pyright
         run: |

@@ -1,4 +1,4 @@
-# Server Logging
+# Server
 # ---------------------------------------------------------------------------------
 import logging
 import sys
@@ -23,6 +23,8 @@ from pyghidra_mcp.models import (
     ExportInfos,
     FunctionSearchResults,
     ImportInfos,
+    ProgramBasicInfo,
+    ProgramBasicInfos,
     ProgramInfo,
     ProgramInfos,
     StringSearchResults,
@@ -44,13 +46,13 @@ logger = logging.getLogger(__name__)
 async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
     """Manage server startup and shutdown lifecycle."""
     try:
-        yield server._pyghidra_context
+        yield server._pyghidra_context  # type: ignore
     finally:
         # pyghidra_context.close()
         pass
 
 
-mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)
+mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
 
 
 # MCP Tools
@@ -167,11 +169,15 @@ def search_code(binary_name: str, query: str, ctx: Context, limit: int = 5) -> C
 
 
 @mcp.tool()
-def list_project_binaries(ctx: Context) -> list[str]:
-    """Lists the names of all binaries currently loaded in the Ghidra project."""
+def list_project_binaries(ctx: Context) -> ProgramBasicInfos:
+    """Lists the names and analysis status of all binaries currently loaded in
+    the Ghidra project."""
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        return list(pyghidra_context.programs.keys())
+        results = []
+        for name, pi in pyghidra_context.programs.items():
+            results.append(ProgramBasicInfo(name=name, analysis_complete=pi.analysis_complete))
+        return ProgramBasicInfos(programs=results)
     except Exception as e:
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error listing project binaries: {e!s}")
@@ -206,6 +212,7 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
                     load_time=pi.load_time,
                     analysis_complete=pi.analysis_complete,
                     metadata=pi.metadata,
+                    collection=None,
                 )
             )
         return ProgramInfos(programs=program_infos)
@@ -329,7 +336,7 @@ def search_strings(
     binary_name: str,
     ctx: Context,
     query: str,
-    limit: int = 25,
+    limit: int = 100,
 ) -> StringSearchResults:
     """Searches for strings within a binary by name.
     This can be very useful to gain general understanding of behaviors.
@@ -373,13 +380,34 @@ def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> 
         raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Error reading bytes: {e!s}")) from e
 
 
+@mcp.tool()
+def import_binary(binary_path: str, ctx: Context) -> str:
+    """Imports a binary from a designated path into the current Ghidra project.
+
+    Args:
+        binary_path: The path to the binary file to import.
+    """
+    try:
+        # We would like to do context progress updates, but until that is more
+        # widely supported by clients, we will resort to this
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context.import_binary_backgrounded(binary_path)
+        return (
+            f"Importing {binary_path} in the background."
+            "When ready, it will appear analyzed in binary list."
+        )
+    except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
+        raise McpError(
+            ErrorData(code=INTERNAL_ERROR, message=f"Error importing binary: {e!s}")
+        ) from e
+
+
 def init_pyghidra_context(
     mcp: FastMCP, input_paths: list[Path], project_name: str, project_directory: str
 ) -> FastMCP:
-    if not input_paths:
-        raise ValueError("Missing Input Paths!")
-
-    bin_paths = [Path(p) for p in input_paths]
+    bin_paths: list[str | Path] = [Path(p) for p in input_paths]
 
     logger.info(f"Analyzing {', '.join(map(str, bin_paths))}")
     logger.info(f"Project: {project_name}")
@@ -396,7 +424,10 @@ def init_pyghidra_context(
     logger.info(f"Analyzing project: {pyghidra_context.project}")
     pyghidra_context.analyze_project()
 
-    mcp._pyghidra_context = pyghidra_context
+    if len(pyghidra_context.list_binaries()) == 0 and len(input_paths) == 0:
+        logger.warning("No binaries were imported and none exist in the project.")
+
+    mcp._pyghidra_context = pyghidra_context  # type: ignore
     logger.info("Server intialized")
 
     return mcp
@@ -422,20 +453,13 @@ def init_pyghidra_context(
     help="Transport protocol to use: stdio, streamable-http, or sse (legacy)",
 )
 @click.option(
-    "--project-name",
-    default="pyghidra_mcp",
-    help="Name of the Ghidra project.",
-)
-@click.option(
-    "--project-directory",
-    default="pyghidra_mcp_projects",
+    "--project-path",
     type=click.Path(),
-    help="Directory to store the Ghidra project.",
+    default=Path("pyghidra_mcp_projects/pyghidra_mcp"),
+    help="Location on disk which points to the Ghidra project to use. Can be an existing file.",
 )
-@click.argument("input_paths", type=click.Path(exists=True), nargs=-1, required=True)
-def main(
-    transport: str, input_paths: list[Path], project_name: str, project_directory: str
-) -> None:
+@click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
+def main(transport: str, input_paths: list[Path], project_path: Path) -> None:
     """PyGhidra Command-Line MCP server
 
     - input_paths: Path to one or more binaries to import, analyze, and expose with pyghidra-mcp
@@ -444,6 +468,8 @@ def main(
     For streamable-http and sse, it will start an HTTP server on port 8000.
 
     """
+    project_name = project_path.stem
+    project_directory = str(project_path.parent)
 
     init_pyghidra_context(mcp, input_paths, project_name, project_directory)
 
@@ -457,7 +483,7 @@ def main(
         else:
             raise ValueError(f"Invalid transport: {transport}")
     finally:
-        mcp._pyghidra_context.close()
+        mcp._pyghidra_context.close()  # type: ignore
 
 
 if __name__ == "__main__":

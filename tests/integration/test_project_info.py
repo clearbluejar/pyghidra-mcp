@@ -64,12 +64,22 @@ async def test_list_project_binaries_tool():
                 assert results.content is not None
                 assert len(results.content) > 0
 
-                # The result should be a JSON list of strings
+                # The result should be a list of program basic info
                 text_content = results.content[0].text
-                assert text_content is not None
-                binaries = [name.text for name in results.content]
-                assert isinstance(binaries, list)
-                assert binary_name in binaries
+                program_infos = json.loads(text_content)
+                assert "programs" in program_infos
+                assert isinstance(program_infos["programs"], list)
+                program_infos = program_infos["programs"]
+                assert len(program_infos) > 0
+
+                found = False
+                for program in program_infos:
+                    if program["name"] == binary_name:
+                        found = True
+                        assert program["analysis_complete"]
+                        break
+
+                assert found
 
     finally:
         # Clean up the test binary and its source
