@@ -153,6 +153,4 @@ class BytesReadResult(BaseModel):
 
     address: str = Field(..., description="The normalized address where bytes were read from.")
     size: int = Field(..., description="The actual number of bytes read.")
-    bytes_hex: str = Field(..., description="The raw bytes as a hexadecimal string.")
-    hexdump: list[str] = Field(..., description="Formatted hexdump lines with addresses and ASCII preview.")
-    ascii_preview: str = Field(..., description="ASCII preview of the bytes with non-printable characters replaced by '.'.")
+    data: str = Field(..., description="The raw bytes as a hexadecimal string.")
