@@ -30,8 +30,8 @@ async def test_read_bytes_happy_path(server_params):
                 pytest.skip("No functions found in test binary")
                 return
 
-            # Get the address of main function
-            main_address = functions_data["functions"][0]["address"]
+            # Get the entry point address of main function
+            main_address = functions_data["functions"][0]["entry_point"]
 
             # Test reading bytes from main function
             response = await session.call_tool(
@@ -70,21 +70,21 @@ async def test_read_bytes_with_hex_prefix(server_params):
 
             binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
 
-            # Get a valid address
-            symbols_response = await session.call_tool(
-                "search_symbols_by_name", {"binary_name": binary_name, "query": "main", "limit": 1}
+            # Get a valid address from functions
+            functions_response = await session.call_tool(
+                "search_functions_by_name", {"binary_name": binary_name, "query": "main", "limit": 1}
             )
-            
-            symbols_result = symbols_response.content[0].text
+
+            functions_result = functions_response.content[0].text
             import json
-            symbols_data = json.loads(symbols_result)
-            
-            if not symbols_data.get("symbols"):
-                pytest.skip("No symbols found in test binary")
+            functions_data = json.loads(functions_result)
+
+            if not functions_data.get("functions"):
+                pytest.skip("No functions found in test binary")
                 return
 
             # Get address and add 0x prefix
-            main_address = symbols_data["symbols"][0]["address"]
+            main_address = functions_data["functions"][0]["entry_point"]
             if not main_address.startswith("0x"):
                 main_address = "0x" + main_address
 
@@ -165,19 +165,19 @@ async def test_read_bytes_invalid_size(server_params):
             binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
 
             # Get a valid address first
-            symbols_response = await session.call_tool(
-                "search_symbols_by_name", {"binary_name": binary_name, "query": "main", "limit": 1}
+            functions_response = await session.call_tool(
+                "search_functions_by_name", {"binary_name": binary_name, "query": "main", "limit": 1}
             )
-            
-            symbols_result = symbols_response.content[0].text
+
+            functions_result = functions_response.content[0].text
             import json
-            symbols_data = json.loads(symbols_result)
-            
-            if not symbols_data.get("symbols"):
-                pytest.skip("No symbols found in test binary")
+            functions_data = json.loads(functions_result)
+
+            if not functions_data.get("functions"):
+                pytest.skip("No functions found in test binary")
                 return
 
-            main_address = symbols_data["symbols"][0]["address"]
+            main_address = functions_data["functions"][0]["entry_point"]
 
             # Test with size = 0
             try:
@@ -232,19 +232,19 @@ async def test_read_bytes_default_size(server_params):
             binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
 
             # Get a valid address
-            symbols_response = await session.call_tool(
-                "search_symbols_by_name", {"binary_name": binary_name, "query": "main", "limit": 1}
+            functions_response = await session.call_tool(
+                "search_functions_by_name", {"binary_name": binary_name, "query": "main", "limit": 1}
             )
-            
-            symbols_result = symbols_response.content[0].text
+
+            functions_result = functions_response.content[0].text
             import json
-            symbols_data = json.loads(symbols_result)
-            
-            if not symbols_data.get("symbols"):
-                pytest.skip("No symbols found in test binary")
+            functions_data = json.loads(functions_result)
+
+            if not functions_data.get("functions"):
+                pytest.skip("No functions found in test binary")
                 return
 
-            main_address = symbols_data["symbols"][0]["address"]
+            main_address = functions_data["functions"][0]["entry_point"]
 
             # Test with default size (should be 32)
             response = await session.call_tool(
