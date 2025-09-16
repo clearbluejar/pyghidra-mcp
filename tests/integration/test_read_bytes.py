@@ -23,12 +23,7 @@ async def test_read_bytes_tool(server_params):
 
             # Read the first 4 bytes (ELF magic: 0x7F + "ELF")
             response = await session.call_tool(
-                "read_bytes",
-                {
-                    "binary_name": binary_name,
-                    "address": "0",
-                    "size": 4
-                }
+                "read_bytes", {"binary_name": binary_name, "address": "0", "size": 4}
             )
 
             result = BytesReadResult.model_validate_json(response.content[0].text)

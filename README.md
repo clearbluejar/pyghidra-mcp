@@ -222,7 +222,7 @@ Enable LLMs to perform actions, make deterministic computations, and interact wi
 
 #### Read Bytes
 
-- `read_bytes(binary_name: str, address: str, size: int = 32)`: Reads raw bytes from memory at a specified address. Returns hex dump, ASCII preview, and raw hex data. Useful for inspecting memory contents, data structures, or confirming analysis findings.
+- `read_bytes(binary_name: str, address: str, size: int = 32)`: Reads raw bytes from memory at a specified address. Returns raw hex data. Useful for inspecting memory contents, data structures, or confirming analysis findings.
 
 #### Search Functions
 

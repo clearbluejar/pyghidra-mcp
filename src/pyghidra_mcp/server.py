@@ -356,7 +356,7 @@ def search_strings(
 @mcp.tool()
 def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> BytesReadResult:
     """Reads raw bytes from memory at a specified address.
-    
+
     Args:
         binary_name: The name of the binary to read bytes from.
         address: The memory address to read from (supports hex format with or without 0x prefix).
@@ -370,9 +370,7 @@ def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> 
     except ValueError as e:
         raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
     except Exception as e:
-        raise McpError(
-            ErrorData(code=INTERNAL_ERROR, message=f"Error reading bytes: {e!s}")
-        ) from e
+        raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Error reading bytes: {e!s}")) from e
 
 
 def init_pyghidra_context(
