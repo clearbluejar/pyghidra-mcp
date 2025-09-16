@@ -304,17 +304,17 @@ class GhidraTools:
     def read_bytes(self, address: str, size: int = 32) -> BytesReadResult:
         """Reads raw bytes from memory at a specified address."""
         # Maximum size limit to prevent excessive memory reads
-        MAX_READ_SIZE = 8192
-        
+        max_read_size = 8192
+
         if size <= 0:
             raise ValueError("size must be > 0")
-        
-        if size > MAX_READ_SIZE:
-            raise ValueError(f"Size {size} exceeds maximum {MAX_READ_SIZE}")
+
+        if size > max_read_size:
+            raise ValueError(f"Size {size} exceeds maximum {max_read_size}")
 
         # Get address factory and parse address
         af = self.program.getAddressFactory()
-        
+
         try:
             # Handle common hex address formats
             addr_str = address
@@ -325,7 +325,7 @@ class GhidraTools:
             if addr is None:
                 raise ValueError(f"Invalid address: {address}")
         except Exception as e:
-            raise ValueError(f"Invalid address format '{address}': {e}")
+            raise ValueError(f"Invalid address format '{address}': {e}") from e
 
         # Check if address is in valid memory
         mem = self.program.getMemory()
@@ -339,13 +339,12 @@ class GhidraTools:
 
         # Convert Java signed bytes (-128 to 127) to Python unsigned (0 to 255)
         if n > 0:
-            data = bytes([b & 0xff for b in buf[:n]])
+            data = bytes([b & 0xFF for b in buf[:n]])
         else:
-            data = b''
+            data = b""
 
         return BytesReadResult(
             address=str(addr),
             size=len(data),
             data=data.hex(),
         )
-
