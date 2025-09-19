@@ -351,13 +351,13 @@ class GhidraTools:
             raise ValueError(f"Address {address} is not in mapped memory")
 
         # Use JPype to handle byte arrays properly for PyGhidra
-        # Create Java byte array
-        buf = JByte[size]
+        # Create Java byte array - JPype's runtime magic confuses static type checkers
+        buf = JByte[size]  # type: ignore[reportInvalidTypeArguments]
         n = mem.getBytes(addr, buf)
 
         # Convert Java signed bytes (-128 to 127) to Python unsigned (0 to 255)
         if n > 0:
-            data = bytes([b & 0xFF for b in buf[:n]])
+            data = bytes([b & 0xFF for b in buf[:n]])  # type: ignore[reportGeneralTypeIssues]
         else:
             data = b""
 
