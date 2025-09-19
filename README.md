@@ -220,6 +220,10 @@ Enable LLMs to perform actions, make deterministic computations, and interact wi
 
 - `list_project_program_info()`: Retrieves detailed information for all programs (binaries) in the project.
 
+#### Read Bytes
+
+- `read_bytes(binary_name: str, address: str, size: int = 32)`: Reads raw bytes from memory at a specified address. Returns raw hex data. Useful for inspecting memory contents, data structures, or confirming analysis findings.
+
 #### Search Functions
 
 - `search_functions_by_name(binary_name: str, query: str, offset: int = 0, limit: int = 25)`: Search for functions within a binary by name (case-insensitive substring).
