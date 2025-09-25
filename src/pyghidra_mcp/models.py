@@ -161,3 +161,11 @@ class StringSearchResults(BaseModel):
     """A container for a list of string search results."""
 
     strings: list[StringSearchResult] = Field(..., description="A list of string search results.")
+
+
+class BytesReadResult(BaseModel):
+    """Represents the result of reading raw bytes from memory."""
+
+    address: str = Field(..., description="The normalized address where bytes were read from.")
+    size: int = Field(..., description="The actual number of bytes read.")
+    data: str = Field(..., description="The raw bytes as a hexadecimal string.")
