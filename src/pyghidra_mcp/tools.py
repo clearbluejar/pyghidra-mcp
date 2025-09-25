@@ -7,7 +7,10 @@ import logging
 import re
 import typing
 
+from jpype import JByte
+
 from pyghidra_mcp.models import (
+    BytesReadResult,
     CodeSearchResult,
     CrossReferenceInfo,
     DecompiledFunction,
@@ -314,3 +317,52 @@ class GhidraTools:
                 )
 
         return search_results
+
+    @handle_exceptions
+    def read_bytes(self, address: str, size: int = 32) -> BytesReadResult:
+        """Reads raw bytes from memory at a specified address."""
+        # Maximum size limit to prevent excessive memory reads
+        max_read_size = 8192
+
+        if size <= 0:
+            raise ValueError("size must be > 0")
+
+        if size > max_read_size:
+            raise ValueError(f"Size {size} exceeds maximum {max_read_size}")
+
+        # Get address factory and parse address
+        af = self.program.getAddressFactory()
+
+        try:
+            # Handle common hex address formats
+            addr_str = address
+            if address.lower().startswith("0x"):
+                addr_str = address[2:]
+
+            addr = af.getAddress(addr_str)
+            if addr is None:
+                raise ValueError(f"Invalid address: {address}")
+        except Exception as e:
+            raise ValueError(f"Invalid address format '{address}': {e}") from e
+
+        # Check if address is in valid memory
+        mem = self.program.getMemory()
+        if not mem.contains(addr):
+            raise ValueError(f"Address {address} is not in mapped memory")
+
+        # Use JPype to handle byte arrays properly for PyGhidra
+        # Create Java byte array - JPype's runtime magic confuses static type checkers
+        buf = JByte[size]  # type: ignore[reportInvalidTypeArguments]
+        n = mem.getBytes(addr, buf)
+
+        # Convert Java signed bytes (-128 to 127) to Python unsigned (0 to 255)
+        if n > 0:
+            data = bytes([b & 0xFF for b in buf[:n]])  # type: ignore[reportGeneralTypeIssues]
+        else:
+            data = b""
+
+        return BytesReadResult(
+            address=str(addr),
+            size=len(data),
+            data=data.hex(),
+        )

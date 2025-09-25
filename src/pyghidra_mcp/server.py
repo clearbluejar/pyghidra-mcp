@@ -16,6 +16,7 @@ from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 from pyghidra_mcp.__init__ import __version__
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
+    BytesReadResult,
     CodeSearchResults,
     CrossReferenceInfos,
     DecompiledFunction,
@@ -357,6 +358,26 @@ def search_strings(
         raise McpError(
             ErrorData(code=INTERNAL_ERROR, message=f"Error searching for strings: {e!s}")
         ) from e
+
+
+@mcp.tool()
+def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> BytesReadResult:
+    """Reads raw bytes from memory at a specified address.
+
+    Args:
+        binary_name: The name of the binary to read bytes from.
+        address: The memory address to read from (supports hex format with or without 0x prefix).
+        size: The number of bytes to read (default: 32, max: 8192).
+    """
+    try:
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        program_info = pyghidra_context.get_program_info(binary_name)
+        tools = GhidraTools(program_info)
+        return tools.read_bytes(address=address, size=size)
+    except ValueError as e:
+        raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
+    except Exception as e:
+        raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Error reading bytes: {e!s}")) from e
 
 
 @mcp.tool()
