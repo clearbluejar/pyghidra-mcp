@@ -2,7 +2,7 @@ from . import server
 from .context import ProgramInfo, PyGhidraContext
 from .tools import GhidraTools
 
-__version__ = "0.1.10"
+__version__ = "0.1.11"
 __author__ = "clearbluejar"
 
 
