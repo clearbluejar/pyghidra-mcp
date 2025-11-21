@@ -458,20 +458,39 @@ def init_pyghidra_context(
     default=Path("pyghidra_mcp_projects/pyghidra_mcp"),
     help="Location on disk which points to the Ghidra project to use. Can be an existing file.",
 )
+@click.option(
+    "-p",
+    "--port",
+    type=int,
+    default=8000,
+    envvar="MCP_PORT",
+    help="Port to listen on for HTTP-based transports (streamable-http, sse).",
+)
+@click.option(
+    "-o",
+    "--host",
+    type=str,
+    default="127.0.0.1",
+    envvar="MCP_HOST",
+    help="Host to listen on for HTTP-based transports (streamable-http, sse).",
+)
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
-def main(transport: str, input_paths: list[Path], project_path: Path) -> None:
+def main(transport: str, input_paths: list[Path], project_path: Path, port: int, host: str) -> None:
     """PyGhidra Command-Line MCP server
 
-    - input_paths: Path to one or more binaries to import, analyze, and expose with pyghidra-mcp
-    - transport: Supports stdio, streamable-http, and sse transports.
+    - input_paths: Path to one or more binaries to import, analyze, and expose with pyghidra-mcp\n
+    - transport: Supports stdio, streamable-http, and sse transports.\n
     For stdio, it will read from stdin and write to stdout.
-    For streamable-http and sse, it will start an HTTP server on port 8000.
+    For streamable-http and sse, it will start an HTTP server on the specified port (default 8000).
 
     """
     project_name = project_path.stem
     project_directory = str(project_path.parent)
 
     init_pyghidra_context(mcp, input_paths, project_name, project_directory)
+
+    mcp.settings.port = port
+    mcp.settings.host = host
 
     try:
         if transport == "stdio":
