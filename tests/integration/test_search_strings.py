@@ -7,16 +7,16 @@ from pyghidra_mcp.models import StringSearchResults
 
 
 @pytest.mark.asyncio
-async def test_search_strings_hello(server_params):
+async def test_search_strings_hello(server_params_no_thread):
     """
     Test for the string Hello in the example binary.
     """
-    async with stdio_client(server_params) as (read, write):
+    async with stdio_client(server_params_no_thread) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the connection
             await session.initialize()
 
-            binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
+            binary_name = PyGhidraContext._gen_unique_bin_name(server_params_no_thread.args[-1])
 
             response = await session.call_tool(
                 "search_strings", {"binary_name": binary_name, "query": "hello"}

@@ -262,10 +262,12 @@ class GhidraTools:
     @handle_exceptions
     def search_code(self, query: str, limit: int = 10) -> list[CodeSearchResult]:
         """Searches the code in the binary for a given query."""
-        if not self.program_info.collection:
-            raise ValueError("Chromadb collection not initialized")
+        if not self.program_info.code_collection:
+            raise ValueError(
+                "Code indexing is not complete for this binary. Please try again later."
+            )
 
-        results = self.program_info.collection.query(query_texts=[query], n_results=limit)
+        results = self.program_info.code_collection.query(query_texts=[query], n_results=limit)
         search_results = []
         if results and results["documents"]:
             for i, doc in enumerate(results["documents"][0]):
@@ -285,7 +287,9 @@ class GhidraTools:
         """Searches for strings within a binary."""
 
         if not self.program_info.strings_collection:
-            raise ValueError("Chromadb string collection not initialized")
+            raise ValueError(
+                "String indexing is not complete for this binary. Please try again later."
+            )
 
         search_results = []
         results = self.program_info.strings_collection.get(

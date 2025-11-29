@@ -46,7 +46,7 @@ def server_params(test_binary):
     return StdioServerParameters(
         command="python",  # Executable
         # Run with test binary
-        args=["-m", "pyghidra_mcp", test_binary],
+        args=["-m", "pyghidra_mcp", "--no-threaded", test_binary],  # no-thread for search_code
         # Optional environment variables
         env={"GHIDRA_INSTALL_DIR": "/ghidra"},
     )

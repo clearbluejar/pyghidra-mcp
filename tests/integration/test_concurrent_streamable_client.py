@@ -31,7 +31,15 @@ base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 def streamable_server(test_binary):
     """Fixture to start the pyghidra-mcp server in a separate process."""
     proc = subprocess.Popen(
-        ["python", "-m", "pyghidra_mcp", "--transport", "streamable-http", test_binary],
+        [
+            "python",
+            "-m",
+            "pyghidra_mcp",
+            "--wait-for-analysis",
+            "--transport",
+            "streamable-http",
+            test_binary,
+        ],
         env={**os.environ, "GHIDRA_INSTALL_DIR": "/ghidra"},
     )
 
@@ -48,6 +56,40 @@ def streamable_server(test_binary):
             raise RuntimeError("Server did not start in time")
 
     asyncio.run(wait_for_server())
+
+    time.sleep(2)
+
+    async def wait_for_collections(timeout: int = 120) -> None:
+        """
+        Repeatedly call `list_project_program_info` until all programs have both
+        collections populated, or until *timeout* seconds elapse.
+        """
+        deadline = time.time() + timeout
+
+        # Open a single persistent connection - re-using it keeps the overhead low.
+        async with streamablehttp_client(f"{base_url}/mcp") as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+
+                while True:
+                    tool_resp = await session.call_tool("list_project_program_info", {})
+                    program_infos_result = json.loads(tool_resp.content[0].text)
+                    program_infos = ProgramInfos(**program_infos_result)
+
+                    has_missing = any(
+                        pi.code_collection is None or pi.strings_collection is None
+                        for pi in program_infos.programs
+                    )
+
+                    if not has_missing:  # All collections are present - success!
+                        return
+
+                    if time.time() > deadline:  # pragma: no cover
+                        raise RuntimeError(f"Collections still missing after {timeout}s: ")
+
+                    await asyncio.sleep(1)  # Wait a bit before the next call
+
+    asyncio.run(wait_for_collections())
 
     time.sleep(2)
 

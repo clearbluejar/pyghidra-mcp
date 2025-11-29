@@ -1,63 +1,59 @@
 import json
-import os
-import tempfile
 
 import pytest
-from mcp import ClientSession, StdioServerParameters
+from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
 from pyghidra_mcp.context import PyGhidraContext
 
+# # Create a simple test binary with multiple functions
+# def create_test_binary_with_functions():
+#     """Create a test binary with multiple functions for testing."""
+#     # Create a temporary file
+#     with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
+#         f.write("""
+# #include <stdio.h>
 
-# Create a simple test binary with multiple functions
-def create_test_binary_with_functions():
-    """Create a test binary with multiple functions for testing."""
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
-        f.write("""
-#include <stdio.h>
+# void function_one() {
+#     printf("Function One\\n");
+# }
 
-void function_one() {
-    printf("Function One\\n");
-}
+# void function_two() {
+#     printf("Function Two\\n");
+# }
 
-void function_two() {
-    printf("Function Two\\n");
-}
+# int main() {
+#     function_one();
+#     function_two();
+#     return 0;
+# }
+# """)
+#         c_file = f.name
 
-int main() {
-    function_one();
-    function_two();
-    return 0;
-}
-""")
-        c_file = f.name
+#     # Compile to binary
+#     bin_file = c_file.replace(".c", "")
+#     os.system(f"gcc -o {bin_file} {c_file}")
 
-    # Compile to binary
-    bin_file = c_file.replace(".c", "")
-    os.system(f"gcc -o {bin_file} {c_file}")
-
-    return bin_file
+#     return bin_file
 
 
-# Create server parameters for stdio connection with a test binary
-def get_server_params():
-    """Get server parameters with a test binary."""
-    # Create a test binary
-    bin_file = create_test_binary_with_functions()
+# # Create server parameters for stdio connection with a test binary
+# def get_server_params():
+#     """Get server parameters with a test binary."""
+#     # Create a test binary
+#     bin_file = create_test_binary_with_functions()
 
-    return StdioServerParameters(
-        command="python",  # Executable
-        args=["-m", "pyghidra_mcp", bin_file],  # Run with test binary
-        # Optional environment variables,  # Optional environment variables
-        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
-    )
+#     return StdioServerParameters(
+#         command="python",  # Executable
+#         args=["-m", "pyghidra_mcp", bin_file],  # Run with test binary
+#         # Optional environment variables,  # Optional environment variables
+#         env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+#     )
 
 
 @pytest.mark.asyncio
-async def test_search_functions_by_name_tool():
+async def test_search_functions_by_name_tool(server_params):
     """Test the search_functions_by_name tool."""
-    server_params = get_server_params()
 
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -99,13 +95,13 @@ async def test_search_functions_by_name_tool():
                 assert e is not None
 
 
-def test_create_test_binary_with_functions():
-    """Test that we can create a test binary with multiple functions."""
-    bin_file = create_test_binary_with_functions()
+# def test_create_test_binary_with_functions():
+#     """Test that we can create a test binary with multiple functions."""
+#     bin_file = create_test_binary_with_functions()
 
-    # Check that the file exists
-    assert os.path.exists(bin_file)
+#     # Check that the file exists
+#     assert os.path.exists(bin_file)
 
-    # Clean up
-    os.unlink(bin_file + ".c")
-    os.unlink(bin_file)
+#     # Clean up
+#     os.unlink(bin_file + ".c")
+#     os.unlink(bin_file)
