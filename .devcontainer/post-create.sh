@@ -1,6 +1,6 @@
 # Create local venv
-python3 -m venv .env
-source .env/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 
 # upgrade pip
 pip install --upgrade pip
