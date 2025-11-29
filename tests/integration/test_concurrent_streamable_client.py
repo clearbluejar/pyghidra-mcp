@@ -77,7 +77,7 @@ def streamable_server(test_binary):
                     program_infos = ProgramInfos(**program_infos_result)
 
                     has_missing = any(
-                        pi.code_collection is None or pi.strings_collection is None
+                        pi.code_collection is False or pi.strings_collection is False
                         for pi in program_infos.programs
                     )
 
