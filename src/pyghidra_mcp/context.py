@@ -3,7 +3,6 @@ import hashlib
 import json
 import logging
 import multiprocessing
-import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,16 +38,13 @@ class ProgramInfo:
     ghidra_analysis_complete: bool
     file_path: Path | None = None
     load_time: float | None = None
-    collection: chromadb.Collection | None = None
+    code_collection: chromadb.Collection | None = None
     strings_collection: chromadb.Collection | None = None
 
     @property
     def analysis_complete(self) -> bool:
-        return (
-            self.ghidra_analysis_complete
-            and self.collection is not None
-            and self.strings_collection is not None
-        )
+        """Check if Ghidra analysis is complete."""
+        return self.ghidra_analysis_complete
 
 
 class PyGhidraContext:
@@ -67,7 +63,8 @@ class PyGhidraContext:
         program_options: dict | None = None,
         gzfs_path: str | Path | None = None,
         threaded: bool = True,
-        max_workers: int = multiprocessing.cpu_count(),
+        max_workers: int | None = None,
+        wait_for_analysis: bool = False,
     ):
         """
         Initializes a new Ghidra project context.
@@ -83,6 +80,7 @@ class PyGhidraContext:
             gzfs_path: Location to store GZFs of analyzed binaries.
             threaded: Use threading during analysis.
             max_workers: Number of workers for threaded analysis.
+            wait_for_analysis: Wait for initial project analysis to complete.
         """
         from ghidra.base.project import GhidraProject
 
@@ -108,10 +106,21 @@ class PyGhidraContext:
             self.gzfs_path.mkdir(exist_ok=True, parents=True)
 
         self.threaded = threaded
-        self.max_workers = max_workers
+        cpu_count = multiprocessing.cpu_count() or 4
+        self.max_workers = max_workers if max_workers else cpu_count
+
         if not self.threaded:
             logger.warn("--no-threaded flag forcing max_workers to 1")
             self.max_workers = 1
+        self.executor = (
+            concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
+            if self.threaded
+            else None
+        )
+        self.import_executor = (
+            concurrent.futures.ThreadPoolExecutor(max_workers=1) if self.threaded else None
+        )
+        self.wait_for_analysis = wait_for_analysis
 
     def close(self, save: bool = True):
         """
@@ -120,6 +129,12 @@ class PyGhidraContext:
         for _program_name, program_info in self.programs.items():
             program = program_info.program
             self.project.close(program)
+
+        if self.executor:
+            self.executor.shutdown(wait=True)
+
+        if self.import_executor:
+            self.import_executor.shutdown(wait=True)
 
         self.project.close()
         logger.info(f"Project {self.project_name} closed.")
@@ -194,19 +209,17 @@ class PyGhidraContext:
 
         logger.info(f"Program {program_name} is ready for use.")
 
-    def import_binaries(self, binary_paths: list[str | Path], threaded: bool = False):
+    def import_binaries(self, binary_paths: list[str | Path]):
         """
         Imports a list of binaries into the project.
-
+        Cannot be threaded, needs to complete before calling analyze_project
+        Ghidra does not directly support multithreaded importing into the same project.
         Args:
             binary_paths: A list of paths to the binary files.
             threaded: If True, imports each binary in a background thread.
         """
         for bin_path in binary_paths:
-            if threaded:
-                self.import_binary_backgrounded(bin_path)
-            else:
-                self.import_binary(bin_path)
+            self.import_binary(bin_path)
 
     def import_binary_backgrounded(self, binary_path: str | Path):
         """
@@ -219,7 +232,10 @@ class PyGhidraContext:
         if not Path(binary_path).exists():
             raise FileNotFoundError(f"The file {binary_path} cannot be found")
 
-        threading.Thread(target=self.import_binary, args=(binary_path, True)).start()
+        if self.import_executor:
+            self.import_executor.submit(self.import_binary, binary_path, True)
+        else:
+            self.import_binary(binary_path, True)
 
     def get_program_info(self, binary_name: str) -> "ProgramInfo":
         """Get program info or raise ValueError if not found."""
@@ -236,8 +252,8 @@ class PyGhidraContext:
                         "message": f"Analysis incomplete for binary '{binary_name}'.",
                         "binary_name": binary_name,
                         "ghidra_analysis_complete": program_info.ghidra_analysis_complete,
-                        "code_collection": program_info.collection,
-                        "strings_collection": program_info.strings_collection,
+                        "code_collection": program_info.code_collection is not None,
+                        "strings_collection": program_info.strings_collection is not None,
                         "suggestion": "Wait and try tool call again.",
                     }
                 )
@@ -260,7 +276,7 @@ class PyGhidraContext:
             ghidra_analysis_complete=False,
             file_path=metadata["Executable Location"],
             load_time=time.time(),
-            collection=None,
+            code_collection=None,
             strings_collection=None,
         )
 
@@ -295,7 +311,7 @@ class PyGhidraContext:
         try:
             collection = self.chroma_client.get_collection(name=program_info.name)
             logger.info(f"Collection '{program_info.name}' exists; skipping code ingest.")
-            program_info.collection = collection
+            program_info.code_collection = collection
         except Exception:
             logger.info(f"Creating new code collection '{program_info.name}'")
             tools = GhidraTools(program_info)
@@ -332,7 +348,7 @@ class PyGhidraContext:
                 logger.error(f"Failed add decompiles to collection: {e}")
 
             logger.info(f"Code analysis complete for collection '{program_info.name}'")
-            program_info.collection = collection
+            program_info.code_collection = collection
 
     def _init_chroma_strings_collection_for_program(self, program_info: ProgramInfo):
         """
@@ -377,13 +393,51 @@ class PyGhidraContext:
     def _init_all_chroma_collections(self):
         """
         Initializes Chroma collections for all programs in the project.
+        If an executor is available, tasks are submitted asynchronously.
+        Otherwise, initialization runs in the main thread.
         """
-        logger.info("Initializing all Chroma DB collections for the project...")
-        for program_info in self.programs.values():
-            self._init_chroma_collections_for_program(program_info)
-        logger.info("All Chroma DB collections initialized.")
+        programs = list(self.programs.values())
+        mode = "background" if self.executor else "main thread"
+        logger.info("Initializing Chroma DB collections in %s...", mode)
+
+        # ensure analysis complete before init
+        assert all(prog.analysis_complete for prog in programs)
+
+        if self.executor:
+            # executor.map submits all tasks at once, returns an iterator of futures
+            self.executor.map(self._init_chroma_collections_for_program, programs)
+        else:
+            for program_info in programs:
+                self._init_chroma_collections_for_program(program_info)
 
     def analyze_project(
+        self,
+        require_symbols: bool = True,
+        force_analysis: bool = False,
+        verbose_analysis: bool = False,
+    ) -> concurrent.futures.Future | None:
+        if self.executor:
+            future = self.executor.submit(
+                self._analyze_project,
+                require_symbols,
+                force_analysis,
+                verbose_analysis,
+            )
+            if self.wait_for_analysis:
+                logger.info("Waiting for analysis to complete...")
+                try:
+                    future.result()
+                    logger.info("Analysis complete.")
+                except Exception as e:
+                    logger.error(f"Analysis completed with an exception: {e}")
+                return None
+            return future
+        else:
+            # No executor: just run synchronously
+            self._analyze_project(require_symbols, force_analysis, verbose_analysis)
+            return None
+
+    def _analyze_project(
         self,
         require_symbols: bool = True,
         force_analysis: bool = False,
@@ -397,35 +451,29 @@ class PyGhidraContext:
         )
 
         domain_files = [
-            domainFile
-            for domainFile in self.project.getRootFolder().getFiles()
-            if domainFile.getContentType() == "Program"
+            df for df in self.project.getRootFolder().getFiles() if df.getContentType() == "Program"
         ]
 
         prog_count = len(domain_files)
         completed_count = 0
 
-        if self.threaded and self.max_workers > 1:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                futures = {
-                    executor.submit(
-                        self.analyze_program,
-                        domainFile,
-                        require_symbols,
-                        force_analysis,
-                        verbose_analysis,
-                    )
-                    for domainFile in domain_files
-                }
+        if self.executor:
+            futures = {
+                self.executor.submit(
+                    self.analyze_program,
+                    domainFile,
+                    require_symbols,
+                    force_analysis,
+                    verbose_analysis,
+                )
+                for domainFile in domain_files
+            }
 
-                for future in concurrent.futures.as_completed(futures):
-                    try:
-                        result = future.result()
-                        logger.info(f"Analysis complete for {result.getName()}")
-                        completed_count += 1
-                        logger.info(f"Completed {completed_count}/{prog_count} programs")
-                    except Exception as exc:
-                        logger.error(f"Program analysis generated an exception: {exc}")
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                logger.info(f"Analysis complete for {result.getName()}")
+                completed_count += 1
+                logger.info(f"Completed {completed_count}/{prog_count} programs")
         else:
             for domain_file in domain_files:
                 self.analyze_program(domain_file, require_symbols, force_analysis, verbose_analysis)
@@ -433,7 +481,9 @@ class PyGhidraContext:
                 logger.info(f"Completed {completed_count}/{prog_count} programs")
 
         logger.info("All programs analyzed.")
-        self._init_all_chroma_collections()
+        # The chroma collections need to be initialized after analysis is complete
+        # At this point, threaded or not, all analysis is done
+        self._init_all_chroma_collections()  # DO NOT MOVE
 
     def analyze_program(  # noqa C901
         self,

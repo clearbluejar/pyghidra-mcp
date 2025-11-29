@@ -1,5 +1,6 @@
 # Server
 # ---------------------------------------------------------------------------------
+import json
 import logging
 import sys
 from collections.abc import AsyncIterator
@@ -212,7 +213,8 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
                     load_time=pi.load_time,
                     analysis_complete=pi.analysis_complete,
                     metadata=pi.metadata,
-                    collection=None,
+                    code_collection=pi.code_collection is not None,
+                    strings_collection=pi.strings_collection is not None,
                 )
             )
         return ProgramInfos(programs=program_infos)
@@ -405,7 +407,19 @@ def import_binary(binary_path: str, ctx: Context) -> str:
 
 
 def init_pyghidra_context(
-    mcp: FastMCP, input_paths: list[Path], project_name: str, project_directory: str
+    mcp: FastMCP,
+    input_paths: list[Path],
+    project_name: str,
+    project_directory: str,
+    force_analysis: bool,
+    verbose_analysis: bool,
+    no_symbols: bool,
+    gdts: list[str],
+    program_options_path: str | None,
+    gzfs_path: str | None,
+    threaded: bool,
+    max_workers: int,
+    wait_for_analysis: bool,
 ) -> FastMCP:
     bin_paths: list[str | Path] = [Path(p) for p in input_paths]
 
@@ -413,13 +427,30 @@ def init_pyghidra_context(
     logger.info(f"Project: {project_name}")
     logger.info(f"Project: Location {project_directory}")
 
+    program_options: dict | None = None
+    if program_options_path:
+        with open(program_options_path) as f:
+            program_options = json.load(f)
+
     # init pyghidra
     pyghidra.start(False)  # setting Verbose output
 
     # init PyGhidraContext / import + analyze binaries
     logger.info("Server initializing...")
-    pyghidra_context = PyGhidraContext(project_name, project_directory)
-    logger.info(f"Importing binaries: {project_directory}")
+    pyghidra_context = PyGhidraContext(
+        project_name=project_name,
+        project_path=project_directory,
+        force_analysis=force_analysis,
+        verbose_analysis=verbose_analysis,
+        no_symbols=no_symbols,
+        gdts=gdts,
+        program_options=program_options,
+        gzfs_path=gzfs_path,
+        threaded=threaded,
+        max_workers=max_workers,
+        wait_for_analysis=wait_for_analysis,
+    )
+    logger.info(f"Importing binaries to {project_directory}")
     pyghidra_context.import_binaries(bin_paths)
     logger.info(f"Analyzing project: {pyghidra_context.project}")
     pyghidra_context.analyze_project()
@@ -447,10 +478,10 @@ def init_pyghidra_context(
 @click.option(
     "-t",
     "--transport",
-    type=click.Choice(["stdio", "streamable-http", "sse"]),
+    type=click.Choice(["stdio", "streamable-http", "sse", "http"], case_sensitive=False),
     default="stdio",
     envvar="MCP_TRANSPORT",
-    help="Transport protocol to use: stdio, streamable-http, or sse (legacy)",
+    help="Transport protocol to use: stdio, streamable-http (aka http), or sse (legacy)",
 )
 @click.option(
     "--project-path",
@@ -474,8 +505,71 @@ def init_pyghidra_context(
     envvar="MCP_HOST",
     help="Host to listen on for HTTP-based transports (streamable-http, sse).",
 )
+@click.option(
+    "--threaded/--no-threaded",
+    default=True,
+    show_default=True,
+    help="Allow threaded analysis. Disable for debug.",
+)
+@click.option(
+    "--force-analysis/--no-force-analysis",
+    default=False,
+    help="Force a new binary analysis each run.",
+)
+@click.option(
+    "--verbose-analysis/--no-verbose-analysis",
+    default=False,
+    help="Verbose logging for analysis step.",
+)
+@click.option(
+    "--no-symbols/--with-symbols",
+    default=False,
+    help="Turn off symbols for analysis.",
+)
+@click.option(
+    "--gdt",
+    type=click.Path(exists=True),
+    multiple=True,
+    help="Path to a GDT file for analysis. Can be specified multiple times.",
+)
+@click.option(
+    "--program-options",
+    type=click.Path(exists=True),
+    help="Path to a JSON file containing program options (custom analyzer settings).",
+)
+@click.option(
+    "--gzfs-path",
+    type=click.Path(),
+    help="Location to store GZFs of analyzed binaries.",
+)
+@click.option(
+    "--max-workers",
+    type=int,
+    default=0,  # 0 means multiprocessing.cpu_count()
+    help="Number of workers for threaded analysis. Defaults to CPU count.",
+)
+@click.option(
+    "--wait-for-analysis/--no-wait-for-analysis",
+    default=False,
+    help="Wait for initial project analysis to complete before starting the server.",
+)
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
-def main(transport: str, input_paths: list[Path], project_path: Path, port: int, host: str) -> None:
+def main(
+    transport: str,
+    input_paths: list[Path],
+    project_path: Path,
+    port: int,
+    host: str,
+    threaded: bool,
+    force_analysis: bool,
+    verbose_analysis: bool,
+    no_symbols: bool,
+    gdt: tuple[str, ...],
+    program_options: str | None,
+    gzfs_path: str | None,
+    max_workers: int,
+    wait_for_analysis: bool,
+) -> None:
     """PyGhidra Command-Line MCP server
 
     - input_paths: Path to one or more binaries to import, analyze, and expose with pyghidra-mcp\n
@@ -486,16 +580,29 @@ def main(transport: str, input_paths: list[Path], project_path: Path, port: int,
     """
     project_name = project_path.stem
     project_directory = str(project_path.parent)
-
-    init_pyghidra_context(mcp, input_paths, project_name, project_directory)
-
     mcp.settings.port = port
     mcp.settings.host = host
+
+    init_pyghidra_context(
+        mcp=mcp,
+        input_paths=input_paths,
+        project_name=project_name,
+        project_directory=project_directory,
+        force_analysis=force_analysis,
+        verbose_analysis=verbose_analysis,
+        no_symbols=no_symbols,
+        gdts=list(gdt),
+        program_options_path=program_options,
+        gzfs_path=gzfs_path,
+        threaded=threaded,
+        max_workers=max_workers,
+        wait_for_analysis=wait_for_analysis,
+    )
 
     try:
         if transport == "stdio":
             mcp.run(transport="stdio")
-        elif transport == "streamable-http":
+        elif transport in ["streamable-http", "http"]:
             mcp.run(transport="streamable-http")
         elif transport == "sse":
             mcp.run(transport="sse")

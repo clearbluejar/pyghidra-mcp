@@ -22,7 +22,7 @@ def sse_server():
     binary_name = "/bin/ls"
     # Start the SSE server
     proc = subprocess.Popen(
-        ["python", "-m", "pyghidra_mcp", "--transport", "sse", binary_name],
+        ["python", "-m", "pyghidra_mcp", "--wait-for-analysis", "--transport", "sse", binary_name],
         env={**os.environ, "GHIDRA_INSTALL_DIR": "/ghidra"},
         stderr=subprocess.PIPE,
         stdout=subprocess.PIPE,

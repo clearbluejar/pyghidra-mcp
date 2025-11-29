@@ -86,7 +86,7 @@ def server_params_no_input():
     return StdioServerParameters(
         command="python",  # Executable
         # Run with test binary
-        args=["-m", "pyghidra_mcp"],
+        args=["-m", "pyghidra_mcp", "--wait-for-analysis"],
         # Optional environment variables
         env={"GHIDRA_INSTALL_DIR": "/ghidra"},
     )
@@ -98,7 +98,19 @@ def server_params(test_binary):
     return StdioServerParameters(
         command="python",  # Executable
         # Run with test binary
-        args=["-m", "pyghidra_mcp", test_binary],
+        args=["-m", "pyghidra_mcp", "--wait-for-analysis", test_binary],
+        # Optional environment variables
+        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+    )
+
+
+@pytest.fixture(scope="module")
+def server_params_no_thread(test_binary):
+    """Get server parameters with a test binary."""
+    return StdioServerParameters(
+        command="python",  # Executable
+        # Run with test binary
+        args=["-m", "pyghidra_mcp", "--no-threaded", test_binary],  # no-thread for chromadb_testing
         # Optional environment variables
         env={"GHIDRA_INSTALL_DIR": "/ghidra"},
     )
@@ -110,7 +122,7 @@ def server_params_shared_object(test_shared_object):
     return StdioServerParameters(
         command="python",  # Executable
         # Run with test binary
-        args=["-m", "pyghidra_mcp", test_shared_object],
+        args=["-m", "pyghidra_mcp", "--wait-for-analysis", test_shared_object],
         # Optional environment variables
         env={"GHIDRA_INSTALL_DIR": "/ghidra"},
     )

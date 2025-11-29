@@ -1,5 +1,3 @@
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 
@@ -53,7 +51,10 @@ class ProgramInfo(BaseModel):
         ..., description="Indicates if Ghidra's analysis of the program has completed."
     )
     metadata: dict = Field(..., description="A dictionary of metadata associated with the program.")
-    collection: Any | None = Field(None, description="The chromadb collection for the program.")
+    code_collection: bool = Field(..., description="True if the chromadb code collection is ready")
+    strings_collection: bool = Field(
+        ..., description="True if the chromadb strings collection is ready"
+    )
 
 
 class ProgramInfos(BaseModel):

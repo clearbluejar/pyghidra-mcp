@@ -1,59 +1,11 @@
 import json
-import os
-import tempfile
 
 import pytest
-from mcp import ClientSession, StdioServerParameters
+from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import CrossReferenceInfos
-
-base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
-
-
-@pytest.fixture(scope="module")
-def test_binary():
-    """
-    Create a simple binary for testing.
-    """
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
-        f.write(
-            """
-#include <stdio.h>
-
-void function_one() {
-    printf("Function One");
-}
-
-int main() {
-    function_one();
-    return 0;
-}
-"""
-        )
-        c_file = f.name
-
-    bin_file = c_file.replace(".c", "")
-    cmd = f"gcc -o {bin_file} {c_file}"
-    ret = os.system(cmd)
-    if ret != 0:
-        raise RuntimeError(f"Compilation failed: {cmd}")
-
-    yield bin_file
-
-    os.unlink(c_file)
-    os.unlink(bin_file)
-
-
-@pytest.fixture(scope="module")
-def server_params(test_binary):
-    """Get server parameters with a test binary."""
-    return StdioServerParameters(
-        command="python",
-        args=["-m", "pyghidra_mcp", test_binary],
-        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
-    )
 
 
 @pytest.mark.asyncio
