@@ -15,7 +15,6 @@ from pyghidra_mcp.models import (
     CrossReferenceInfo,
     DecompiledFunction,
     ExportInfo,
-    FunctionInfo,
     ImportInfo,
     StringInfo,
     StringSearchResult,
@@ -115,26 +114,6 @@ class GhidraTools:
                 logger.debug(f"Could not get string value from data at {data.getAddress()}: {e}")
 
         return strings
-
-    @handle_exceptions
-    def search_functions_by_name(
-        self, query: str, offset: int = 0, limit: int = 100
-    ) -> list[FunctionInfo]:
-        """Searches for functions within a binary by name."""
-        from ghidra.program.model.listing import Function
-
-        if not query:
-            raise ValueError("Query string is required")
-
-        funcs = []
-        fm = self.program.getFunctionManager()
-        functions = fm.getFunctions(True)
-        # Search for functions containing the query string
-        for func in functions:
-            func: Function
-            if query.lower() in func.name.lower():
-                funcs.append(FunctionInfo(name=func.name, entry_point=str(func.getEntryPoint())))
-        return funcs[offset : limit + offset]
 
     @handle_exceptions
     def search_symbols_by_name(
