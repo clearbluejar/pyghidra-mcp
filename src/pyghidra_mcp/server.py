@@ -22,7 +22,6 @@ from pyghidra_mcp.models import (
     CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
-    FunctionSearchResults,
     ImportInfos,
     ProgramBasicInfo,
     ProgramBasicInfos,
@@ -80,41 +79,14 @@ async def decompile_function(binary_name: str, name: str, ctx: Context) -> Decom
 
 
 @mcp.tool()
-def search_functions_by_name(
-    binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
-) -> FunctionSearchResults:
-    """Searches for functions within a binary by name.
-
-    Args:
-        binary_name: The name of the binary to search within.
-        query: The substring to search for in function names (case-insensitive).
-        offset: The number of results to skip.
-        limit: The maximum number of results to return.
-    """
-    try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        program_info = pyghidra_context.get_program_info(binary_name)
-        tools = GhidraTools(program_info)
-        functions = tools.search_functions_by_name(query, offset, limit)
-        return FunctionSearchResults(functions=functions)
-    except Exception as e:
-        if isinstance(e, ValueError):
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
-        raise McpError(
-            ErrorData(code=INTERNAL_ERROR, message=f"Error searching for functions: {e!s}")
-        ) from e
-
-
-@mcp.tool()
 def search_symbols_by_name(
     binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
 ) -> SymbolSearchResults:
-    """
-    Search for symbols by case insensitive substring within a specific binary
-    Symbols include Functions, Labels, Classes, Namespaces, Externals,
-    Dynamics, Libraries, Global Variables, Parameters, and Local Variables
+    """Searches for symbols, including functions, within a binary by name.
 
-    Return: A paginatedlist of matches.
+    This tool searches for symbols by a case-insensitive substring. Symbols include
+    Functions, Labels, Classes, Namespaces, Externals, Dynamics, Libraries,
+    Global Variables, Parameters, and Local Variables.
 
     Args:
         binary_name: The name of the binary to search within.

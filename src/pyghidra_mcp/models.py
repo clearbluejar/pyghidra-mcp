@@ -9,21 +9,6 @@ class DecompiledFunction(BaseModel):
     signature: str | None = Field(None, description="The signature of the function.")
 
 
-class FunctionInfo(BaseModel):
-    """Provides basic information about a function within a binary."""
-
-    name: str = Field(..., description="The name of the function.")
-    entry_point: str = Field(..., description="The entry point address of the function.")
-
-
-class FunctionSearchResults(BaseModel):
-    """A container for a list of functions found during a search."""
-
-    functions: list[FunctionInfo] = Field(
-        ..., description="A list of functions that match the search criteria."
-    )
-
-
 class ProgramBasicInfo(BaseModel):
     """Basic information about a program: name and analysis status"""
 
