@@ -17,7 +17,6 @@ from pyghidra_mcp.models import (
     CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
-    FunctionSearchResults,
     ImportInfos,
     ProgramInfos,
     StringSearchResults,
@@ -109,7 +108,7 @@ async def invoke_tool_concurrently(server_binary_path):
                     "decompile_function", {"binary_name": binary_name, "name": "main"}
                 ),
                 session.call_tool(
-                    "search_functions_by_name", {"binary_name": binary_name, "query": "function"}
+                    "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
                 ),
                 session.call_tool("list_project_binaries", {}),
                 session.call_tool("list_project_program_info", {}),
@@ -158,12 +157,12 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         assert "main" in decompiled_function.name
         assert "main" in decompiled_function.code
 
-        # Function search results
+        # Symbol search results (formerly function search results)
         search_results_result = json.loads(client_responses[1].content[0].text)
-        search_results = FunctionSearchResults(**search_results_result)
-        assert len(search_results.functions) >= 2
-        assert any("function_one" in func.name for func in search_results.functions)
-        assert any("function_two" in func.name for func in search_results.functions)
+        search_results = SymbolSearchResults(**search_results_result)
+        assert len(search_results.symbols) >= 2
+        assert any("function_one" in s.name for s in search_results.symbols)
+        assert any("function_two" in s.name for s in search_results.symbols)
 
         # List project binaries
         binaries_result = client_responses[2].content
