@@ -17,14 +17,13 @@ from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 from pyghidra_mcp.__init__ import __version__
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
+    BinaryMetadata,
     BytesReadResult,
     CodeSearchResults,
     CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
     ImportInfos,
-    ProgramBasicInfo,
-    ProgramBasicInfos,
     ProgramInfo,
     ProgramInfos,
     StringSearchResults,
@@ -142,25 +141,9 @@ def search_code(binary_name: str, query: str, ctx: Context, limit: int = 5) -> C
 
 
 @mcp.tool()
-def list_project_binaries(ctx: Context) -> ProgramBasicInfos:
-    """Lists the names and analysis status of all binaries currently loaded in
-    the Ghidra project."""
-    try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-        results = []
-        for name, pi in pyghidra_context.programs.items():
-            results.append(ProgramBasicInfo(name=name, analysis_complete=pi.analysis_complete))
-        return ProgramBasicInfos(programs=results)
-    except Exception as e:
-        raise McpError(
-            ErrorData(code=INTERNAL_ERROR, message=f"Error listing project binaries: {e!s}")
-        ) from e
-
-
-@mcp.tool()
-def list_project_program_info(ctx: Context) -> ProgramInfos:
+def list_project_binaries(ctx: Context) -> ProgramInfos:
     """
-    Retrieve metadata and analysis status for every program (binary) currently
+    Retrieve binary name, path, and analysis status for every program (binary) currently
     loaded in the active project.
 
     Returns a structured list of program entries, each containing:
@@ -168,7 +151,6 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
     - file_path: Absolute path to the binary file (if available)
     - load_time: Timestamp when the program was loaded into the project
     - analysis_complete: Boolean indicating if automated analysis has finished
-    - metadata: Additional attributes or annotations provided by the analysis toolchain
 
     Use this to inspect the full set of binaries in the project, monitor analysis
     progress, or drive follow up actions such as listing imports/exports or running
@@ -184,7 +166,7 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
                     file_path=str(pi.file_path) if pi.file_path else None,
                     load_time=pi.load_time,
                     analysis_complete=pi.analysis_complete,
-                    metadata=pi.metadata,
+                    metadata={},
                     code_collection=pi.code_collection is not None,
                     strings_collection=pi.strings_collection is not None,
                 )
@@ -196,6 +178,65 @@ def list_project_program_info(ctx: Context) -> ProgramInfos:
                 code=INTERNAL_ERROR,
                 message=f"Error listing project program info: {e!s}",
             )
+        ) from e
+
+
+@mcp.tool()
+def list_project_binary_metadata(binary_name: str, ctx: Context) -> BinaryMetadata:
+    """
+    Retrieve detailed metadata for a specific program (binary) in the active project.
+
+    This tool provides extensive information about a binary, including its architecture,
+    compiler, executable format, and various analysis metrics like the number of
+    functions and symbols. It is useful for gaining a deep understanding of a
+    binary's composition and properties. For example, you can use it to determine
+    the processor (`Processor`), endianness (`Endian`), or check if it's a
+    relocatable file (`Relocatable`). The results also include hashes like MD5/SHA256
+    and details from the executable format (e.g., ELF or PE).
+
+    Args:
+        binary_name: The name of the binary to retrieve metadata for.
+
+    Returns:
+        An object containing detailed metadata for the specified binary.
+    """
+    try:
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        program_info = pyghidra_context.get_program_info(binary_name)
+        metadata_dict = program_info.metadata
+        return BinaryMetadata.model_validate(metadata_dict)
+    except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
+        raise McpError(
+            ErrorData(
+                code=INTERNAL_ERROR,
+                message=f"Error retrieving binary metadata: {e!s}",
+            )
+        ) from e
+
+
+@mcp.tool()
+async def delete_project_binary(binary_name: str, ctx: Context) -> str:
+    """Deletes a binary (program) from the project.
+
+    Args:
+        binary_name: The name of the binary to delete.
+    """
+    try:
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        if pyghidra_context.delete_program(binary_name):
+            return f"Successfully deleted binary: {binary_name}"
+        else:
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message=f"Binary '{binary_name}' not found or could not be deleted.",
+                )
+            )
+    except Exception as e:
+        raise McpError(
+            ErrorData(code=INTERNAL_ERROR, message=f"Error deleting binary: {e!s}")
         ) from e
 
 
@@ -392,10 +433,10 @@ def init_pyghidra_context(
     threaded: bool,
     max_workers: int,
     wait_for_analysis: bool,
+    list_project_binaries: bool,
+    delete_project_binary: str | None,
 ) -> FastMCP:
     bin_paths: list[str | Path] = [Path(p) for p in input_paths]
-
-    logger.info(f"Analyzing {', '.join(map(str, bin_paths))}")
     logger.info(f"Project: {project_name}")
     logger.info(f"Project: Location {project_directory}")
 
@@ -422,12 +463,36 @@ def init_pyghidra_context(
         max_workers=max_workers,
         wait_for_analysis=wait_for_analysis,
     )
-    logger.info(f"Importing binaries to {project_directory}")
-    pyghidra_context.import_binaries(bin_paths)
+
+    if list_project_binaries:
+        binaries = pyghidra_context.list_binaries()
+        if binaries:
+            click.echo("Ghidra Project Binaries:")
+            for binary_name in binaries:
+                click.echo(f"- {binary_name}")
+        else:
+            click.echo("No binaries found in the project.")
+        sys.exit(0)
+
+    if delete_project_binary:
+        try:
+            if pyghidra_context.delete_program(delete_project_binary):
+                click.echo(f"Successfully deleted binary: {delete_project_binary}")
+            else:
+                click.echo(f"Failed to delete binary: {delete_project_binary}", err=True)
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+        sys.exit(0)
+
+    if len(bin_paths) > 0:
+        logger.info(f"Adding new bins: {', '.join(map(str, bin_paths))}")
+        logger.info(f"Importing binaries to {project_directory}")
+        pyghidra_context.import_binaries(bin_paths)
+
     logger.info(f"Analyzing project: {pyghidra_context.project}")
     pyghidra_context.analyze_project()
 
-    if len(pyghidra_context.list_binaries()) == 0 and len(input_paths) == 0:
+    if len(pyghidra_context.list_binaries()) == 0:
         logger.warning("No binaries were imported and none exist in the project.")
 
     mcp._pyghidra_context = pyghidra_context  # type: ignore
@@ -525,6 +590,16 @@ def init_pyghidra_context(
     default=False,
     help="Wait for initial project analysis to complete before starting the server.",
 )
+@click.option(
+    "--list-project-binaries",
+    is_flag=True,
+    help="List all ingested binaries in the project.",
+)
+@click.option(
+    "--delete-project-binary",
+    type=str,
+    help="Delete a specific binary (program) from the project by name.",
+)
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
 def main(
     transport: str,
@@ -541,6 +616,8 @@ def main(
     gzfs_path: str | None,
     max_workers: int,
     wait_for_analysis: bool,
+    list_project_binaries: bool,
+    delete_project_binary: str | None,
 ) -> None:
     """PyGhidra Command-Line MCP server
 
@@ -569,6 +646,8 @@ def main(
         threaded=threaded,
         max_workers=max_workers,
         wait_for_analysis=wait_for_analysis,
+        list_project_binaries=list_project_binaries,
+        delete_project_binary=delete_project_binary,
     )
 
     try:

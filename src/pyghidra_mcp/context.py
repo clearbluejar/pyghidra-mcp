@@ -87,7 +87,9 @@ class PyGhidraContext:
         self.project_name = project_name
         self.project_path = Path(project_path)
         self.project: GhidraProject = self._get_or_create_project()
+
         self.programs: dict[str, ProgramInfo] = {}
+        self._init_project_programs()
 
         project_dir = self.project_path / self.project_name
         chromadb_path = project_dir / "chromadb"
@@ -163,9 +165,52 @@ class PyGhidraContext:
             logger.info(f"Creating new project: {self.project_name}")
             return GhidraProject.createProject(project_dir_str, self.project_name, False)
 
+    def _init_project_programs(self):
+        """
+        Initializes the programs dictionary with existing programs in the project.
+        """
+        from ghidra.program.model.listing import Program
+
+        root_folder = self.project.getRootFolder()
+        for domain_file in root_folder.getFiles():
+            if domain_file.getContentType() == "Program":
+                program: Program = self.project.openProgram("/", domain_file.getName(), False)
+                program_info = self._init_program_info(program)
+                self.programs[program.name] = program_info
+
     def list_binaries(self) -> list[str]:
         """List all the binaries within the Ghidra project."""
         return [f.getName() for f in self.project.getRootFolder().getFiles()]
+
+    def delete_program(self, program_name: str) -> bool:
+        """
+        Deletes a program from the Ghidra project and saves the project.
+
+        Args:
+            program_name: The name of the program to delete.
+
+        Returns:
+            True if the program was deleted successfully, False otherwise.
+        """
+        program_info = self.programs.get(program_name)
+        if not program_info:
+            available_progs = list(self.programs.keys())
+            raise ValueError(
+                f"Binary {program_name} not found. Available binaries: {available_progs}"
+            )
+        else:
+            logger.info(f"Deleting program: {program_name}")
+            try:
+                program_to_delete: Program = program_info.program
+                program_to_delete_df: DomainFile = program_to_delete.getDomainFile()
+                self.project.close(program_to_delete)
+                program_to_delete_df.delete()
+                # clean up program reference
+                del self.programs[program_name]
+                return True
+            except Exception as e:
+                logger.error(f"Error deleting program '{program_name}': {e}")
+                return False
 
     def import_binary(self, binary_path: str | Path, analyze: bool = False) -> None:
         """
