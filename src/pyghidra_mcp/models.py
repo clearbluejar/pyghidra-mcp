@@ -155,3 +155,39 @@ class BytesReadResult(BaseModel):
     address: str = Field(..., description="The normalized address where bytes were read from.")
     size: int = Field(..., description="The actual number of bytes read.")
     data: str = Field(..., description="The raw bytes as a hexadecimal string.")
+
+
+class BinaryMetadata(BaseModel):
+    """Detailed metadata for a Ghidra program."""
+
+    program_name: str | None = Field(default=None, alias="Program Name")
+    language_id: str | None = Field(default=None, alias="Language ID")
+    compiler_id: str | None = Field(default=None, alias="Compiler ID")
+    processor: str | None = Field(default=None, alias="Processor")
+    endian: str | None = Field(default=None, alias="Endian")
+    address_size: int | None = Field(default=None, alias="Address Size")
+    minimum_address: str | None = Field(default=None, alias="Minimum Address")
+    maximum_address: str | None = Field(default=None, alias="Maximum Address")
+    num_bytes: int | None = Field(default=None, alias="# of Bytes")
+    num_memory_blocks: int | None = Field(default=None, alias="# of Memory Blocks")
+    num_instructions: int | None = Field(default=None, alias="# of Instructions")
+    num_defined_data: int | None = Field(default=None, alias="# of Defined Data")
+    num_functions: int | None = Field(default=None, alias="# of Functions")
+    num_symbols: int | None = Field(default=None, alias="# of Symbols")
+    num_data_types: int | None = Field(default=None, alias="# of Data Types")
+    num_data_type_categories: int | None = Field(default=None, alias="# of Data Type Categories")
+    analyzed: bool | None = Field(default=None, alias="Analyzed")
+    compiler: str | None = Field(default=None, alias="Compiler")
+    created_with_ghidra_version: str | None = Field(
+        default=None, alias="Created With Ghidra Version"
+    )
+    date_created: str | None = Field(default=None, alias="Date Created")
+    executable_format: str | None = Field(default=None, alias="Executable Format")
+    executable_location: str | None = Field(default=None, alias="Executable Location")
+    executable_md5: str | None = Field(default=None, alias="Executable MD5")
+    executable_sha256: str | None = Field(default=None, alias="Executable SHA256")
+    relocatable: bool | None = Field(default=None, alias="Relocatable")
+
+    class ConfigDict:
+        extra = "allow"
+        populate_by_name = True
