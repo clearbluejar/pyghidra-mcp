@@ -3,7 +3,7 @@
 {
 	"name": "ghidra-python-vscode-devcontainer-skeleton",
 	// image from https://github.com/clearbluejar/ghidra-python	
-	"image": "ghcr.io/clearbluejar/ghidra-python:11.4.2ghidra3.12python-bookworm",
+	"image": "ghcr.io/clearbluejar/ghidra-python:11.4.3ghidra3.13python-bookworm",
 	// Configure tool-specific properties.
 	"customizations": {
 		// Configure properties specific to VS Code.
