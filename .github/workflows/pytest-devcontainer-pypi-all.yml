@@ -20,6 +20,7 @@ jobs:
           "11.4.1ghidra3.11python-bookworm",
           "11.3ghidra3.10python-bookworm",
           # "11.3ghidra3.9python-bookworm",
+          "12.0ghidra3.13python-bookworm",
         ]
 
     steps:
@@ -42,10 +43,17 @@ jobs:
           env
           ls /usr/local/include/
           pip install --upgrade pip
-          python -m venv env
-          source env/bin/activate
-          # Install package from PyPI with dev extras
-          pip install pyghidra-mcp[dev]
+          python -m venv .venv
+          source .venv/bin/activate
+
+          # If Ghidra major version is 11, pin pyghidra==2.2.1 first
+          if [[ "$GHIDRA_VERSION" == 11.* ]]; then
+            echo "Detected Ghidra $GHIDRA_VERSION, pinning pyghidra==2.2.1..."
+            pip install "pyghidra==2.2.1"
+          fi
+
+          # Install package in editable mode with dev extras
+          pip install -e .[dev]
 
           # Run tests
           python -m pytest tests/unit/ --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
