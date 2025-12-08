@@ -1,14 +1,14 @@
 [project]
 name = "pyghidra-mcp"
-version = "0.1.11"
+version = "0.1.12"
 description = "Python Command-Line Ghidra MCP"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.2.1",
     "mcp[cli]>=1.9.4",
-    "pyghidra>=2.1.0",
-    "chromadb>=0.5.5",
+    "pyghidra==2.2.1",
+    "chromadb>=1.3.5",
 ]
 authors = [
     { name = "clearbluejar", email = "3752074+clearbluejar@users.noreply.github.com" },
@@ -42,7 +42,7 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=0.23.0",
-    "aiohttp>=3.9.5",
+    "aiohttp",
     "pytest-cov>=6.2.1",
     "ghidra-stubs>=11.3.2",
     "pytest-cov>=6.2.1",
@@ -60,7 +60,7 @@ dev = [
 dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=0.23.0",
-    "aiohttp>=3.9.5",
+    "aiohttp",
     "pytest-cov>=6.2.1",
     "ghidra-stubs>=11.3.2",
     "pytest-cov>=6.2.1",
