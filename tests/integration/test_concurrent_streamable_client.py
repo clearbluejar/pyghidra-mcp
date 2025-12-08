@@ -12,6 +12,7 @@ from mcp.client.streamable_http import streamablehttp_client
 
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
+    BinaryMetadata,
     BytesReadResult,
     CodeSearchResults,
     CrossReferenceInfos,
@@ -56,11 +57,11 @@ def streamable_server(test_binary):
 
     asyncio.run(wait_for_server())
 
-    time.sleep(2)
+    time.sleep(3)
 
-    async def wait_for_collections(timeout: int = 120) -> None:
+    async def wait_for_collections(test_binary, timeout: int = 15) -> None:
         """
-        Repeatedly call `list_project_program_info` until all programs have both
+        Repeatedly call `list_project_binaries` until all programs have both
         collections populated, or until *timeout* seconds elapse.
         """
         deadline = time.time() + timeout
@@ -71,16 +72,23 @@ def streamable_server(test_binary):
                 await session.initialize()
 
                 while True:
-                    tool_resp = await session.call_tool("list_project_program_info", {})
+                    tool_resp = await session.call_tool("list_project_binaries", {})
                     program_infos_result = json.loads(tool_resp.content[0].text)
                     program_infos = ProgramInfos(**program_infos_result)
+
+                    has_test_binary = any(
+                        pi.name == PyGhidraContext._gen_unique_bin_name(Path(test_binary))
+                        for pi in program_infos.programs
+                    )
 
                     has_missing = any(
                         pi.code_collection is False or pi.strings_collection is False
                         for pi in program_infos.programs
                     )
 
-                    if not has_missing:  # All collections are present - success!
+                    if (
+                        not has_missing and has_test_binary
+                    ):  # All collections are present - success!
                         return
 
                     if time.time() > deadline:  # pragma: no cover
@@ -88,7 +96,7 @@ def streamable_server(test_binary):
 
                     await asyncio.sleep(1)  # Wait a bit before the next call
 
-    asyncio.run(wait_for_collections())
+    asyncio.run(wait_for_collections(test_binary))
 
     time.sleep(2)
 
@@ -111,7 +119,7 @@ async def invoke_tool_concurrently(server_binary_path):
                     "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
                 ),
                 session.call_tool("list_project_binaries", {}),
-                session.call_tool("list_project_program_info", {}),
+                session.call_tool("list_project_binary_metadata", {"binary_name": binary_name}),
                 session.call_tool("list_exports", {"binary_name": binary_name}),
                 session.call_tool("list_imports", {"binary_name": binary_name}),
                 session.call_tool(
@@ -165,15 +173,24 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         assert any("function_two" in s.name for s in search_results.symbols)
 
         # List project binaries
-        binaries_result = client_responses[2].content
-        assert isinstance(binaries_result, list)
-        assert any([os.path.basename(streamable_server) in name.text for name in binaries_result])
-
-        # List project program info
-        program_infos_result = json.loads(client_responses[3].content[0].text)
+        program_infos_result = json.loads(client_responses[2].content[0].text)
         program_infos = ProgramInfos(**program_infos_result)
         assert len(program_infos.programs) >= 1
-        assert os.path.basename(streamable_server) in program_infos.programs[0].name
+        assert any(
+            os.path.basename(streamable_server) in program.name
+            for program in program_infos.programs
+        )
+
+        # List project binary metadata
+        bin_metadata_result = json.loads(client_responses[3].content[0].text)
+        metadata = BinaryMetadata(**bin_metadata_result)
+        assert isinstance(metadata, BinaryMetadata)
+        assert metadata.executable_location is not None
+        assert metadata.compiler is not None
+        assert metadata.processor is not None
+        assert metadata.endian is not None
+        assert metadata.address_size is not None
+        assert os.path.basename(streamable_server) in metadata.program_name
 
         # List exports
         export_infos_result = json.loads(client_responses[4].content[0].text)
@@ -218,3 +235,6 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         assert bytes_result.size == 4
         assert bytes_result.data == "7f454c46"  # ELF magic
         assert bytes_result.address == "00100000"
+
+        # Delete binary
+        # This test is omitted due to complexity in concurrent scenarios
