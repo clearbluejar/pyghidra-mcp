@@ -228,25 +228,23 @@ class PyGhidraContext:
         binary_path = Path(binary_path)
         program_name = PyGhidraContext._gen_unique_bin_name(binary_path)
 
-        root_folder = self.project.getRootFolder()
         program: Program
 
-        if root_folder.getFile(program_name):
+        if self.programs.get(program_name):
             logger.info(f"Opening existing program: {program_name}")
-            program = self.project.openProgram("/", program_name, False)
+            program = self.programs[program_name].program
+            program_info = self.programs[program_name]
         else:
             logger.info(f"Importing new program: {program_name}")
             program = self.project.importProgram(binary_path)
             program.name = program_name
             if program:
                 self.project.saveAs(program, "/", program_name, True)
+            program_info = self._init_program_info(program)
+            self.programs[program_name] = program_info
 
         if not program:
             raise ImportError(f"Failed to import binary: {binary_path}")
-
-        program_info = self._init_program_info(program)
-
-        self.programs[program_name] = program_info
 
         if analyze:
             self.analyze_program(program_info.program)
@@ -266,6 +264,17 @@ class PyGhidraContext:
         for bin_path in binary_paths:
             self.import_binary(bin_path)
 
+    def _import_callback(self, future: concurrent.futures.Future):
+        """
+        A callback function to handle results or exceptions from the import task.
+        """
+        try:
+            result = future.result()
+            logger.info(f"Background import task completed successfully. Result: {result}")
+        except Exception as e:
+            logger.error(f"FATAL ERROR during background binary import: {e}", exc_info=True)
+            raise e
+
     def import_binary_backgrounded(self, binary_path: str | Path):
         """
         Spawns a thread and imports a binary into the project.
@@ -278,7 +287,8 @@ class PyGhidraContext:
             raise FileNotFoundError(f"The file {binary_path} cannot be found")
 
         if self.import_executor:
-            self.import_executor.submit(self.import_binary, binary_path, True)
+            future = self.import_executor.submit(self.import_binary, binary_path, True)
+            future.add_done_callback(self._import_callback)
         else:
             self.import_binary(binary_path, True)
 
@@ -455,6 +465,15 @@ class PyGhidraContext:
             for program_info in programs:
                 self._init_chroma_collections_for_program(program_info)
 
+    # Callback function that runs when the future is done to catch any exceptions
+    def _analysis_done_callback(self, future: concurrent.futures.Future):
+        try:
+            future.result()
+            logging.info("Asynchronous analysis finished successfully.")
+        except Exception as e:
+            logging.error(f"Asynchronous analysis failed with exception: {e}")
+            raise e
+
     def analyze_project(
         self,
         require_symbols: bool = True,
@@ -468,6 +487,9 @@ class PyGhidraContext:
                 force_analysis,
                 verbose_analysis,
             )
+
+            future.add_done_callback(self._analysis_done_callback)
+
             if self.wait_for_analysis:
                 logger.info("Waiting for analysis to complete...")
                 try:
@@ -491,13 +513,12 @@ class PyGhidraContext:
         """
         Analyzes all files found within the Ghidra project
         """
-        logger.info(
-            f"Starting analysis for {len(self.project.getRootFolder().getFiles())} binaries"
-        )
 
         domain_files = [
             df for df in self.project.getRootFolder().getFiles() if df.getContentType() == "Program"
         ]
+
+        logger.info(f"Starting analysis for {len(domain_files)} binaries")
 
         prog_count = len(domain_files)
         completed_count = 0
@@ -565,65 +586,63 @@ class PyGhidraContext:
         if len(gdt_names) > 0:
             logger.debug(f"Using file gdts: {gdt_names}")
 
-        try:
-            if verbose_analysis or self.verbose_analysis:
-                monitor = ConsoleTaskMonitor()
-                flat_api = FlatProgramAPI(program, monitor)
-            else:
-                flat_api = FlatProgramAPI(program)
+        if verbose_analysis or self.verbose_analysis:
+            monitor = ConsoleTaskMonitor()
+            flat_api = FlatProgramAPI(program, monitor)
+        else:
+            flat_api = FlatProgramAPI(program)
 
-            if (
-                GhidraProgramUtilities.shouldAskToAnalyze(program)
-                or force_analysis
-                or self.force_analysis
-            ):
-                GhidraScriptUtil.acquireBundleHostReference()
+        if (
+            GhidraProgramUtilities.shouldAskToAnalyze(program)
+            or force_analysis
+            or self.force_analysis
+        ):
+            GhidraScriptUtil.acquireBundleHostReference()
 
-                if program and program.getFunctionManager().getFunctionCount() > 1000:
-                    # Force Decomp Param ID is not set
-                    if (
-                        self.program_options is not None
-                        and self.program_options.get("program_options", {})
-                        .get("Analyzers", {})
-                        .get("Decompiler Parameter ID")
-                        is None
-                    ):
-                        self.set_analysis_option(program, "Decompiler Parameter ID", True)
+            if program and program.getFunctionManager().getFunctionCount() > 1000:
+                # Force Decomp Param ID is not set
+                if (
+                    self.program_options is not None
+                    and self.program_options.get("program_options", {})
+                    .get("Analyzers", {})
+                    .get("Decompiler Parameter ID")
+                    is None
+                ):
+                    self.set_analysis_option(program, "Decompiler Parameter ID", True)
 
-                if self.program_options:
-                    analyzer_options = self.program_options.get("program_options", {}).get(
-                        "Analyzers", {}
-                    )
-                    for k, v in analyzer_options.items():
-                        logger.info(f"Setting prog option:{k} with value:{v}")
-                        self.set_analysis_option(program, k, v)
+            if self.program_options:
+                analyzer_options = self.program_options.get("program_options", {}).get(
+                    "Analyzers", {}
+                )
+                for k, v in analyzer_options.items():
+                    logger.info(f"Setting prog option:{k} with value:{v}")
+                    self.set_analysis_option(program, k, v)
 
-                if self.no_symbols:
-                    logger.warn(
-                        f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}"
-                    )
-                    self.set_analysis_option(program, "PDB Universal", False)
+            if self.no_symbols:
+                logger.warn(f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}")
+                self.set_analysis_option(program, "PDB Universal", False)
 
-                logger.info(f"Starting Ghidra analysis of {program}...")
-                try:
-                    flat_api.analyzeAll(program)
-                    if hasattr(GhidraProgramUtilities, "setAnalyzedFlag"):
-                        GhidraProgramUtilities.setAnalyzedFlag(program, True)
-                    elif hasattr(GhidraProgramUtilities, "markProgramAnalyzed"):
-                        GhidraProgramUtilities.markProgramAnalyzed(program)
-                    else:
-                        raise Exception("Missing set analyzed flag method!")
-                finally:
-                    GhidraScriptUtil.releaseBundleHostReference()
-                    self.project.save(program)
-            else:
-                logger.info(f"Analysis already complete.. skipping {program}!")
-        finally:
-            if self.gzfs_path is not None:
-                from java.io import File  # type: ignore
+            logger.info(f"Starting Ghidra analysis of {program}...")
+            try:
+                flat_api.analyzeAll(program)
+                if hasattr(GhidraProgramUtilities, "setAnalyzedFlag"):
+                    GhidraProgramUtilities.setAnalyzedFlag(program, True)
+                elif hasattr(GhidraProgramUtilities, "markProgramAnalyzed"):
+                    GhidraProgramUtilities.markProgramAnalyzed(program)
+                else:
+                    raise Exception("Missing set analyzed flag method!")
+            finally:
+                GhidraScriptUtil.releaseBundleHostReference()
+                self.project.save(program)
+        else:
+            logger.info(f"Analysis already complete.. skipping {program}!")
 
-                gzf_file = self.gzfs_path / f"{program.getDomainFile().getName()}.gzf"
-                self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
+        # Save program as gzfs
+        if self.gzfs_path is not None:
+            from java.io import File  # type: ignore
+
+            gzf_file = self.gzfs_path / f"{program.getDomainFile().getName()}.gzf"
+            self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
 
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
         self.programs[df_or_prog.name].ghidra_analysis_complete = True
