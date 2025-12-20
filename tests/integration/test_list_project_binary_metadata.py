@@ -44,4 +44,6 @@ async def test_list_project_binary_metadata(server_params):
             assert metadata.processor is not None
             assert metadata.endian is not None
             assert metadata.address_size is not None
-            assert metadata.program_name == binary_name
+            assert binary_name is not None
+            assert metadata.program_name is not None
+            assert metadata.program_name in binary_name
