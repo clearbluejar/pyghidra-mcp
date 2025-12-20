@@ -171,16 +171,27 @@ class PyGhidraContext:
         """
         from ghidra.program.model.listing import Program
 
-        root_folder = self.project.getRootFolder()
-        for domain_file in root_folder.getFiles():
-            if domain_file.getContentType() == "Program":
-                program: Program = self.project.openProgram("/", domain_file.getName(), False)
-                program_info = self._init_program_info(program)
-                self.programs[program.name] = program_info
+        all_binary_paths = self.list_binaries()
+        for binary_path_s in all_binary_paths:
+            binary_path = Path(binary_path_s)
+            program: Program = self.project.openProgram(
+                str(binary_path.parent), binary_path.name, False
+            )
+            program_info = self._init_program_info(program)
+            self.programs[binary_path_s] = program_info
 
     def list_binaries(self) -> list[str]:
         """List all the binaries within the Ghidra project."""
-        return [f.getName() for f in self.project.getRootFolder().getFiles()]
+
+        def list_folder_contents(folder) -> list[str]:
+            names: list[str] = []
+            for subfolder in folder.getFolders():
+                names.extend(list_folder_contents(subfolder))
+
+            names.extend([f.getPathname() for f in folder.getFiles()])
+            return names
+
+        return list_folder_contents(self.project.getRootFolder())
 
     def delete_program(self, program_name: str) -> bool:
         """
@@ -212,13 +223,16 @@ class PyGhidraContext:
                 logger.error(f"Error deleting program '{program_name}': {e}")
                 return False
 
-    def import_binary(self, binary_path: str | Path, analyze: bool = False) -> None:
+    def import_binary(
+        self, binary_path: str | Path, analyze: bool = False, relative_path: Path | None = None
+    ) -> None:
         """
         Imports a single binary into the project.
 
         Args:
             binary_path: Path to the binary file.
             analyze: Perform analysis on this binary. Useful if not importing in bulk.
+            relative_path: Relative path within the project hierarchy (e.g., Path("bin") or Path("lib")).
 
         Returns:
             None
@@ -226,27 +240,40 @@ class PyGhidraContext:
         from ghidra.program.model.listing import Program
 
         binary_path = Path(binary_path)
+        if binary_path.is_dir():
+            return self.import_binaries([binary_path])
+
         program_name = PyGhidraContext._gen_unique_bin_name(binary_path)
 
         root_folder = self.project.getRootFolder()
         program: Program
 
-        if root_folder.getFile(program_name):
-            logger.info(f"Opening existing program: {program_name}")
-            program = self.project.openProgram("/", program_name, False)
+        # Create folder hierarchy if relative_path is provided
+        if relative_path:
+            ghidra_folder = self._create_folder_hierarchy(root_folder, relative_path)
         else:
+            ghidra_folder = root_folder
+
+        # Check if program already exists at this location
+        try:
+            existing_file = ghidra_folder.getFile(program_name)
+            if existing_file:
+                logger.info(f"Opening existing program: {program_name}")
+                program = self.project.openProgram(ghidra_folder, program_name, False)
+            else:
+                raise FileNotFoundError("No existing file found")
+        except Exception:
             logger.info(f"Importing new program: {program_name}")
             program = self.project.importProgram(binary_path)
             program.name = program_name
             if program:
-                self.project.saveAs(program, "/", program_name, True)
+                self.project.saveAs(program, ghidra_folder.pathname, program_name, True)
 
         if not program:
             raise ImportError(f"Failed to import binary: {binary_path}")
 
         program_info = self._init_program_info(program)
-
-        self.programs[program_name] = program_info
+        self.programs[program.getDomainFile().pathname] = program_info
 
         if analyze:
             self.analyze_program(program_info.program)
@@ -254,17 +281,91 @@ class PyGhidraContext:
 
         logger.info(f"Program {program_name} is ready for use.")
 
+    @staticmethod
+    def _create_folder_hierarchy(root_folder, relative_path: Path):
+        """
+        Recursively creates folder hierarchy in Ghidra project.
+
+        Args:
+            root_folder: The root folder of the Ghidra project.
+            relative_path: The path hierarchy to create (e.g., Path("bin/subfolder")).
+
+        Returns:
+            The folder object at the end of the hierarchy.
+        """
+        current_folder = root_folder
+
+        # Split the path into parts and iterate through them
+        for part in relative_path.parts:
+            existing_folder = current_folder.getFolder(part)
+            if existing_folder:
+                current_folder = existing_folder
+                logger.debug(f"Using existing folder: {part}")
+            else:
+                current_folder = current_folder.createFolder(part)
+                logger.debug(f"Created folder: {part}")
+
+        return current_folder
+
     def import_binaries(self, binary_paths: list[str | Path]):
         """
         Imports a list of binaries into the project.
-        Cannot be threaded, needs to complete before calling analyze_project
-        Ghidra does not directly support multithreaded importing into the same project.
+        If an entry is a directory it will be walked recursively
+        and all regular files found will be imported, preserving directory structure.
+
+        Note: Ghidra does not directly support multithreaded importing into the same project.
         Args:
-            binary_paths: A list of paths to the binary files.
-            threaded: If True, imports each binary in a background thread.
+            binary_paths: A list of paths to the binary files or directories.
         """
-        for bin_path in binary_paths:
-            self.import_binary(bin_path)
+        resolved_paths: list[Path] = [Path(p) for p in binary_paths]
+
+        # Tuple of (full system path, relative path from provided path)
+        files_to_import: list[tuple[Path, Path | None]] = []
+        for p in resolved_paths:
+            if p.is_dir():
+                logger.info(f"Discovering files in directory: {p}")
+                for f in p.rglob("*"):
+                    if f.is_file() and self._is_binary_file(f):
+                        # Store the relative path (e.g., "bin" or "lib/subfolder")
+                        relative = f.relative_to(p).parent
+                        files_to_import.append((f, relative))
+            elif p.is_file() and self._is_binary_file(p):
+                files_to_import.append((p, None))
+
+        if not files_to_import:
+            logger.info("No files found to import from provided paths.")
+            return
+
+        logger.info(f"Importing {len(files_to_import)} binary files into project...")
+        for bin_path, relative_path in files_to_import:
+            try:
+                self.import_binary(bin_path, analyze=True, relative_path=relative_path)
+            except Exception as e:
+                logger.error(f"Failed to import {bin_path}: {e}")
+                # continue importing remaining files
+
+    @staticmethod
+    def _is_binary_file(path: Path) -> bool:
+        """
+        Quick header-based check for common binary formats.
+        Recognizes ELF (0x7f 'ELF') and PE ('MZ' DOS header) signatures.
+        Returns False on read errors or unknown signatures.
+        """
+        try:
+            with path.open("rb") as f:
+                header = f.read(4)
+                if not header:
+                    return False
+                # ELF: 0x7f 'ELF'
+                if header.startswith(b"\x7fELF"):
+                    return True
+                # PE executables typically start with 'MZ' (DOS stub)
+                if header.startswith(b"MZ"):
+                    return True
+                return False
+        except Exception as e:
+            logger.debug(f"Could not read file header for {path}: {e}")
+            return False
 
     def import_binary_backgrounded(self, binary_path: str | Path):
         """
@@ -286,10 +387,19 @@ class PyGhidraContext:
         """Get program info or raise ValueError if not found."""
         program_info = self.programs.get(binary_name)
         if not program_info:
+            # Exact program name not in the list
             available_progs = list(self.programs.keys())
-            raise ValueError(
-                f"Binary {binary_name} not found. Available binaries: {available_progs}"
-            )
+
+            # If the LLM gave us just the binary name, use that
+            available_prog_names = {
+                Path(prog).name: prog_info for prog, prog_info in self.programs.items()
+            }
+            program_info = available_prog_names.get(binary_name)
+
+            if not program_info:
+                raise ValueError(
+                    f"Binary {binary_name} not found. Available binaries: {available_progs}"
+                )
         if not program_info.analysis_complete:
             raise RuntimeError(
                 json.dumps(
@@ -538,18 +648,23 @@ class PyGhidraContext:
         verbose_analysis: bool = False,
     ):
         from ghidra.app.script import GhidraScriptUtil
+        from ghidra.framework.model import DomainFile
         from ghidra.program.flatapi import FlatProgramAPI
         from ghidra.program.model.listing import Program
         from ghidra.program.util import GhidraProgramUtilities
         from ghidra.util.task import ConsoleTaskMonitor
 
-        if self.programs.get(df_or_prog.name):
+        df = df_or_prog
+        if not isinstance(df_or_prog, DomainFile):
+            df = df_or_prog.getDomainFile()
+
+        if self.programs.get(df.pathname):
             # program already opened and initialized
-            program = self.programs[df_or_prog.name].program
+            program = self.programs[df.pathname].program
         else:
             # open program from Ghidra Project
-            program = self.project.openProgram("/", df_or_prog.getName(), False)
-            self.programs[df_or_prog.name] = self._init_program_info(program)
+            program = self.project.openProgram(df.getParent().pathname, df_or_prog.getName(), False)
+            self.programs[df.pathname] = self._init_program_info(program)
 
         assert isinstance(program, Program)
 
@@ -622,11 +737,12 @@ class PyGhidraContext:
             if self.gzfs_path is not None:
                 from java.io import File  # type: ignore
 
-                gzf_file = self.gzfs_path / f"{program.getDomainFile().getName()}.gzf"
+                pathname = df.pathname.replace("/", "_")
+                gzf_file = self.gzfs_path / f"{pathname}.gzf"
                 self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
 
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
-        self.programs[df_or_prog.name].ghidra_analysis_complete = True
+        self.programs[df.pathname].ghidra_analysis_complete = True
         return df_or_prog
 
     def set_analysis_option(  # noqa: C901
