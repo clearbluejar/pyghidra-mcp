@@ -18,7 +18,7 @@ async def test_decompile_function_tool(server_params, test_binary):
             try:
                 binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
                 results = await session.call_tool(
-                    "decompile_function", {"binary_name": binary_name, "name": "main"}
+                    "decompile_function", {"binary_name": binary_name, "name_or_address": "main"}
                 )
 
                 # Check that we got results

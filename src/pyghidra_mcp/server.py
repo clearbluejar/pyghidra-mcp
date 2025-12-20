@@ -9,6 +9,7 @@ from pathlib import Path
 
 import click
 import pyghidra
+from click_option_group import optgroup
 from mcp.server import Server
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.shared.exceptions import McpError
@@ -19,6 +20,9 @@ from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
     BinaryMetadata,
     BytesReadResult,
+    CallGraphDirection,
+    CallGraphDisplayType,
+    CallGraphResult,
     CodeSearchResults,
     CrossReferenceInfos,
     DecompiledFunction,
@@ -57,18 +61,20 @@ mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
 # MCP Tools
 # ---------------------------------------------------------------------------------
 @mcp.tool()
-async def decompile_function(binary_name: str, name: str, ctx: Context) -> DecompiledFunction:
+async def decompile_function(
+    binary_name: str, name_or_address: str, ctx: Context
+) -> DecompiledFunction:
     """Decompiles a function in a specified binary and returns its pseudo-C code.
 
     Args:
         binary_name: The name of the binary containing the function.
-        name: The name of the function to decompile.
+        name_or_address: The name or address of the function to decompile.
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
-        return tools.decompile_function(name)
+        return tools.decompile_function_by_name_or_addr(name_or_address)
     except Exception as e:
         if isinstance(e, ValueError):
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
@@ -396,6 +402,56 @@ def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> 
 
 
 @mcp.tool()
+def gen_callgraph(
+    binary_name: str,
+    function_name: str,
+    ctx: Context,
+    direction: CallGraphDirection = CallGraphDirection.CALLING,
+    display_type: CallGraphDisplayType = CallGraphDisplayType.FLOW,
+    condense_threshold: int = 50,
+    top_layers: int = 3,
+    bottom_layers: int = 3,
+) -> CallGraphResult:
+    """Generates a mermaidjs function call graph for a specified function.
+
+    Typically the 'calling' callgraph is most useful.
+    The resulting graph string is mermaidjs format. This output is critical for correct rendering.
+    The graph details function calls originating from (calling) or terminating at (called)
+    the target function.
+
+    Args:
+        binary_name: The name of the binary containing the function.
+        function_name: The name of the function to generate the call graph for.
+        direction: Direction of the call graph (calling or called).
+        display_type: Format of the graph (flow, flow_ends).
+        condense_threshold: Maximum number of edges before graph condensation is triggered.
+        top_layers: Number of top layers to show in a condensed graph.
+        bottom_layers: Number of bottom layers to show in a condensed graph.
+    """
+    try:
+        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        program_info = pyghidra_context.get_program_info(binary_name)
+        tools = GhidraTools(program_info)
+        return tools.gen_callgraph(
+            function_name_or_address=function_name,
+            cg_direction=direction,
+            cg_display_type=display_type,
+            include_refs=True,
+            max_depth=None,
+            max_run_time=60,
+            condense_threshold=condense_threshold,
+            top_layers=top_layers,
+            bottom_layers=bottom_layers,
+        )
+    except Exception as e:
+        if isinstance(e, ValueError):
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
+        raise McpError(
+            ErrorData(code=INTERNAL_ERROR, message=f"Error generating call graph: {e!s}")
+        ) from e
+
+
+@mcp.tool()
 def import_binary(binary_path: str, ctx: Context) -> str:
     """Imports a binary from a designated path into the current Ghidra project.
 
@@ -512,93 +568,108 @@ def init_pyghidra_context(
     "--version",
     help="Show version and exit.",
 )
-@click.option(
+# --- Server Options ---
+@optgroup.group("Server Options")
+@optgroup.option(
     "-t",
     "--transport",
     type=click.Choice(["stdio", "streamable-http", "sse", "http"], case_sensitive=False),
     default="stdio",
     envvar="MCP_TRANSPORT",
-    help="Transport protocol to use: stdio, streamable-http (aka http), or sse (legacy)",
+    show_default=True,
+    help="Transport protocol to use.",
 )
-@click.option(
-    "--project-path",
-    type=click.Path(),
-    default=Path("pyghidra_mcp_projects/pyghidra_mcp"),
-    help="Location on disk which points to the Ghidra project to use. Can be an existing file.",
-)
-@click.option(
+@optgroup.option(
     "-p",
     "--port",
     type=int,
     default=8000,
     envvar="MCP_PORT",
-    help="Port to listen on for HTTP-based transports (streamable-http, sse).",
+    show_default=True,
+    help="Port to listen on for HTTP-based transports.",
 )
-@click.option(
+@optgroup.option(
     "-o",
     "--host",
     type=str,
     default="127.0.0.1",
     envvar="MCP_HOST",
-    help="Host to listen on for HTTP-based transports (streamable-http, sse).",
+    show_default=True,
+    help="Host to listen on for HTTP-based transports.",
 )
-@click.option(
+@optgroup.option(
+    "--project-path",
+    type=click.Path(),
+    default=Path("pyghidra_mcp_projects/pyghidra_mcp"),
+    show_default=True,
+    help="Path to the Ghidra project.",
+)
+@optgroup.option(
     "--threaded/--no-threaded",
     default=True,
     show_default=True,
     help="Allow threaded analysis. Disable for debug.",
 )
-@click.option(
-    "--force-analysis/--no-force-analysis",
-    default=False,
-    help="Force a new binary analysis each run.",
-)
-@click.option(
-    "--verbose-analysis/--no-verbose-analysis",
-    default=False,
-    help="Verbose logging for analysis step.",
-)
-@click.option(
-    "--no-symbols/--with-symbols",
-    default=False,
-    help="Turn off symbols for analysis.",
-)
-@click.option(
-    "--gdt",
-    type=click.Path(exists=True),
-    multiple=True,
-    help="Path to a GDT file for analysis. Can be specified multiple times.",
-)
-@click.option(
-    "--program-options",
-    type=click.Path(exists=True),
-    help="Path to a JSON file containing program options (custom analyzer settings).",
-)
-@click.option(
-    "--gzfs-path",
-    type=click.Path(),
-    help="Location to store GZFs of analyzed binaries.",
-)
-@click.option(
+@optgroup.option(
     "--max-workers",
     type=int,
     default=0,  # 0 means multiprocessing.cpu_count()
+    show_default=True,
     help="Number of workers for threaded analysis. Defaults to CPU count.",
 )
-@click.option(
+@optgroup.option(
     "--wait-for-analysis/--no-wait-for-analysis",
     default=False,
+    show_default=True,
     help="Wait for initial project analysis to complete before starting the server.",
 )
-@click.option(
+# --- Project Options ---
+@optgroup.group("Project Management")
+@optgroup.option(
     "--list-project-binaries",
     is_flag=True,
     help="List all ingested binaries in the project.",
 )
-@click.option(
+@optgroup.option(
     "--delete-project-binary",
     type=str,
     help="Delete a specific binary (program) from the project by name.",
+)
+# --- Analysis Options ---
+@optgroup.group("Analysis Options")
+@optgroup.option(
+    "--force-analysis/--no-force-analysis",
+    default=False,
+    show_default=True,
+    help="Force a new binary analysis each run.",
+)
+@optgroup.option(
+    "--verbose-analysis/--no-verbose-analysis",
+    default=False,
+    show_default=True,
+    help="Verbose logging for analysis step.",
+)
+@optgroup.option(
+    "--no-symbols/--with-symbols",
+    default=False,
+    show_default=True,
+    help="Turn off symbols for analysis.",
+)
+@optgroup.option(
+    "--gdt",
+    type=click.Path(exists=True),
+    multiple=True,
+    help="Path to GDT files (can be specified multiple times).",
+)
+@optgroup.option(
+    "--program-options",
+    type=click.Path(exists=True),
+    help="Path to a JSON file containing program options.",
+)
+@optgroup.option(
+    "--gzfs-path",
+    type=click.Path(),
+    help="Location to store GZFs of analyzed binaries.",
 )
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
 def main(

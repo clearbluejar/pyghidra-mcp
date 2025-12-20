@@ -71,7 +71,7 @@ async def test_streamable_client_smoke(streamable_server):
             # Decompile a function
             results = await session.call_tool(
                 "decompile_function",
-                {"binary_name": binary_name, "name": "main"},
+                {"binary_name": binary_name, "name_or_address": "main"},
             )
             # We have results!
             assert results is not None
