@@ -1,3 +1,5 @@
+from enum import Enum
+
 from pydantic import BaseModel, Field
 
 
@@ -104,6 +106,7 @@ class SymbolInfo(BaseModel):
     namespace: str = Field(..., description="The namespace of the symbol.")
     source: str = Field(..., description="The source of the symbol.")
     refcount: int = Field(..., description="The reference count of the symbol.")
+    external: bool = Field(..., description="Is symbol external.")
 
 
 class SymbolSearchResults(BaseModel):
@@ -191,3 +194,34 @@ class BinaryMetadata(BaseModel):
     class ConfigDict:
         extra = "allow"
         populate_by_name = True
+
+
+class CallGraphDirection(str, Enum):
+    """Represents the direction of the call graph."""
+
+    CALLING = "calling"
+    CALLED = "called"
+
+
+class CallGraphDisplayType(str, Enum):
+    """Represents the display type of the call graph."""
+
+    FLOW = "flow"
+    FLOW_ENDS = "flow_ends"
+    MIND = "mind"
+
+
+class CallGraphResult(BaseModel):
+    """Represents the result of a mermaidjs call graph generation."""
+
+    function_name: str = Field(
+        ..., description="The name of the function for which the call graph was generated."
+    )
+    direction: CallGraphDirection = Field(
+        ..., description="The direction of the call graph (calling or called)."
+    )
+    display_type: CallGraphDisplayType = Field(
+        ..., description="The type of the call graph visualization."
+    )
+    graph: str = Field(..., description="The MermaidJS markdown string for the call graph.")
+    mermaid_url: str = Field(..., description="The MermaidJS image url")
