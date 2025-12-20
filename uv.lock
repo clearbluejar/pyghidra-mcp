@@ -430,6 +430,18 @@ wheels = [
 ]
 
 [[package]]
+name = "click-option-group"
+version = "0.5.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/ff/d291d66595b30b83d1cb9e314b2c9be7cfc7327d4a0d40a15da2416ea97b/click_option_group-0.5.9.tar.gz", hash = "sha256:f94ed2bc4cf69052e0f29592bd1e771a1789bd7bfc482dd0bc482134aff95823", size = 22222, upload-time = "2025-10-09T09:38:01.474Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/75/45/54bb2d8d4138964a94bef6e9afe48b0be4705ba66ac442ae7d8a8dc4ffef/click_option_group-0.5.9-py3-none-any.whl", hash = "sha256:ad2599248bd373e2e19bec5407967c3eec1d0d4fc4a5e77b08a0481e75991080", size = 11553, upload-time = "2025-10-09T09:38:00.066Z" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -733,6 +745,18 @@ version = "11.3.2"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/73/a9/a7314abb682ddb3f5d325a366bd328e008984facd686da218a8af7b4deb1/ghidra_stubs-11.3.2-py3-none-any.whl", hash = "sha256:edfc2bc688521ef558056f6fa5064ddc89bc634721fe2702dccbb9d3bf2f0075", size = 3041150, upload-time = "2025-04-16T10:20:43.905Z" },
+]
+
+[[package]]
+name = "ghidrecomp"
+version = "0.5.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyghidra" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ff/8e/c2be40b6136b7cc5c5fe70b4482b9ff7cda4ee107f1a0c5e16b811ec3378/ghidrecomp-0.5.8.tar.gz", hash = "sha256:54e2c1d18eb2646d921897675306d524548e0c87858930fb0a0a88dfd5dc3c62", size = 67532, upload-time = "2025-12-16T20:15:48.6Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/59/3d/9da80f8130257fb3c7caa6bf758535264251fcd29ea29353df39ba2d2782/ghidrecomp-0.5.8-py3-none-any.whl", hash = "sha256:23a315f0a9cbc5623d80b8f27ec86f1f1dc106b70ca160c43ef0fa904ab36fe8", size = 44359, upload-time = "2025-12-16T20:15:47.33Z" },
 ]
 
 [[package]]
@@ -2256,6 +2280,8 @@ source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
     { name = "click" },
+    { name = "click-option-group" },
+    { name = "ghidrecomp" },
     { name = "mcp", extra = ["cli"] },
     { name = "pyghidra" },
 ]
@@ -2297,11 +2323,13 @@ requires-dist = [
     { name = "aiohttp", marker = "extra == 'dev'" },
     { name = "chromadb", specifier = ">=1.3.5" },
     { name = "click", specifier = ">=8.2.1" },
+    { name = "click-option-group", specifier = ">=0.5.9" },
     { name = "ghidra-stubs", marker = "extra == 'dev'", specifier = ">=11.3.2" },
+    { name = "ghidrecomp", specifier = ">=0.5.8" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.9.4" },
     { name = "mcp", extras = ["cli"], marker = "extra == 'dev'", specifier = ">=1.11.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
-    { name = "pyghidra", specifier = "==2.2.1" },
+    { name = "pyghidra", specifier = ">=2.2.1" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.1" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },

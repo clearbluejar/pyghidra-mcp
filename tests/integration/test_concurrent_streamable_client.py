@@ -14,6 +14,7 @@ from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
     BinaryMetadata,
     BytesReadResult,
+    CallGraphResult,
     CodeSearchResults,
     CrossReferenceInfos,
     DecompiledFunction,
@@ -113,7 +114,7 @@ async def invoke_tool_concurrently(server_binary_path):
 
             tasks = [
                 session.call_tool(
-                    "decompile_function", {"binary_name": binary_name, "name": "main"}
+                    "decompile_function", {"binary_name": binary_name, "name_or_address": "main"}
                 ),
                 session.call_tool(
                     "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
@@ -138,6 +139,9 @@ async def invoke_tool_concurrently(server_binary_path):
                 session.call_tool(
                     "read_bytes", {"binary_name": binary_name, "address": "100000", "size": 4}
                 ),
+                session.call_tool(
+                    "gen_callgraph", {"binary_name": binary_name, "function_name": "main"}
+                ),
             ]
 
             responses = await asyncio.gather(*tasks)
@@ -157,7 +161,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     assert len(results) == num_clients
 
     for client_responses in results:
-        assert len(client_responses) == 11
+        assert len(client_responses) == 12
 
         # Decompiled function
         decompiled_func_result = json.loads(client_responses[0].content[0].text)
@@ -221,7 +225,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         search_code_result = json.loads(client_responses[8].content[0].text)
         code_search_results = CodeSearchResults(**search_code_result)
         assert len(code_search_results.results) > 0
-        assert code_search_results.results[0].function_name == "function_one"
+        assert "function_one" in code_search_results.results[0].function_name
 
         # Search strings
         search_string_result = json.loads(client_responses[9].content[0].text)
@@ -235,6 +239,13 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         assert bytes_result.size == 4
         assert bytes_result.data == "7f454c46"  # ELF magic
         assert bytes_result.address == "00100000"
+
+        # Call graph
+        call_graph_result = json.loads(client_responses[11].content[0].text)
+        call_graph = CallGraphResult(**call_graph_result)
+        assert len(call_graph.graph) > 0
+        assert "main" in call_graph.function_name
+        assert "_start" in call_graph.graph
 
         # Delete binary
         # This test is omitted due to complexity in concurrent scenarios

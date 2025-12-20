@@ -380,17 +380,17 @@ class PyGhidraContext:
                 try:
                     if i % 10 == 0:
                         logger.debug(f"Decompiling {i}/{len(functions)}")
-                    decompiled = tools.decompile_function(func.name)
+                    decompiled = tools.decompile_function(func)
                     decompiles.append(decompiled.code)
-                    ids.append(func.name)
+                    ids.append(decompiled.name)
                     metadatas.append(
                         {
-                            "function_name": func.name,
+                            "function_name": decompiled.name,
                             "entry_point": str(func.getEntryPoint()),
                         }
                     )
                 except Exception as e:
-                    logger.error(f"Failed to decompile {func.name}: {e}")
+                    logger.error(f"Failed to decompile {func.getSymbol().getName(True)}: {e}")
 
             collection = self.chroma_client.create_collection(name=program_info.name)
             try:

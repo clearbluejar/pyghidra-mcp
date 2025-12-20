@@ -189,6 +189,7 @@ def test_symbol_info_model():
         namespace="global",
         source="user",
         refcount=5,
+        external=False,
     )
     assert symbol.name == "test_symbol"
     assert symbol.address == "0x1234"
@@ -196,6 +197,7 @@ def test_symbol_info_model():
     assert symbol.namespace == "global"
     assert symbol.source == "user"
     assert symbol.refcount == 5
+    assert symbol.external is False
 
 
 def test_symbol_search_results_model():
@@ -209,6 +211,7 @@ def test_symbol_search_results_model():
                 namespace="global",
                 source="user",
                 refcount=5,
+                external=False,
             ),
             SymbolInfo(
                 name="test_symbol2",
@@ -217,6 +220,7 @@ def test_symbol_search_results_model():
                 namespace="local",
                 source="analysis",
                 refcount=1,
+                external=False,
             ),
         ]
     )
