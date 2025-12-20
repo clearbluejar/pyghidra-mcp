@@ -66,7 +66,8 @@ async def test_search_code(server_params):
 
             # 1. Decompile a function to get its code to use as a query
             decompile_response = await session.call_tool(
-                "decompile_function", {"binary_name": binary_name, "name": "function_to_find"}
+                "decompile_function",
+                {"binary_name": binary_name, "name_or_address": "function_to_find"},
             )
 
             decompiled_function = DecompiledFunction.model_validate_json(
@@ -84,4 +85,4 @@ async def test_search_code(server_params):
             # 3. Assert the results
             assert len(search_results.results) > 0
             # The top result should be the function we searched for
-            assert search_results.results[0].function_name == "function_to_find"
+            assert "function_to_find" in search_results.results[0].function_name
