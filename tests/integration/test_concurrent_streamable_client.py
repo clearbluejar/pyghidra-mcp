@@ -78,7 +78,7 @@ def streamable_server(test_binary):
                     program_infos = ProgramInfos(**program_infos_result)
 
                     has_test_binary = any(
-                        pi.name == PyGhidraContext._gen_unique_bin_name(Path(test_binary))
+                        PyGhidraContext._gen_unique_bin_name(Path(test_binary)) in pi.name
                         for pi in program_infos.programs
                     )
 

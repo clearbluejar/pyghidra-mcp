@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import tempfile
 from pathlib import Path
@@ -9,19 +8,6 @@ from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
 from pyghidra_mcp.context import PyGhidraContext
-
-
-def find_binary_in_list_response(response, binary_name):
-    text_content = response.content[0].text
-    program_infos = json.loads(text_content)["programs"]
-
-    found_program = None
-    for program in program_infos:
-        if binary_name in program["name"]:
-            found_program = program
-            break
-
-    return found_program
 
 
 @pytest.fixture()
@@ -78,7 +64,9 @@ void hello() {
 
 
 @pytest.mark.asyncio
-async def test_import_binaries_recursive(binaries_in_directory, server_params_no_input):
+async def test_import_binaries_recursive(
+    binaries_in_directory, server_params_no_input, find_binary_in_list_response
+):
     """
     Test that import_binaries recursively discovers and imports multiple binaries
     from a directory structure, skipping non-binary files.
