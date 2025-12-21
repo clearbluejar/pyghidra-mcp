@@ -8,11 +8,11 @@ from pyghidra_mcp.models import BinaryMetadata, ProgramInfos
 
 
 @pytest.mark.asyncio
-async def test_list_project_binary_metadata(server_params):
+async def test_list_project_binary_metadata(server_params_no_input):
     """
     Test the list_project_binary_metadata tool.
     """
-    async with stdio_client(server_params) as (read, write):
+    async with stdio_client(server_params_no_input) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the connection
             await session.initialize()

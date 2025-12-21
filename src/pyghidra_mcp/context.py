@@ -193,6 +193,25 @@ class PyGhidraContext:
 
         return list_folder_contents(self.project.getRootFolder())
 
+    def list_binary_domain_files(self) -> list["DomainFile"]:
+        """Return a list of DomainFile objects for all binaries in the project.
+
+        This mirrors `list_binaries` but returns the DomainFile objects themselves
+        (filtered by content type == "Program").
+        """
+
+        from ghidra.framework.model import DomainFile
+
+        def list_folder_domain_files(folder) -> list["DomainFile"]:
+            files: list[DomainFile] = []
+            for subfolder in folder.getFolders():
+                files.extend(list_folder_domain_files(subfolder))
+
+            files.extend([f for f in folder.getFiles() if f.getContentType() == "Program"])
+            return files
+
+        return list_folder_domain_files(self.project.getRootFolder())
+
     def delete_program(self, program_name: str) -> bool:
         """
         Deletes a program from the Ghidra project and saves the project.
@@ -232,7 +251,7 @@ class PyGhidraContext:
         Args:
             binary_path: Path to the binary file.
             analyze: Perform analysis on this binary. Useful if not importing in bulk.
-            relative_path: Relative path within the project hierarchy (e.g., Path("bin") or Path("lib")).
+            relative_path: Relative path within the project hierarchy (Path("bin") or Path("lib")).
 
         Returns:
             None
@@ -623,10 +642,7 @@ class PyGhidraContext:
         """
         Analyzes all files found within the Ghidra project
         """
-
-        domain_files = [
-            df for df in self.project.getRootFolder().getFiles() if df.getContentType() == "Program"
-        ]
+        domain_files = self.list_binary_domain_files()
 
         logger.info(f"Starting analysis for {len(domain_files)} binaries")
 
