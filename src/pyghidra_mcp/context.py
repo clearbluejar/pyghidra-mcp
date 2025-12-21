@@ -264,8 +264,8 @@ class PyGhidraContext:
 
         program_name = PyGhidraContext._gen_unique_bin_name(binary_path)
 
-        root_folder = self.project.getRootFolder()
         program: Program
+        root_folder = self.project.getRootFolder()
 
         # Create folder hierarchy if relative_path is provided
         if relative_path:
@@ -383,6 +383,17 @@ class PyGhidraContext:
         except Exception as e:
             logger.debug(f"Could not read file header for {path}: {e}")
             return False
+
+    def _import_callback(self, future: concurrent.futures.Future):
+        """
+        A callback function to handle results or exceptions from the import task.
+        """
+        try:
+            result = future.result()
+            logger.info(f"Background import task completed successfully. Result: {result}")
+        except Exception as e:
+            logger.error(f"FATAL ERROR during background binary import: {e}", exc_info=True)
+            raise e
 
     def _import_callback(self, future: concurrent.futures.Future):
         """
