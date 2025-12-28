@@ -26,20 +26,73 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-@dataclass
 class ProgramInfo:
-    """Information about a loaded program"""
+    """Information about a loaded program with lazy loading support"""
 
-    name: str
-    program: "Program"
-    flat_api: "FlatProgramAPI | None"
-    decompiler: "DecompInterface"
-    metadata: dict  # Ghidra program metadata
-    ghidra_analysis_complete: bool
-    file_path: Path | None = None
-    load_time: float | None = None
-    code_collection: chromadb.Collection | None = None
-    strings_collection: chromadb.Collection | None = None
+    def __init__(
+        self,
+        name: str,
+        load_callback,
+        metadata: dict,
+        ghidra_analysis_complete: bool,
+        domain_file_path: str,
+        file_path: Path | None = None,
+        load_time: float | None = None,
+        code_collection: chromadb.Collection | None = None,
+        strings_collection: chromadb.Collection | None = None,
+    ):
+        self.name = name
+        self.load_callback = load_callback
+        self.metadata = metadata
+        self.ghidra_analysis_complete = ghidra_analysis_complete
+        self.domain_file_path = domain_file_path
+        self.file_path = file_path
+        self.load_time = load_time
+        self.code_collection = code_collection
+        self.strings_collection = strings_collection
+
+        # Private backing fields
+        self._program: "Program | None" = None
+        self._flat_api: "FlatProgramAPI | None" = None
+        self._decompiler: "DecompInterface | None" = None
+
+    @property
+    def program(self) -> "Program":
+        if self._program is None:
+            self.load_callback(self.name)
+        if self._program is None:
+            raise RuntimeError(f"Failed to load program {self.name}")
+        return self._program
+
+    @program.setter
+    def program(self, value):
+        self._program = value
+
+    @property
+    def flat_api(self) -> "FlatProgramAPI | None":
+        if self._flat_api is None:
+            # triggers load if needed
+            if self.program:
+                # self.program property ensures _program is set, which sets _flat_api
+                pass
+        return self._flat_api
+
+    @flat_api.setter
+    def flat_api(self, value):
+        self._flat_api = value
+
+    @property
+    def decompiler(self) -> "DecompInterface":
+        if self._decompiler is None:
+            if self.program:
+                pass
+        if self._decompiler is None:
+             raise RuntimeError(f"Failed to get decompiler for {self.name} even after load")
+        return self._decompiler
+
+    @decompiler.setter
+    def decompiler(self, value):
+        self._decompiler = value
 
     @property
     def analysis_complete(self) -> bool:
@@ -89,6 +142,9 @@ class PyGhidraContext:
         self.project: GhidraProject = self._get_or_create_project()
 
         self.programs: dict[str, ProgramInfo] = {}
+        # LRU cache to track usages of programs
+        self.lru_cache: list[str] = []
+        self.cache_size = 5
         self._init_project_programs()
 
         project_dir = self.project_path / self.project_name
@@ -114,6 +170,11 @@ class PyGhidraContext:
         if not self.threaded:
             logger.warn("--no-threaded flag forcing max_workers to 1")
             self.max_workers = 1
+        
+        # Set cache size based on workers to ensure we don't evict programs currently in use by workers
+        # Minimum 5, but at least max_workers + 2 (buffers for main thread etc)
+        self.cache_size = max(5, self.max_workers + 2)
+        
         self.executor = (
             concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
             if self.threaded
@@ -129,8 +190,9 @@ class PyGhidraContext:
         Saves changes to all open programs and closes the project.
         """
         for _program_name, program_info in self.programs.items():
-            program = program_info.program
-            self.project.close(program)
+            if program_info._program:
+                program = program_info.program
+                self.project.close(program)
 
         if self.executor:
             self.executor.shutdown(wait=True)
@@ -140,6 +202,74 @@ class PyGhidraContext:
 
         self.project.close()
         logger.info(f"Project {self.project_name} closed.")
+
+    def _ensure_program_loaded(self, binary_name: str):
+        """
+        Callback to load a program when it is accessed.
+        Manages LRU cache to keep memory usage in check.
+        """
+        from ghidra.program.flatapi import FlatProgramAPI
+        from ghidra.program.model.listing import Program
+
+        program_info = self.programs.get(binary_name)
+        if not program_info:
+            raise ValueError(f"Program {binary_name} not found in project.")
+
+        # If already loaded, move to end of LRU (most recently used)
+        if program_info._program is not None:
+            if binary_name in self.lru_cache:
+                self.lru_cache.remove(binary_name)
+            self.lru_cache.append(binary_name)
+            return
+
+        logger.info(f"Lazy loading program: {binary_name}")
+
+        # If cache is full, unload the least recently used program
+        if len(self.lru_cache) >= self.cache_size:
+            lru_binary = self.lru_cache.pop(0)
+            self._unload_program(lru_binary)
+
+        # Load the program
+        # We need the parent folder path and filename
+        # This was constructed during init, we can reconstruct or store it better.
+        # Ideally we stored the 'domain_file_path' in ProgramInfo.
+        # Load the program
+        df_path = Path(program_info.domain_file_path)
+        # Ghidra expects folder path string and program name
+        # df_path includes program name.
+        parent_path = str(df_path.parent).replace("\\", "/") # Ensure forward slashes for Ghidra
+        # Root folder is "/"
+        if parent_path == ".":
+            parent_path = "/"
+        
+        program = self.project.openProgram(parent_path, df_path.name, False)
+
+        program_info._program = program
+        program_info._flat_api = FlatProgramAPI(program)
+        program_info._decompiler = self.setup_decompiler(program)
+        
+        self.lru_cache.append(binary_name)
+        logger.info(f"Loaded {binary_name}. Cache size: {len(self.lru_cache)}")
+
+    def _unload_program(self, binary_name: str):
+        """
+        Unloads a program to free memory.
+        """
+        program_info = self.programs.get(binary_name)
+        if not program_info or not program_info._program:
+            return
+
+        logger.info(f"Unloading program to free memory: {binary_name}")
+        program = program_info._program
+        self.project.close(program)
+
+        program_info._program = None
+        program_info._flat_api = None
+        program_info._decompiler = None
+        
+        # Ensure removed from cache if present (might have been popped already)
+        if binary_name in self.lru_cache:
+            self.lru_cache.remove(binary_name)
 
     def _get_or_create_project(self) -> "GhidraProject":
         """
@@ -169,15 +299,19 @@ class PyGhidraContext:
         """
         Initializes the programs dictionary with existing programs in the project.
         """
-        from ghidra.program.model.listing import Program
-
         all_binary_paths = self.list_binaries()
         for binary_path_s in all_binary_paths:
-            binary_path = Path(binary_path_s)
-            program: Program = self.project.openProgram(
-                str(binary_path.parent), binary_path.name, False
+            # Create lazy ProgramInfo
+            # We assume analysis is not complete until proven otherwise (e.g. by analyze_project)
+            # Metadata is empty until loaded.
+            name = Path(binary_path_s).name
+            program_info = ProgramInfo(
+                name=name,
+                load_callback=self._ensure_program_loaded,
+                metadata={},
+                ghidra_analysis_complete=False, 
+                domain_file_path=binary_path_s
             )
-            program_info = self._init_program_info(program)
             self.programs[binary_path_s] = program_info
 
     def list_binaries(self) -> list[str]:
@@ -231,12 +365,22 @@ class PyGhidraContext:
         else:
             logger.info(f"Deleting program: {program_name}")
             try:
-                program_to_delete: Program = program_info.program
-                program_to_delete_df: DomainFile = program_to_delete.getDomainFile()
-                self.project.close(program_to_delete)
-                program_to_delete_df.delete()
+                # Ensure it's unloaded (closed) before deleting
+                self._unload_program(program_name)
+                
+                # We need the DomainFile to delete it.
+                # project.getProjectData().getFile(path)
+                file_system = self.project.getProjectData()
+                domain_file = file_system.getFile(program_info.domain_file_path)
+                if domain_file:
+                    domain_file.delete()
+                else:
+                    logger.warning(f"Could not find domain file for deletion: {program_info.domain_file_path}")
+                
                 # clean up program reference
                 del self.programs[program_name]
+                if program_name in self.lru_cache:
+                    self.lru_cache.remove(program_name)
                 return True
             except Exception as e:
                 logger.error(f"Error deleting program '{program_name}': {e}")
@@ -277,6 +421,9 @@ class PyGhidraContext:
         full_path = str(Path(ghidra_folder.pathname) / program_name)
         if self.programs.get(full_path):
             logger.info(f"Opening existing program: {program_name}")
+            # Accessing .program triggers load if not loaded, but here we want to ensure it's loaded 
+            # AND set the _program backing field if we were just importing?
+            # Actually if it exists, we just use it.
             program = self.programs[full_path].program
             program_info = self.programs[full_path]
         else:
@@ -287,7 +434,19 @@ class PyGhidraContext:
                 self.project.saveAs(program, ghidra_folder.pathname, program_name, True)
 
             program_info = self._init_program_info(program)
+            # The pathname might be different after saveAs?
+            # program.getDomainFile().getPathname() should be correct.
             self.programs[program.getDomainFile().pathname] = program_info
+            
+            # Since we have the program open, add it to LRU
+            self.lru_cache.append(program.getDomainFile().pathname)
+            if len(self.lru_cache) > self.cache_size:
+                 # Evict oldest different from this one
+                 # We just appended, so this one is last.
+                 # Pop first.
+                 evict = self.lru_cache.pop(0)
+                 self._unload_program(evict)
+
 
         if not program:
             raise ImportError(f"Failed to import binary: {binary_path}")
@@ -450,19 +609,26 @@ class PyGhidraContext:
         assert program is not None
 
         metadata = self.get_metadata(program)
-
+        
+        # This is called when we HAVE a program (e.g. from import_binary).
+        # We need to create a ProgramInfo that is "loaded".
+        
         program_info = ProgramInfo(
             name=program.name,
-            program=program,
-            flat_api=FlatProgramAPI(program),
-            decompiler=self.setup_decompiler(program),
+            load_callback=self._ensure_program_loaded,
             metadata=metadata,
-            ghidra_analysis_complete=False,
-            file_path=metadata["Executable Location"],
+            ghidra_analysis_complete=False, # Will be set true by analyze_plugin if called
+            file_path=Path(metadata.get("Executable Location", "")), # Safely get path
             load_time=time.time(),
             code_collection=None,
             strings_collection=None,
+            domain_file_path=program.getDomainFile().getPathname()
         )
+        
+        # Manually populate the private fields since we have the object
+        program_info._program = program
+        program_info._flat_api = FlatProgramAPI(program)
+        program_info._decompiler = self.setup_decompiler(program)
 
         return program_info
 
