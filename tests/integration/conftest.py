@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 
@@ -126,3 +127,20 @@ def server_params_shared_object(test_shared_object):
         # Optional environment variables
         env={"GHIDRA_INSTALL_DIR": "/ghidra"},
     )
+
+
+@pytest.fixture()
+def find_binary_in_list_response():
+    """Return a helper that finds a binary by generated name in a list_project_binaries response."""
+
+    def _finder(response, binary_name):
+        text_content = response.content[0].text
+        program_infos = json.loads(text_content)["programs"]
+
+        for program in program_infos:
+            if binary_name in program["name"]:
+                return program
+
+        return None
+
+    return _finder

@@ -154,7 +154,7 @@ def list_project_binaries(ctx: Context) -> ProgramInfos:
 
     Returns a structured list of program entries, each containing:
     - name: The display name of the program
-    - file_path: Absolute path to the binary file (if available)
+    - file_path: Absolute path to the binary file on disk (if available)
     - load_time: Timestamp when the program was loaded into the project
     - analysis_complete: Boolean indicating if automated analysis has finished
 
@@ -165,10 +165,10 @@ def list_project_binaries(ctx: Context) -> ProgramInfos:
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_infos = []
-        for _name, pi in pyghidra_context.programs.items():
+        for name, pi in pyghidra_context.programs.items():
             program_infos.append(
                 ProgramInfo(
-                    name=pi.name,
+                    name=name,
                     file_path=str(pi.file_path) if pi.file_path else None,
                     load_time=pi.load_time,
                     analysis_complete=pi.analysis_complete,

@@ -8,11 +8,11 @@ from pyghidra_mcp.models import BinaryMetadata, ProgramInfos
 
 
 @pytest.mark.asyncio
-async def test_list_project_binary_metadata(server_params):
+async def test_list_project_binary_metadata(server_params_no_input):
     """
     Test the list_project_binary_metadata tool.
     """
-    async with stdio_client(server_params) as (read, write):
+    async with stdio_client(server_params_no_input) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the connection
             await session.initialize()
@@ -44,4 +44,6 @@ async def test_list_project_binary_metadata(server_params):
             assert metadata.processor is not None
             assert metadata.endian is not None
             assert metadata.address_size is not None
-            assert metadata.program_name == binary_name
+            assert binary_name is not None
+            assert metadata.program_name is not None
+            assert metadata.program_name in binary_name

@@ -36,7 +36,7 @@ async def test_list_project_binaries_tool(server_params):
 
             found = False
             for program in program_infos:
-                if program["name"] == binary_name:
+                if binary_name in program["name"]:
                     found = True
                     assert program["analysis_complete"]
                     break
