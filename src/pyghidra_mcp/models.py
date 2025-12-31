@@ -29,8 +29,8 @@ class ProgramBasicInfos(BaseModel):
 class ProgramInfo(BaseModel):
     """Detailed information about a program (binary) loaded in Ghidra."""
 
-    name: str = Field(..., description="The name of the program.")
-    file_path: str | None = Field(None, description="The file path of the program.")
+    name: str = Field(..., description="The name of the program in Ghidra.")
+    file_path: str | None = Field(None, description="The file path of the program on disk.")
     load_time: float | None = Field(
         None, description="The time it took to load the program in seconds."
     )
