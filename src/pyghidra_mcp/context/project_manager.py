@@ -65,8 +65,9 @@ class ProjectManager:
         # LRU cache to track usages of programs
         self.lru_cache: list[str] = []
 
-        # Set cache size based on workers to ensure we don't evict programs currently in use by workers
-        # Minimum 5, but at least max_workers + 2 (buffers for main thread etc)
+        # Set cache size based on workers to ensure we don't evict programs
+        # currently in use by workers Minimum 5, but at least max_workers + 2
+        # (buffers for main thread etc)
         cpu_count = multiprocessing.cpu_count() or 4
         self.max_workers = max_workers if max_workers else cpu_count
 

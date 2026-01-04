@@ -109,8 +109,9 @@ class AnalysisManager:
                     self.set_analysis_option(program, k, v)
 
             if self.project_manager.no_symbols:
+                flag = self.project_manager.no_symbols
                 logger.warning(
-                    f"Disabling symbols for analysis! --no-symbols flag: {self.project_manager.no_symbols}"
+                    f"Disabling symbols for analysis! --no-symbols flag: {flag}"
                 )
                 self.set_analysis_option(program, "PDB Universal", False)
 

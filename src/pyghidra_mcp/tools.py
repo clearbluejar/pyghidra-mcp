@@ -8,7 +8,7 @@ import re
 import typing
 
 from ghidrecomp.callgraph import gen_callgraph
-from jpype import JByte
+from jpype import JArray, JByte
 
 from pyghidra_mcp.models import (
     BytesReadResult,
@@ -29,6 +29,7 @@ if typing.TYPE_CHECKING:
     from ghidra.app.decompiler import DecompileResults
     from ghidra.program.model.listing import Function
     from ghidra.program.model.symbol import Symbol
+    from typing import Any
 
     from .context import ProgramInfo
 
@@ -51,7 +52,7 @@ def handle_exceptions(func):
 
 def setup_decompiler(program) -> "Any":
     """Set up the decompiler interface."""
-    from ghidra.app.decompiler import DecompInterface, DecompileOptions
+    from ghidra.app.decompiler import DecompileOptions, DecompInterface
 
     prog_options = DecompileOptions()
     decomp = DecompInterface()
@@ -488,13 +489,13 @@ class GhidraTools:
             raise ValueError(f"Address {address} is not in mapped memory")
 
         # Use JPype to handle byte arrays properly for PyGhidra
-        # Create Java byte array - JPype's runtime magic confuses static type checkers
-        buf = JByte[size]  # type: ignore[reportInvalidTypeArguments]
+        # Create Java byte array
+        buf = JArray(JByte)(size) # type: ignore[reportCallIssue]
         n = mem.getBytes(addr, buf)
 
         # Convert Java signed bytes (-128 to 127) to Python unsigned (0 to 255)
         if n > 0:
-            data = bytes([b & 0xFF for b in buf[:n]])  # type: ignore[reportGeneralTypeIssues]
+            data = bytes([b & 0xFF for b in buf[:n]])
         else:
             data = b""
 
