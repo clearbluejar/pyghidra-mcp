@@ -49,6 +49,25 @@ def handle_exceptions(func):
     return wrapper
 
 
+def setup_decompiler(program) -> "Any":
+    """Set up the decompiler interface."""
+    from ghidra.app.decompiler import DecompInterface, DecompileOptions
+
+    prog_options = DecompileOptions()
+    decomp = DecompInterface()
+
+    # grab default options from program
+    prog_options.grabFromProgram(program)
+
+    # increase maxpayload size to 100MB (default 50MB)
+    prog_options.setMaxPayloadMBytes(100)
+
+    decomp.setOptions(prog_options)
+    decomp.openProgram(program)
+
+    return decomp
+
+
 class GhidraTools:
     """Comprehensive tool handler for Ghidra MCP tools"""
 
@@ -57,6 +76,10 @@ class GhidraTools:
         self.program_info = program_info
         self.program = program_info.program
         self.decompiler = program_info.decompiler
+
+        if self.decompiler is None:
+            self.decompiler = setup_decompiler(self.program)
+            self.program_info.decompiler = self.decompiler
 
     def _get_filename(self, func: "Function"):
         max_path_len = 50

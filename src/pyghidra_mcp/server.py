@@ -546,7 +546,7 @@ def init_pyghidra_context(
         pyghidra_context.import_binaries(bin_paths)
 
     logger.info(f"Analyzing project: {pyghidra_context.project}")
-    pyghidra_context.analyze_project()
+    pyghidra_context.analysis_manager.analyze_project()
 
     if len(pyghidra_context.list_binaries()) == 0:
         logger.warning("No binaries were imported and none exist in the project.")
