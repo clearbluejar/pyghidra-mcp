@@ -599,7 +599,7 @@ def init_pyghidra_context(
 )
 @optgroup.option(
     "--project-path",
-    type=click.Path(),
+    type=click.Path(path_type=Path),
     default=Path("pyghidra_mcp_projects/pyghidra_mcp"),
     show_default=True,
     help="Path to the Ghidra project.",
