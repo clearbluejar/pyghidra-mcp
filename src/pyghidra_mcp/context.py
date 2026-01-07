@@ -356,7 +356,7 @@ class PyGhidraContext:
         logger.info(f"Importing {len(files_to_import)} binary files into project...")
         for bin_path, relative_path in files_to_import:
             try:
-                self.import_binary(bin_path, analyze=True, relative_path=relative_path)
+                self.import_binary(bin_path, analyze=False, relative_path=relative_path)
             except Exception as e:
                 logger.error(f"Failed to import {bin_path}: {e}")
                 # continue importing remaining files
