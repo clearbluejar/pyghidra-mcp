@@ -417,15 +417,22 @@ Add the following JSON block to your `claude_desktop_config.json` file:
 
 ```json
 {
-  "mcpServers": {
-    "pyghidra-mcp": {
-      "command": "uvx",
-      "args": ["pyghidra-mcp", "/bin/ls", "/bin/jq", "/path/to/bin" ],
-      "env": {
-        "GHIDRA_INSTALL_DIR": "/path/to/ghidra"
-      }
+    "mcpServers": {
+        "pyghidra-mcp": {
+            "command": "uvx",
+            "args": [
+                "--from",
+                "git+https://github.com/clearbluejar/pyghidra-mcp",
+                "pyghidra-mcp",
+                "--project-path",
+                "/tmp/pyghidra", // or path to writeable directory
+                "/bin/ls" //
+            ],
+            "env": {
+                "GHIDRA_INSTALL_DIR": "/path/to/ghidra/ghidra_12.0_PUBLIC"
+            }
+        }
     }
-  }
 }
 ```
 ## Inspiration
