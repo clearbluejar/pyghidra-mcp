@@ -260,7 +260,7 @@ class PyGhidraContext:
 
         binary_path = Path(binary_path)
         if binary_path.is_dir():
-            return self.import_binaries([binary_path])
+            return self.import_binaries([binary_path], analyze=analyze)
 
         program_name = PyGhidraContext._gen_unique_bin_name(binary_path)
 
@@ -324,7 +324,7 @@ class PyGhidraContext:
 
         return current_folder
 
-    def import_binaries(self, binary_paths: list[str | Path]):
+    def import_binaries(self, binary_paths: list[str | Path], analyze: bool = False):
         """
         Imports a list of binaries into the project.
         If an entry is a directory it will be walked recursively
@@ -333,6 +333,7 @@ class PyGhidraContext:
         Note: Ghidra does not directly support multithreaded importing into the same project.
         Args:
             binary_paths: A list of paths to the binary files or directories.
+            analyze: Whether to analyze the imported binaries.
         """
         resolved_paths: list[Path] = [Path(p) for p in binary_paths]
 
@@ -356,7 +357,7 @@ class PyGhidraContext:
         logger.info(f"Importing {len(files_to_import)} binary files into project...")
         for bin_path, relative_path in files_to_import:
             try:
-                self.import_binary(bin_path, analyze=False, relative_path=relative_path)
+                self.import_binary(bin_path, analyze=analyze, relative_path=relative_path)
             except Exception as e:
                 logger.error(f"Failed to import {bin_path}: {e}")
                 # continue importing remaining files
@@ -407,10 +408,10 @@ class PyGhidraContext:
             raise FileNotFoundError(f"The file {binary_path} cannot be found")
 
         if self.import_executor:
-            future = self.import_executor.submit(self.import_binary, binary_path, True)
+            future = self.import_executor.submit(self.import_binary, binary_path, analyze=True)
             future.add_done_callback(self._import_callback)
         else:
-            self.import_binary(binary_path, True)
+            self.import_binary(binary_path, analyze=True)
 
     def get_program_info(self, binary_name: str) -> "ProgramInfo":
         """Get program info or raise ValueError if not found."""
