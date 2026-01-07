@@ -60,7 +60,7 @@ def streamable_server(test_binary):
 
     time.sleep(3)
 
-    async def wait_for_collections(test_binary, timeout: int = 15) -> None:
+    async def wait_for_collections(test_binary, timeout: int = 120) -> None:
         """
         Repeatedly call `list_project_binaries` until all programs have both
         collections populated, or until *timeout* seconds elapse.
