@@ -102,10 +102,13 @@ graph TD
       - [Code Search](#code-search)
       - [Cross-References](#cross-references)
       - [Decompile Function](#decompile-function)
+      - [Generate Call Graph](#generate-call-graph)
       - [Import Binary](#import-binary)
+      - [Delete Project Binary](#delete-project-binary)
       - [List Exports](#list-exports)
       - [List Imports](#list-imports)
       - [List Project Binaries](#list-project-binaries)
+      - [List Project Binary Metadata](#list-project-binary-metadata)
       - [Read Bytes](#read-bytes)
       - [Search Strings](#search-strings)
       - [Search Symbols](#search-symbols)
@@ -202,13 +205,17 @@ Enable LLMs to perform actions, make deterministic computations, and interact wi
 
 - `list_cross_references(binary_name: str, name_or_address: str)`: Finds and lists all cross-references (x-refs) to a given function or address.
 
+#### Generate Call Graph
+
+- `gen_callgraph(binary_name: str, function_name_or_address: str, direction: str = "calling", display_type: str = "flow", include_refs: bool = True, max_depth: int | None = None, max_run_time: int = 60, condense_threshold: int = 50, top_layers: int = 5, bottom_layers: int = 5)`: Generates a MermaidJS call graph for a specified function. Supports both "calling" (functions called by the target) and "called" (functions that call the target) directions with multiple visualization types.
+
 #### Decompile Function
 
 - `decompile_function(binary_name: str, name: str)`: Decompile a function from a given binary.
 
 #### Import Binary
 
-- `import_binary(binary_path: str)`: Imports a binary from a designated path into the current Ghidra project.
+- `import_binary(binary_path: str)`: Imports a binary from a designated path into the current Ghidra project. If the path is a directory, it will recursively scan and import all supported binary files, preserving the directory structure within the Ghidra project.
 
 #### List Exports
 
@@ -221,6 +228,14 @@ Enable LLMs to perform actions, make deterministic computations, and interact wi
 #### List Project Binaries
 
 - `list_project_binaries()`: Lists the names of all binaries currently loaded in the Ghidra project.
+
+#### List Project Binary Metadata
+
+- `list_project_binary_metadata(binary_name: str)`: Retrieves detailed metadata for a specific binary, including architecture, compiler, executable format, analysis metrics, and file hashes.
+
+#### Delete Project Binary
+
+- `delete_project_binary(binary_name: str)`: Deletes a binary (program) from the Ghidra project.
 
 #### Read Bytes
 
