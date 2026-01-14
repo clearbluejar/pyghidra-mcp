@@ -65,6 +65,7 @@ class PyGhidraContext:
         threaded: bool = True,
         max_workers: int | None = None,
         wait_for_analysis: bool = False,
+        callgraph_max_run_time: int = 60,
     ):
         """
         Initializes a new Ghidra project context.
@@ -81,6 +82,7 @@ class PyGhidraContext:
             threaded: Use threading during analysis.
             max_workers: Number of workers for threaded analysis.
             wait_for_analysis: Wait for initial project analysis to complete.
+            callgraph_max_run_time: Default max runtime (seconds) for callgraph generation.
         """
         from ghidra.base.project import GhidraProject
 
@@ -123,6 +125,9 @@ class PyGhidraContext:
             concurrent.futures.ThreadPoolExecutor(max_workers=1) if self.threaded else None
         )
         self.wait_for_analysis = wait_for_analysis
+        if callgraph_max_run_time < 0:
+            raise ValueError("callgraph_max_run_time must be >= 0")
+        self.callgraph_max_run_time = callgraph_max_run_time
 
     def close(self, save: bool = True):
         """
@@ -499,7 +504,7 @@ class PyGhidraContext:
             program_info.code_collection = collection
         except Exception:
             logger.info(f"Creating new code collection '{program_info.name}'")
-            tools = GhidraTools(program_info)
+            tools = GhidraTools(program_info, callgraph_max_run_time=self.callgraph_max_run_time)
             functions = tools.get_all_functions()
             decompiles = []
             ids = []
@@ -547,7 +552,7 @@ class PyGhidraContext:
             program_info.strings_collection = strings_collection
         except Exception:
             logger.info(f"Creating new strings collection '{collection_name}'")
-            tools = GhidraTools(program_info)
+            tools = GhidraTools(program_info, callgraph_max_run_time=self.callgraph_max_run_time)
 
             ids = []
             strings = tools.get_all_strings()

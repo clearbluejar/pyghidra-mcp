@@ -34,6 +34,8 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CALLGRAPH_MAX_RUN_TIME = 60
+
 
 def handle_exceptions(func):
     """Decorator to handle exceptions in tool methods"""
@@ -52,11 +54,16 @@ def handle_exceptions(func):
 class GhidraTools:
     """Comprehensive tool handler for Ghidra MCP tools"""
 
-    def __init__(self, program_info: "ProgramInfo"):
+    def __init__(
+        self,
+        program_info: "ProgramInfo",
+        callgraph_max_run_time: int = DEFAULT_CALLGRAPH_MAX_RUN_TIME,
+    ):
         """Initialize with a Ghidra ProgramInfo object"""
         self.program_info = program_info
         self.program = program_info.program
         self.decompiler = program_info.decompiler
+        self.callgraph_max_run_time = callgraph_max_run_time
 
     def _get_filename(self, func: "Function"):
         max_path_len = 50
@@ -202,7 +209,7 @@ class GhidraTools:
         """Finds and decompiles a function in a specified binary and returns its pseudo-C code."""
 
         func = self.find_function(name_or_address)
-        return self.decompile_function(func)
+        return self.decompile_function(func, timeout=timeout)
 
     def decompile_function(self, func: "Function", timeout: int = 0) -> DecompiledFunction:
         """Decompiles a function in a specified binary and returns its pseudo-C code."""
@@ -489,13 +496,15 @@ class GhidraTools:
         cg_display_type: CallGraphDisplayType = CallGraphDisplayType.FLOW,
         include_refs: bool = True,
         max_depth: int | None = None,
-        max_run_time: int = 60,
+        max_run_time: int | None = None,
         condense_threshold: int = 50,
         top_layers: int = 5,
         bottom_layers: int = 5,
     ) -> CallGraphResult:
         """Generates a call graph for a specified function."""
 
+        if max_run_time is None:
+            max_run_time = self.callgraph_max_run_time
         cg_func = self.find_function(function_name_or_address)
         mermaid_url: str = ""
 

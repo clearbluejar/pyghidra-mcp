@@ -431,14 +431,16 @@ def gen_callgraph(
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = pyghidra_context.get_program_info(binary_name)
-        tools = GhidraTools(program_info)
+        tools = GhidraTools(
+            program_info,
+            callgraph_max_run_time=pyghidra_context.callgraph_max_run_time,
+        )
         return tools.gen_callgraph(
             function_name_or_address=function_name,
             cg_direction=direction,
             cg_display_type=display_type,
             include_refs=True,
             max_depth=None,
-            max_run_time=60,
             condense_threshold=condense_threshold,
             top_layers=top_layers,
             bottom_layers=bottom_layers,
@@ -489,6 +491,7 @@ def init_pyghidra_context(
     threaded: bool,
     max_workers: int,
     wait_for_analysis: bool,
+    callgraph_max_run_time: int,
     list_project_binaries: bool,
     delete_project_binary: str | None,
 ) -> FastMCP:
@@ -518,6 +521,7 @@ def init_pyghidra_context(
         threaded=threaded,
         max_workers=max_workers,
         wait_for_analysis=wait_for_analysis,
+        callgraph_max_run_time=callgraph_max_run_time,
     )
 
     if list_project_binaries:
@@ -671,6 +675,15 @@ def init_pyghidra_context(
     type=click.Path(),
     help="Location to store GZFs of analyzed binaries.",
 )
+# --- Tool Timeouts ---
+@optgroup.group("Tool Timeouts")
+@optgroup.option(
+    "--callgraph-max-run-time",
+    type=click.IntRange(min=0),
+    default=60,
+    show_default=True,
+    help="Default max runtime in seconds for call graph generation.",
+)
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
 def main(
     transport: str,
@@ -687,6 +700,7 @@ def main(
     gzfs_path: str | None,
     max_workers: int,
     wait_for_analysis: bool,
+    callgraph_max_run_time: int,
     list_project_binaries: bool,
     delete_project_binary: str | None,
 ) -> None:
@@ -717,6 +731,7 @@ def main(
         threaded=threaded,
         max_workers=max_workers,
         wait_for_analysis=wait_for_analysis,
+        callgraph_max_run_time=callgraph_max_run_time,
         list_project_binaries=list_project_binaries,
         delete_project_binary=delete_project_binary,
     )
