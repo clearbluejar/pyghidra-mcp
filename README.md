@@ -207,11 +207,11 @@ Enable LLMs to perform actions, make deterministic computations, and interact wi
 
 #### Generate Call Graph
 
-- `gen_callgraph(binary_name: str, function_name_or_address: str, direction: str = "calling", display_type: str = "flow", include_refs: bool = True, max_depth: int | None = None, max_run_time: int = 60, condense_threshold: int = 50, top_layers: int = 5, bottom_layers: int = 5)`: Generates a MermaidJS call graph for a specified function. Supports both "calling" (functions called by the target) and "called" (functions that call the target) directions with multiple visualization types.
+- `gen_callgraph(binary_name: str, function_name_or_address: str, direction: str = "calling", display_type: str = "flow", include_refs: bool = True, max_depth: int | None = None, condense_threshold: int = 50, top_layers: int = 5, bottom_layers: int = 5)`: Generates a MermaidJS call graph for a specified function. Supports both "calling" (functions called by the target) and "called" (functions that call the target) directions with multiple visualization types.
 
 #### Decompile Function
 
-- `decompile_function(binary_name: str, name: str)`: Decompile a function from a given binary.
+- `decompile_function(binary_name: str, name_or_address: str)`: Decompile a function from a given binary.
 
 #### Import Binary
 
@@ -306,6 +306,8 @@ Options:
                                     options (custom analyzer settings).
   --gzfs-path PATH                  Location to store GZFs of analyzed
                                     binaries.
+  --callgraph-max-run-time INTEGER  Default max runtime in seconds for call
+                                    graph generation. [default: 60]
   --max-workers INTEGER             Number of workers for threaded analysis.
                                     Defaults to CPU count. [default: 0]
   --wait-for-analysis / --no-wait-for-analysis
