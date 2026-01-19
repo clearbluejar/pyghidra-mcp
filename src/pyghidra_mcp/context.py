@@ -275,9 +275,46 @@ class PyGhidraContext:
                 ]
                 logger.warning(
                     f"Project locked. Found {len(lock_files)} lock file(s): "
-                    f"{[f.name for f in lock_files]}. "
+                    f"{[f.name for f in lock_files]}. Cleaning stale locks. "
                     f"Retry {attempt + 1}/{self._MAX_LOCK_RETRIES + 1}..."
                 )
+                self._clean_lock_files(project_dir)
+
+    @staticmethod
+    def _clean_lock_files(project_dir: Path) -> list[str]:
+        """
+        Remove stale Ghidra lock files from a project directory.
+
+        WARNING: This method deletes files without additional confirmation.
+        In multi-user environments, ensure no other Ghidra instance is actively
+        using the project before calling this method.
+
+        This is called when opening a project fails due to LockException,
+        typically caused by previous crashes or forced process termination.
+
+        Args:
+            project_dir: Path to the Ghidra project directory.
+
+        Returns:
+            List of successfully removed lock file names.
+        """
+        removed = []
+
+        for pattern in PyGhidraContext._LOCK_FILE_PATTERNS:
+            for lock_file in project_dir.glob(pattern):
+                try:
+                    lock_file.unlink()
+                    removed.append(lock_file.name)
+                    logger.info(f"Removed lock file: {lock_file}")
+                except OSError as e:
+                    logger.warning(f"Could not remove lock file {lock_file}: {e}")
+
+        if removed:
+            logger.info(f"Successfully cleaned {len(removed)} lock file(s): {', '.join(removed)}")
+        else:
+            logger.warning("No lock files were removed (may be held by another process)")
+
+        return removed
 
     def _init_project_programs(self):
         """
