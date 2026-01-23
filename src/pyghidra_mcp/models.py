@@ -37,15 +37,7 @@ class ProgramInfo(BaseModel):
     analysis_complete: bool = Field(
         ..., description="Indicates if Ghidra's analysis of the program has completed."
     )
-    metadata: dict = Field(
-        ..., description="Ghidra program metadata (e.g., architecture, compiler, language ID)"
-    )
-    code_collection: bool = Field(
-        ..., description="Whether the ChromaDB code collection has been created and populated with decompiled functions"
-    )
-    strings_collection: bool = Field(
-        ..., description="Whether the ChromaDB strings collection has been created and populated with extracted strings"
-    )
+    metadata: dict = Field(..., description="A dictionary of metadata associated with the program.")
 
 
 class ProgramInfos(BaseModel):
@@ -129,6 +121,7 @@ class SymbolSearchResults(BaseModel):
     )
 
 
+<<<<<<< HEAD
 class CodeSearchResult(BaseModel):
     """Represents a single search result from the codebase."""
 
@@ -147,6 +140,8 @@ class CodeSearchResults(BaseModel):
     results: list[CodeSearchResult] = Field(..., description="A list of code search results.")
 
 
+=======
+>>>>>>> e94108e (Squashed commit of the following:)
 class StringInfo(BaseModel):
     """Represents a string found within the binary."""
 

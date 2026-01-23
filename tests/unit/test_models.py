@@ -1,7 +1,5 @@
 from pyghidra_mcp.models import (
     BytesReadResult,
-    CodeSearchResult,
-    CodeSearchResults,
     CrossReferenceInfo,
     CrossReferenceInfos,
     DecompiledFunction,
@@ -62,16 +60,12 @@ def test_program_info_model():
         load_time=1.23,
         analysis_complete=True,
         metadata={"key": "value"},
-        code_collection=True,
-        strings_collection=False,
     )
     assert info.name == "test_program"
     assert info.file_path == "/path/to/program"
     assert info.load_time == 1.23
     assert info.analysis_complete is True
     assert info.metadata == {"key": "value"}
-    assert info.code_collection is True
-    assert info.strings_collection is False
 
 
 def test_program_infos_model():
@@ -84,8 +78,6 @@ def test_program_infos_model():
                 load_time=1.23,
                 analysis_complete=True,
                 metadata={"key": "value"},
-                code_collection=True,
-                strings_collection=False,
             ),
             ProgramInfo(
                 name="test_program2",
@@ -93,8 +85,6 @@ def test_program_infos_model():
                 load_time=4.56,
                 analysis_complete=False,
                 metadata={},
-                code_collection=False,
-                strings_collection=True,
             ),
         ]
     )
@@ -227,39 +217,6 @@ def test_symbol_search_results_model():
     assert len(results.symbols) == 2
     assert results.symbols[0].name == "test_symbol1"
     assert results.symbols[1].refcount == 1
-
-
-def test_code_search_result_model():
-    """Test the CodeSearchResult model."""
-    result = CodeSearchResult(
-        function_name="test_func",
-        code="int i = 0;",
-        similarity=0.9,
-    )
-    assert result.function_name == "test_func"
-    assert result.code == "int i = 0;"
-    assert result.similarity == 0.9
-
-
-def test_code_search_results_model():
-    """Test the CodeSearchResults model."""
-    results = CodeSearchResults(
-        results=[
-            CodeSearchResult(
-                function_name="test_func1",
-                code="int i = 0;",
-                similarity=0.9,
-            ),
-            CodeSearchResult(
-                function_name="test_func2",
-                code="return 1;",
-                similarity=0.8,
-            ),
-        ]
-    )
-    assert len(results.results) == 2
-    assert results.results[0].function_name == "test_func1"
-    assert results.results[1].similarity == 0.8
 
 
 def test_string_info_model():

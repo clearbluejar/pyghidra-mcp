@@ -1,19 +1,14 @@
 import concurrent.futures
 import hashlib
-import json
 import multiprocessing
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Union
 
-import chromadb
 import pyghidra  # noqa
-from chromadb.config import Settings
 from loguru import logger
-
-from pyghidra_mcp.tools import GhidraTools
 
 if TYPE_CHECKING:
     from ghidra.app.decompiler import DecompInterface
@@ -35,8 +30,6 @@ class ProgramInfo:
     ghidra_analysis_complete: bool
     file_path: Path | None = None
     load_time: float | None = None
-    code_collection: chromadb.Collection | None = None
-    strings_collection: chromadb.Collection | None = None
     # Thread-safe lock for concurrent access to Ghidra program/decompiler
     _lock: threading.RLock = field(default_factory=threading.RLock)
     # Lock specifically for analysis_complete flag to prevent deadlocks
@@ -89,7 +82,7 @@ class PyGhidraContext:
     """
 
     # Lock file patterns used by Ghidra for project locking
-    _LOCK_FILE_PATTERNS = ["*.lock", "*.lock~"]
+    _LOCK_FILE_PATTERNS: ClassVar[list[str]] = ["*.lock", "*.lock~"]
 
     # Maximum retry attempts after LockException (1 retry = 2 total attempts).
     # This handles stale locks from crashes while avoiding infinite loops
@@ -135,12 +128,16 @@ class PyGhidraContext:
         self.programs: dict[str, ProgramInfo] = {}
         self._init_project_programs()
 
+<<<<<<< HEAD
         project_dir = self.project_path / self.project_name
         chromadb_path = project_dir / "chromadb"
         self.chroma_client = chromadb.PersistentClient(
             path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
         )
 
+=======
+        # From GhidraDiffEngine
+>>>>>>> e94108e (Squashed commit of the following:)
         self.force_analysis = force_analysis
         self.verbose_analysis = verbose_analysis
         self.no_symbols = no_symbols
@@ -264,7 +261,8 @@ class PyGhidraContext:
             except LockException:
                 if attempt >= self._MAX_LOCK_RETRIES:
                     raise RuntimeError(
-                        f"Failed to open project '{self.project_name}' after {attempt + 1} attempt(s). "
+                        f"Failed to open project '{self.project_name}' "
+                        f"after {attempt + 1} attempt(s). "
                         f"Another Ghidra instance may be using this project."
                     ) from None
 
@@ -494,7 +492,6 @@ class PyGhidraContext:
 
         if analyze:
             self.analyze_program(program_info.program)
-            self._init_chroma_collections_for_program(program_info)
 
         logger.info(f"Program {program_name} is ready for use.")
 
@@ -631,16 +628,9 @@ class PyGhidraContext:
         # Use thread-safe property access
         if not program_info.analysis_complete:
             raise RuntimeError(
-                json.dumps(
-                    {
-                        "message": f"Analysis incomplete for binary '{binary_name}'.",
-                        "binary_name": binary_name,
-                        "ghidra_analysis_complete": program_info.ghidra_analysis_complete,
-                        "code_collection": program_info.code_collection is not None,
-                        "strings_collection": program_info.strings_collection is not None,
-                        "suggestion": "Wait and try tool call again.",
-                    }
-                )
+                f"Analysis incomplete for binary '{binary_name}'. "
+                f"Ghidra analysis: {program_info.ghidra_analysis_complete}. "
+                "Wait and try tool call again."
             )
         return program_info
 
@@ -671,8 +661,6 @@ class PyGhidraContext:
             ghidra_analysis_complete=False,
             file_path=metadata["Executable Location"],
             load_time=time.time(),
-            code_collection=None,
-            strings_collection=None,
         )
 
         return program_info
@@ -700,6 +688,7 @@ class PyGhidraContext:
 
         return "-".join((path.name, _sha1_file(path.absolute())[:6]))
 
+<<<<<<< HEAD
     def _init_chroma_code_collection_for_program(self, program_info: ProgramInfo):
         """
         Initialize Chroma code collection for a single program.
@@ -809,6 +798,9 @@ class PyGhidraContext:
             for program_info in programs:
                 self._init_chroma_collections_for_program(program_info)
 
+=======
+    # Callback function that runs when the future is done to catch any exceptions
+>>>>>>> e94108e (Squashed commit of the following:)
     def _analysis_done_callback(self, future: concurrent.futures.Future):
         try:
             future.result()
@@ -893,10 +885,13 @@ class PyGhidraContext:
                 logger.info(f"Completed {completed_count}/{prog_count} programs")
 
         logger.info("All programs analyzed.")
+<<<<<<< HEAD
         # The chroma collections need to be initialized after analysis is complete
         # At this point, threaded or not, all analysis is done
         # Must run after analysis completes (ChromaDB requires analyzed functions)
         self._init_all_chroma_collections()
+=======
+>>>>>>> e94108e (Squashed commit of the following:)
 
     def analyze_program(  # noqa C901
         self,
@@ -988,7 +983,9 @@ class PyGhidraContext:
                     self.set_analysis_option(program, k, v)
 
             if self.no_symbols:
-                logger.warning(f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}")
+                logger.warning(
+                    f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}"
+                )
                 self.set_analysis_option(program, "PDB Universal", False)
 
             logger.info(f"Starting Ghidra analysis of {program}...")
