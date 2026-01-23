@@ -15,7 +15,6 @@ from pyghidra_mcp.models import (
     CallGraphDirection,
     CallGraphDisplayType,
     CallGraphResult,
-    CodeSearchResult,
     CrossReferenceInfo,
     DecompiledFunction,
     ExportInfo,
@@ -401,95 +400,28 @@ class GhidraTools:
             return cross_references
 
     @handle_exceptions
-    def search_code(self, query: str, limit: int = 10) -> list[CodeSearchResult]:
-        """Search decompiled code using semantic similarity.
-
-        Performs vector-based semantic search using ChromaDB embeddings.
-        Requires code collection to be initialized (run after analysis).
-
-        Args:
-            query: Natural language query describing the code you're looking for
-            limit: Maximum number of results to return (default: 10)
-
-        Returns:
-            List of code snippets ranked by semantic similarity (0.0-1.0)
-
-        Raises:
-            ValueError: If code collection is not ready
-        """
-        if not self.program_info.code_collection:
-            raise ValueError(
-                "Code indexing is not complete for this binary. Please try again later."
-            )
-
-        results = self.program_info.code_collection.query(query_texts=[query], n_results=limit)
-        search_results = []
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i]  # type: ignore
-                distance = results["distances"][0][i]  # type: ignore
-                search_results.append(
-                    CodeSearchResult(
-                        function_name=str(metadata["function_name"]),
-                        code=doc,
-                        similarity=1 - distance,
-                    )
-                )
-        return search_results
-
-    @handle_exceptions
     def search_strings(self, query: str, limit: int = 100) -> list[StringSearchResult]:
-        """Search for strings using hybrid text + semantic search.
+        """Searches for strings within a binary by direct filtering."""
+        if not query:
+            raise ValueError("Query string is required")
 
-        First performs exact substring matching, then supplements with
-        semantic similarity search using ChromaDB embeddings.
+        all_strings = self.get_all_strings()
+        query_lower = query.lower()
 
-        Args:
-            query: String to search for (exact match or semantic)
-            limit: Maximum number of results to return (default: 100)
+        # Filter strings that contain the query (case-insensitive)
+        filtered_strings = [
+            s for s in all_strings
+            if query_lower in s.value.lower()
+        ][:limit]
 
-        Returns:
-            List of string matches with similarity scores (0.0-1.0)
-
-        Raises:
-            ValueError: If strings collection is not ready
-        """
-
-        if not self.program_info.strings_collection:
-            raise ValueError(
-                "String indexing is not complete for this binary. Please try again later."
+        return [
+            StringSearchResult(
+                value=s.value,
+                address=s.address,
+                similarity=1.0  # Exact match
             )
-
-        search_results = []
-        results = self.program_info.strings_collection.get(
-            where_document={"$contains": query}, limit=limit
-        )
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"]):
-                metadata = results["metadatas"][i]  # type: ignore
-                search_results.append(
-                    StringSearchResult(
-                        value=doc,
-                        address=str(metadata["address"]),
-                        similarity=1,
-                    )
-                )
-            limit -= len(results["documents"])
-
-        results = self.program_info.strings_collection.query(query_texts=[query], n_results=limit)
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i]  # type: ignore
-                distance = results["distances"][0][i]  # type: ignore
-                search_results.append(
-                    StringSearchResult(
-                        value=doc,
-                        address=str(metadata["address"]),
-                        similarity=1 - distance,
-                    )
-                )
-
-        return search_results
+            for s in filtered_strings
+        ]
 
     @handle_exceptions
     def get_image_base(self) -> str:

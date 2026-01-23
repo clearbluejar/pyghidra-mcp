@@ -45,7 +45,11 @@ from pyghidra_mcp.tools import GhidraTools
 logger.remove()
 logger.add(
     sys.stderr,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+    format=(
+        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<level>{level: <8}</level> | "
+        "<level>{message}</level>"
+    ),
     level="INFO",
     enqueue=True,  # Async logging to prevent blocking on stderr writes
 )
@@ -717,14 +721,20 @@ def init_pyghidra_context(
     # These flags require immediate project access, which doesn't fit lazy mode
     if list_project_binaries or delete_project_binary:
         logger.warning(
-            "--list-project-binaries and --delete-project-binary "
-            "require immediate project access, which is not supported in lazy mode. "
+            "--list-project-binaries and --delete-project-binary require "
+            "immediate project access, which is not supported in lazy mode. "
             "Please start the server and use the tools instead."
         )
         if list_project_binaries:
-            click.echo("List binaries feature not available in lazy mode. Start server and use tools.")
+            click.echo(
+                "List binaries feature not available in lazy mode. "
+                "Start server and use tools."
+            )
         if delete_project_binary:
-            click.echo("Delete binary feature not available in lazy mode. Start server and use tools.")
+            click.echo(
+                "Delete binary feature not available in lazy mode. "
+                "Start server and use tools."
+            )
         sys.exit(1)
 
     logger.info("Server ready - Ghidra project will be created on first tool call")

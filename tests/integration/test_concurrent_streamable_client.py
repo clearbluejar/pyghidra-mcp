@@ -17,7 +17,6 @@ from pyghidra_mcp.models import (
     BinaryMetadata,
     BytesReadResult,
     CallGraphResult,
-    CodeSearchResults,
     CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
@@ -75,10 +74,10 @@ def streamable_server(ghidra_install_dir, base_url):
 
     time.sleep(3)
 
-    async def wait_for_collections(test_binary, timeout: int = 120) -> None:
+    async def wait_for_analysis(test_binary, timeout: int = 120) -> None:
         """
-        Repeatedly call `list_project_binaries` until all programs have both
-        collections populated, or until *timeout* seconds elapse.
+        Repeatedly call `list_project_binaries` until all programs have
+        analysis complete, or until *timeout* seconds elapse.
         """
         deadline = time.time() + timeout
 
@@ -97,22 +96,25 @@ def streamable_server(ghidra_install_dir, base_url):
                         for pi in program_infos.programs
                     )
 
-                    has_missing = any(
-                        pi.code_collection is False or pi.strings_collection is False
-                        for pi in program_infos.programs
+                    has_incomplete = any(
+                        not pi.analysis_complete for pi in program_infos.programs
                     )
 
                     if (
-                        not has_missing and has_test_binary
-                    ):  # All collections are present - success!
+                        not has_incomplete and has_test_binary
+                    ):  # All analysis complete - success!
                         return
 
                     if time.time() > deadline:  # pragma: no cover
-                        raise RuntimeError(f"Collections still missing after {timeout}s: ")
+                        raise RuntimeError(f"Analysis still incomplete after {timeout}s")
 
                     await asyncio.sleep(1)  # Wait a bit before the next call
 
-    yield base_url
+    asyncio.run(wait_for_analysis(test_binary))
+
+    time.sleep(2)
+
+    yield test_binary
     proc.terminate()
     proc.wait()
 
@@ -139,9 +141,6 @@ async def invoke_tool_concurrently(binary_name, base_url, image_base):
                 ),
                 session.call_tool(
                     "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
-                ),
-                session.call_tool(
-                    "search_code", {"binary_name": binary_name, "query": "Function One", "limit": 1}
                 ),
                 session.call_tool(
                     "search_strings", {"binary_name": binary_name, "query": "hello", "limit": 1}
@@ -217,7 +216,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server, test_
     assert len(results) == num_clients
 
     for client_responses in results:
-        assert len(client_responses) == 12
+        assert len(client_responses) == 11
 
         # Decompiled function
         decompiled_func_result = json.loads(client_responses[0].content[0].text)
@@ -276,27 +275,21 @@ async def test_concurrent_streamable_client_invocations(streamable_server, test_
         assert any("function_one" in s.name for s in search_symbols.symbols)
         assert any("function_two" in s.name for s in search_symbols.symbols)
 
-        # Search code results
-        search_code_result = json.loads(client_responses[8].content[0].text)
-        code_search_results = CodeSearchResults(**search_code_result)
-        assert len(code_search_results.results) > 0
-        assert "function_one" in code_search_results.results[0].function_name
-
         # Search strings
-        search_string_result = json.loads(client_responses[9].content[0].text)
+        search_string_result = json.loads(client_responses[8].content[0].text)
         string_search_results = StringSearchResults(**search_string_result)
         assert len(string_search_results.strings) > 0
         assert "World" in string_search_results.strings[0].value
 
-        # Read bytes - verify structure exists, don't assume specific values
-        read_bytes_result = json.loads(client_responses[10].content[0].text)
+        # Read bytes
+        read_bytes_result = json.loads(client_responses[9].content[0].text)
         bytes_result = BytesReadResult(**read_bytes_result)
         assert bytes_result.size == 4
         assert bytes_result.data is not None
         assert bytes_result.address is not None
 
         # Call graph
-        call_graph_result = json.loads(client_responses[11].content[0].text)
+        call_graph_result = json.loads(client_responses[10].content[0].text)
         call_graph = CallGraphResult(**call_graph_result)
         assert len(call_graph.graph) > 0
         assert "main" in call_graph.function_name

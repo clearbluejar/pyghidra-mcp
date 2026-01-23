@@ -314,7 +314,7 @@ def server_params_no_thread(test_binary, ghidra_install_dir):
     return StdioServerParameters(
         command="python",  # Executable
         # Run with test binary
-        args=["-m", "pyghidra_mcp", "--no-threaded", test_binary],  # no-thread for chromadb_testing
+        args=["-m", "pyghidra_mcp", "--no-threaded", test_binary],  # no-thread for debugging
         # Optional environment variables
         env={"GHIDRA_INSTALL_DIR": ghidra_install_dir},
     )
