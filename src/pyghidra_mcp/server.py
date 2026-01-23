@@ -28,7 +28,6 @@ from pyghidra_mcp.models import (
     CallGraphDirection,
     CallGraphDisplayType,
     CallGraphResult,
-    CodeSearchResults,
     CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
@@ -270,40 +269,6 @@ def search_symbols_by_name(
 
 
 @mcp.tool()
-def search_code(binary_name: str, query: str, ctx: Context, limit: int = 5) -> CodeSearchResults:
-    """
-    Perform a semantic code search over a binarys decompiled pseudo C output
-    powered by a vector database for similarity matching.
-
-    This returns the most relevant functions or code blocks whose semantics
-    match the provided query even if the exact text differs. Results are
-    Ghidra generated pseudo C enabling natural language like exploration of
-    binary code structure.
-
-    For best results provide a short distinctive query such as a function
-    signature or key logic snippet to minimize irrelevant matches.
-
-    Args:
-        ctx: The MCP request context (provided by FastMCP)
-        binary_name: Name of the binary to search within.
-        query: Code snippet signature or description to match via semantic search.
-        limit: Maximum number of top scoring results to return (default: 5).
-    """
-    try:
-        pyghidra_context = get_or_create_context()
-        program_info = pyghidra_context.get_program_info(binary_name)
-        tools = GhidraTools(program_info)
-        results = tools.search_code(query, limit)
-        return CodeSearchResults(results=results)
-    except Exception as e:
-        if isinstance(e, ValueError):
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
-        raise McpError(
-            ErrorData(code=INTERNAL_ERROR, message=f"Error searching for code: {e!s}")
-        ) from e
-
-
-@mcp.tool()
 def list_project_binaries(ctx: Context) -> ProgramInfos:
     """
     Retrieve binary name, path, and analysis status for every program (binary) currently
@@ -333,8 +298,6 @@ def list_project_binaries(ctx: Context) -> ProgramInfos:
                     load_time=pi.load_time,
                     analysis_complete=pi.analysis_complete,  # Thread-safe property access
                     metadata={},
-                    code_collection=pi.code_collection is not None,
-                    strings_collection=pi.strings_collection is not None,
                 )
             )
         return ProgramInfos(programs=program_infos)
