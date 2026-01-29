@@ -226,6 +226,13 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         code_search_results = CodeSearchResults(**search_code_result)
         assert len(code_search_results.results) > 0
         assert "function_one" in code_search_results.results[0].function_name
+        # Verify new fields
+        assert code_search_results.query == "Function One"
+        assert code_search_results.search_mode.value == "semantic"  # Default mode
+        assert code_search_results.returned_count > 0
+        assert code_search_results.literal_total >= 0
+        assert code_search_results.semantic_total > 0
+        assert code_search_results.total_functions > 0
 
         # Search strings
         search_string_result = json.loads(client_responses[9].content[0].text)

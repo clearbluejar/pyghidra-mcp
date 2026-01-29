@@ -86,3 +86,54 @@ async def test_search_code(server_params):
             assert len(search_results.results) > 0
             # The top result should be the function we searched for
             assert "function_to_find" in search_results.results[0].function_name
+
+            # 4. Verify new fields are populated
+            # 4. Verify new fields are populated
+            assert search_results.query == query_code
+            assert search_results.search_mode.value == "semantic"  # Default mode
+            assert search_results.returned_count > 0
+            assert search_results.literal_total >= 0  # Dual-mode count
+            assert search_results.semantic_total > 0
+            assert search_results.total_functions > 0
+            # semantic_total should be <= total_functions
+            assert search_results.semantic_total <= search_results.total_functions
+
+
+@pytest.mark.asyncio
+async def test_search_code_literal(server_params):
+    """
+    Tests searching for code using literal (exact string) search mode.
+    """
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            # Initialize the connection
+            await session.initialize()
+
+            binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
+
+            # Search for a literal string that should be in the decompiled code
+            # "printf" should appear in the decompiled output
+            literal_query = "printf"
+
+            # Use literal search mode
+            search_response = await session.call_tool(
+                "search_code",
+                {
+                    "binary_name": binary_name,
+                    "query": literal_query,
+                    "limit": 5,
+                    "search_mode": "literal",
+                },
+            )
+
+            search_results = CodeSearchResults.model_validate_json(search_response.content[0].text)
+
+            # Assert the results
+            assert search_results.search_mode.value == "literal"
+            assert search_results.literal_total > 0  # Should find functions containing "printf"
+
+            # Each result should contain the literal query string
+            for result in search_results.results:
+                assert literal_query in result.code
+                assert result.search_mode.value == "literal"
+                assert result.similarity == 1.0  # Literal matches have similarity 1.0

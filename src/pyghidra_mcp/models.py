@@ -117,20 +117,41 @@ class SymbolSearchResults(BaseModel):
     )
 
 
+class SearchMode(str, Enum):
+    """Search mode for code search."""
+
+    SEMANTIC = "semantic"  # Vector similarity search
+    LITERAL = "literal"  # Exact string match ($contains)
+
+
 class CodeSearchResult(BaseModel):
     """Represents a single search result from the codebase."""
 
     function_name: str = Field(
         ..., description="The name of the function where the code was found."
     )
-    code: str = Field(..., description="The code snippet that matched the search query.")
+    code: str = Field(..., description="The psuedo-c code snippet")
     similarity: float = Field(..., description="The similarity score of the search result.")
+    search_mode: SearchMode = Field(..., description="The search mode used for this result.")
+    preview: str | None = Field(None, description="Truncated preview when include_full_code=False.")
 
 
 class CodeSearchResults(BaseModel):
-    """A container for a list of code search results."""
+    """A container for a list of code search results"""
 
     results: list[CodeSearchResult] = Field(..., description="A list of code search results.")
+    query: str = Field(..., description="The query used for the search.")
+    search_mode: SearchMode = Field(..., description="The search mode used.")
+    # Pagination
+    returned_count: int = Field(..., description="Number of results returned in this response.")
+    offset: int = Field(..., description="Offset used for pagination.")
+    limit: int = Field(..., description="Limit used for pagination.")
+    # Dual-mode counts - ALWAYS populated to help LLM decide on mode switching
+    literal_total: int = Field(
+        ..., description="Total functions containing literal match. 0 if none found."
+    )
+    semantic_total: int = Field(..., description="Estimated total for semantic search.")
+    total_functions: int = Field(..., description="Total number of functions in the binary.")
 
 
 class StringInfo(BaseModel):

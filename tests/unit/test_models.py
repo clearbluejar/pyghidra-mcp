@@ -13,6 +13,7 @@ from pyghidra_mcp.models import (
     ProgramBasicInfos,
     ProgramInfo,
     ProgramInfos,
+    SearchMode,
     StringInfo,
     StringSearchResult,
     StringSearchResults,
@@ -235,10 +236,12 @@ def test_code_search_result_model():
         function_name="test_func",
         code="int i = 0;",
         similarity=0.9,
+        search_mode=SearchMode.SEMANTIC,
     )
     assert result.function_name == "test_func"
     assert result.code == "int i = 0;"
     assert result.similarity == 0.9
+    assert result.search_mode == SearchMode.SEMANTIC
 
 
 def test_code_search_results_model():
@@ -249,17 +252,31 @@ def test_code_search_results_model():
                 function_name="test_func1",
                 code="int i = 0;",
                 similarity=0.9,
+                search_mode=SearchMode.SEMANTIC,
             ),
             CodeSearchResult(
                 function_name="test_func2",
                 code="return 1;",
                 similarity=0.8,
+                search_mode=SearchMode.SEMANTIC,
             ),
-        ]
+        ],
+        query="test",
+        search_mode=SearchMode.SEMANTIC,
+        returned_count=2,
+        offset=0,
+        limit=10,
+        literal_total=1,
+        semantic_total=5,
+        total_functions=10,
     )
     assert len(results.results) == 2
     assert results.results[0].function_name == "test_func1"
     assert results.results[1].similarity == 0.8
+    assert results.query == "test"
+    assert results.search_mode == SearchMode.SEMANTIC
+    assert results.returned_count == 2
+    assert results.literal_total == 1
 
 
 def test_string_info_model():

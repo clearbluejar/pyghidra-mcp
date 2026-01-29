@@ -30,6 +30,7 @@ from pyghidra_mcp.models import (
     ImportInfos,
     ProgramInfo,
     ProgramInfos,
+    SearchMode,
     StringSearchResults,
     SymbolSearchResults,
 )
@@ -114,30 +115,54 @@ def search_symbols_by_name(
 
 
 @mcp.tool()
-def search_code(binary_name: str, query: str, ctx: Context, limit: int = 5) -> CodeSearchResults:
+def search_code(
+    binary_name: str,
+    query: str,
+    ctx: Context,
+    limit: int = 5,
+    offset: int = 0,
+    search_mode: SearchMode = SearchMode.SEMANTIC,
+    include_full_code: bool = True,
+    preview_length: int = 500,
+    similarity_threshold: float = 0.0,
+) -> CodeSearchResults:
     """
-    Perform a semantic code search over a binarys decompiled pseudo C output
-    powered by a vector database for similarity matching.
+    Perform a code search over a binary's decompiled pseudo C output.
 
-    This returns the most relevant functions or code blocks whose semantics
-    match the provided query even if the exact text differs. Results are
-    Ghidra generated pseudo C enabling natural language like exploration of
-    binary code structure.
+    Supports two search modes:
+    - **semantic**: Vector similarity search for meaning-based matching (default)
+    - **literal**: Exact string matching using $contains for precise text matches
+
+    Results always include counts to help
+    decide if switching modes would yield better results
 
     For best results provide a short distinctive query such as a function
     signature or key logic snippet to minimize irrelevant matches.
 
     Args:
         binary_name: Name of the binary to search within.
-        query: Code snippet signature or description to match via semantic search.
-        limit: Maximum number of top scoring results to return (default: 5).
+        query: Code snippet, signature, or exact text to search for.
+        limit: Maximum number of results to return (default: 5).
+        offset: Number of results to skip for pagination (default: 0).
+        search_mode: Search mode - 'semantic' or 'literal' (default: semantic).
+        include_full_code: If True, return full function code. If False, return truncated preview.
+        preview_length: Length of preview in characters when include_full_code=False (default: 500).
+        similarity_threshold: Minimum similarity score (0.0-1.0) for semantic results
+            (default: 0.0).
     """
     try:
         pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
-        results = tools.search_code(query, limit)
-        return CodeSearchResults(results=results)
+        return tools.search_code(
+            query=query,
+            limit=limit,
+            offset=offset,
+            search_mode=search_mode,
+            include_full_code=include_full_code,
+            preview_length=preview_length,
+            similarity_threshold=similarity_threshold,
+        )
     except Exception as e:
         if isinstance(e, ValueError):
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
