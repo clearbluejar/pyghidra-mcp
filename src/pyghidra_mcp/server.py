@@ -518,6 +518,8 @@ def init_pyghidra_context(
     wait_for_analysis: bool,
     list_project_binaries: bool,
     delete_project_binary: str | None,
+    symbols_path: str | None,
+    sym_file_path: str | None,
 ) -> FastMCP:
     bin_paths: list[str | Path] = [Path(p) for p in input_paths]
     logger.info(f"Project: {project_name}")
@@ -546,6 +548,8 @@ def init_pyghidra_context(
         threaded=threaded,
         max_workers=max_workers,
         wait_for_analysis=wait_for_analysis,
+        symbols_path=symbols_path,
+        sym_file_path=sym_file_path,
     )
 
     if list_project_binaries:
@@ -691,6 +695,19 @@ def init_pyghidra_context(
     help="Turn off symbols for analysis.",
 )
 @optgroup.option(
+    "--sym-file-path",
+    type=click.Path(exists=True),
+    default=None,
+    help="Specify single pdb symbol file for bin (default: None)",
+)
+@optgroup.option(
+    "-s",
+    "--symbols-path",
+    type=click.Path(),
+    default=None,
+    help="Path for local symbols directory (default: symbols)",
+)
+@optgroup.option(
     "--gdt",
     type=click.Path(exists=True),
     multiple=True,
@@ -725,6 +742,8 @@ def main(
     wait_for_analysis: bool,
     list_project_binaries: bool,
     delete_project_binary: str | None,
+    sym_file_path: str | None,
+    symbols_path: str | None,
 ) -> None:
     """PyGhidra Command-Line MCP server
 
@@ -771,6 +790,8 @@ def main(
         list_project_binaries=list_project_binaries,
         delete_project_binary=delete_project_binary,
         pyghidra_mcp_dir=pyghidra_mcp_dir,
+        sym_file_path=sym_file_path,
+        symbols_path=symbols_path,
     )
 
     try:

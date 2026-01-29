@@ -65,6 +65,8 @@ class PyGhidraContext:
         threaded: bool = True,
         max_workers: int | None = None,
         wait_for_analysis: bool = False,
+        symbols_path: str | Path | None = None,
+        sym_file_path: str | Path | None = None,
     ):
         """
         Initializes a new Ghidra project context.
@@ -81,6 +83,8 @@ class PyGhidraContext:
             threaded: Use threading during analysis.
             max_workers: Number of workers for threaded analysis.
             wait_for_analysis: Wait for initial project analysis to complete.
+            symbols_path: Path to local symbol store.
+            sym_file_path: Path to a specific PDB file.
         """
         from ghidra.base.project import GhidraProject
 
@@ -109,6 +113,10 @@ class PyGhidraContext:
         self.verbose_analysis = verbose_analysis
         self.no_symbols = no_symbols
         self.gdts = gdts if gdts is not None else []
+        
+        # Symbol configuration
+        self.symbols_path = Path(symbols_path) if symbols_path else self.pyghidra_mcp_dir / "symbols"
+        self.sym_file_path = Path(sym_file_path) if sym_file_path else None
         self.program_options = program_options
         self.gzfs_path = Path(gzfs_path) if gzfs_path else self.pyghidra_mcp_dir / "gzfs"
         if self.gzfs_path:
@@ -719,6 +727,9 @@ class PyGhidraContext:
         from ghidra.program.model.listing import Program
         from ghidra.program.util import GhidraProgramUtilities
         from ghidra.util.task import ConsoleTaskMonitor
+        
+        # Import symbol utilities from ghidrecomp
+        from ghidrecomp.utility import setup_symbol_server, set_remote_pdbs, set_pdb, get_pdb
 
         df = df_or_prog
         if not isinstance(df_or_prog, DomainFile):
@@ -781,6 +792,23 @@ class PyGhidraContext:
             if self.no_symbols:
                 logger.warn(f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}")
                 self.set_analysis_option(program, "PDB Universal", False)
+            
+            else:
+                # Configure symbols if enabled
+                if self.sym_file_path:
+                    logger.info(f"Setting PDB file: {self.sym_file_path}")
+                    set_pdb(program, self.sym_file_path)
+                else:
+                    logger.info(f"Setting up symbol server at {self.symbols_path}")
+                    setup_symbol_server(self.symbols_path)
+                    set_remote_pdbs(program, True)
+                
+                # Verify PDB loaded
+                pdb = get_pdb(program)
+                if pdb is None:
+                    logger.warn(f"Failed to find pdb for {program.name}")
+                else:
+                    logger.info(f"Loaded pdb: {pdb}")
 
             logger.info(f"Starting Ghidra analysis of {program}...")
             try:
