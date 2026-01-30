@@ -48,13 +48,44 @@ int main() {
 
 
 @pytest.mark.asyncio
-async def test_search_code(shared_mcp_session):
+async def test_search_code(shared_mcp_session, test_binary):
     """
     Tests searching for code using similarity search.
+
+    NOTE: This test uses its own test_binary fixture (with function_to_find)
+    instead of the pre-imported demo binary, because it needs a specific function
+    for semantic code search testing.
     """
-    # Use shared MCP session with pre-imported demo binary
+    # Use shared MCP session
     session = shared_mcp_session
-    binary_name = session.demo_binary_name
+
+    # Import the test binary (with function_to_find)
+    from pyghidra_mcp.context import PyGhidraContext
+    import asyncio
+
+    binary_name = PyGhidraContext._gen_unique_bin_name(test_binary)
+    await session.call_tool("import_binary", {"binary_path": test_binary})
+
+    # Wait for import and analysis to complete
+    timeout_seconds = 120
+    start_time = asyncio.get_event_loop().time()
+
+    while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
+        await asyncio.sleep(1)
+        prog_resp = await session.call_tool("list_project_binaries", {})
+        import json
+        prog_result = json.loads(prog_resp.content[0].text)
+        prog_infos = prog_result.get("programs", [])
+
+        for pi in prog_infos:
+            if binary_name in pi.get("name", ""):
+                if (pi.get("analysis_complete") and
+                    pi.get("code_collection") and
+                    pi.get("strings_collection")):
+                    break
+        else:
+            continue
+        break
 
     # 1. Decompile a function to get its code to use as a query
     decompile_response = await session.call_tool(

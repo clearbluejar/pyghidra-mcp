@@ -52,7 +52,7 @@ def sse_server(ghidra_install_dir, base_url, test_binary):
 
 
 @pytest.mark.asyncio
-async def test_sse_client_smoke(sse_server, import_binary_and_wait):
+async def test_sse_client_smoke(sse_server):
     test_binary_path, base_url = sse_server
     # Generate the binary name that Ghidra will use
     binary_name = PyGhidraContext._gen_unique_bin_name(test_binary_path)
@@ -72,8 +72,25 @@ async def test_sse_client_smoke(sse_server, import_binary_and_wait):
             await session.initialize()
             # Session initialized
 
-            # Import binary and wait for analysis (no need for code/strings collections for this test)
-            await import_binary_and_wait(session, test_binary_path, wait_for_code=False, wait_for_strings=False)
+            # Wait for binary to be imported and analyzed (server started with test_binary)
+            # Note: The SSE server was started with test_binary, so it should already be imported
+            # We just need to wait for analysis to complete
+            timeout_seconds = 120
+            start_time = asyncio.get_event_loop().time()
+
+            while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
+                await asyncio.sleep(1)
+                prog_resp = await session.call_tool("list_project_binaries", {})
+                prog_result = json.loads(prog_resp.content[0].text)
+                prog_infos = prog_result.get("programs", [])
+
+                for pi in prog_infos:
+                    if binary_name in pi.get("name", ""):
+                        if pi.get("analysis_complete"):
+                            break
+                else:
+                    continue
+                break
 
             # Decompile entry point function (platform-specific)
             results = await session.call_tool(
