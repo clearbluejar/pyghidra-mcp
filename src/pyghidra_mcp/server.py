@@ -9,7 +9,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import click
 import pyghidra
@@ -60,6 +60,9 @@ _context_config: dict[str, Any] = {}
 _pyghidra_context: PyGhidraContext | None = None
 _pyghidra_launcher: Any = None  # Launcher for JVM cleanup
 _context_lock = threading.Lock()  # Protect context initialization from race conditions
+
+# Track transport mode for JVM lifecycle management
+_transport_mode: Literal["stdio", "sse", "streamable-http"] = "stdio"
 
 
 def get_or_create_context() -> PyGhidraContext:
