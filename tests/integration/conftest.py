@@ -126,7 +126,7 @@ void function_two() {
 @pytest.fixture(scope="session")
 def ghidra_install_dir():
     """Get the Ghidra installation directory from environment or use default."""
-    return os.getenv("GHIDRA_INSTALL_DIR", "/ghidra")
+    return os.getenv("GHIDRA_INSTALL_DIR")
 
 
 @pytest_asyncio.fixture(scope="session")
