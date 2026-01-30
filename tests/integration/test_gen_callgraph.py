@@ -9,11 +9,9 @@ from pyghidra_mcp.models import CallGraphResult
 async def test_gen_callgraph_tool(shared_mcp_session):
     """Test the gen_callgraph tool."""
 
-    # Use shared MCP session (no need to create new connection)
+    # Use shared MCP session with pre-imported demo binary
     session = shared_mcp_session
-
-    # Use pre-imported demo binary from shared session
-    binary_name = await import_binary_and_wait(session, test_binary, wait_for_code=False, wait_for_strings=False)
+    binary_name = session.demo_binary_name
 
     # Call the gen_callgraph tool
     results = await session.call_tool(

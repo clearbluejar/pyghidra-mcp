@@ -46,11 +46,9 @@ from pyghidra_mcp.models import ImportInfos
 @pytest.mark.asyncio
 async def test_list_imports(shared_mcp_session):
     """Test listing imports from a binary - tests pagination and filtering."""
-    # Use shared MCP session (no need to create new connection)
+    # Use shared MCP session with pre-imported demo binary
     session = shared_mcp_session
-
-    # Use pre-imported demo binary from shared session
-    binary_name = await import_binary_and_wait(session, test_binary, wait_for_code=False, wait_for_strings=False)
+    binary_name = session.demo_binary_name
 
     # Get all imports to understand what we're working with
     response = await session.call_tool("list_imports", {"binary_name": binary_name})

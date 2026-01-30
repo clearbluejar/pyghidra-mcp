@@ -10,11 +10,9 @@ async def test_search_symbols_by_name(shared_mcp_session):
     """
     Tests searching for symbols by name.
     """
-    # Use shared MCP session (no need to create new connection)
+    # Use shared MCP session with pre-imported demo binary
     session = shared_mcp_session
-
-    # Use pre-imported demo binary from shared session
-    binary_name = await import_binary_and_wait(session, test_binary, wait_for_code=False, wait_for_strings=False)
+    binary_name = session.demo_binary_name
 
     response = await session.call_tool(
         "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
