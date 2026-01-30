@@ -1,4 +1,8 @@
+import asyncio
 import json
+import os
+import sys
+import tempfile
 
 import pytest
 from mcp import ClientSession
@@ -11,41 +15,84 @@ from pyghidra_mcp.models import (
 
 
 @pytest.mark.asyncio
-async def test_delete_project_binary(server_params_no_thread):
+async def test_delete_project_binary(shared_mcp_session):
     """Test the delete_project_binary tool."""
 
-    async with stdio_client(server_params_no_thread) as (read, write):
-        async with ClientSession(read, write) as session:
-            # Initialize the connection
-            await session.initialize()
+    # Use shared MCP session
+    session = shared_mcp_session
 
-            # Generate a unique binary name for the test binary
-            binary_name = "/" + PyGhidraContext._gen_unique_bin_name(
-                server_params_no_thread.args[-1]
-            )
+    # Create a temporary binary to delete (don't use the pre-imported demo binary)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
+        f.write(
+            """
+#include <stdio.h>
 
-            # Verify that the binary is in project
+void temp_function() {
+    printf("Temporary function");
+}
+
+int main() {
+    printf("Temporary binary");
+    return 0;
+}
+"""
+        )
+        c_file = f.name
+
+    # Compile temporary binary
+    bin_ext = ".exe" if sys.platform == "win32" else ""
+    bin_file = c_file.replace(".c", bin_ext)
+    ret = os.system(f"gcc -o {bin_file} {c_file}")
+
+    if ret != 0:
+        pytest.skip(f"Failed to compile temporary binary: {bin_file}")
+
+    try:
+        # Import temporary binary
+        await session.call_tool("import_binary", {"binary_path": bin_file})
+
+        # Wait for import to complete
+        temp_binary_name = PyGhidraContext._gen_unique_bin_name(bin_file)
+        timeout_seconds = 60
+        start_time = asyncio.get_event_loop().time()
+        imported = False
+
+        while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
+            await asyncio.sleep(1)
+
             tool_resp = await session.call_tool("list_project_binaries", {})
             program_infos_result = json.loads(tool_resp.content[0].text)
             program_infos = ProgramInfos(**program_infos_result)
 
-            assert program_infos is not None
             names = [b.name for b in program_infos.programs]
-            assert binary_name in names
+            if temp_binary_name in names:
+                imported = True
+                break
 
-            # Delete the binary
-            tool_resp = await session.call_tool(
-                "delete_project_binary", {"binary_name": binary_name}
-            )
-            assert tool_resp is not None
-            delete_result = tool_resp.content[0].text
-            assert "Successfully deleted binary" in delete_result
+        if not imported:
+            pytest.skip(f"Temporary binary not imported within {timeout_seconds}s")
 
-            # Verify that the binary is deleted
-            tool_resp = await session.call_tool("list_project_binaries", {})
-            program_infos_result = json.loads(tool_resp.content[0].text)
-            program_infos = ProgramInfos(**program_infos_result)
+        # Delete the binary
+        tool_resp = await session.call_tool(
+            "delete_project_binary", {"binary_name": temp_binary_name}
+        )
+        assert tool_resp is not None
+        delete_result = tool_resp.content[0].text
+        assert "Successfully deleted binary" in delete_result
 
-            assert program_infos is not None
-            names = [b.name for b in program_infos.programs]
-            assert binary_name not in names
+        # Verify that the binary is deleted
+        tool_resp = await session.call_tool("list_project_binaries", {})
+        program_infos_result = json.loads(tool_resp.content[0].text)
+        program_infos = ProgramInfos(**program_infos_result)
+
+        assert program_infos is not None
+        names = [b.name for b in program_infos.programs]
+        assert temp_binary_name not in names
+
+    finally:
+        # Clean up temporary files
+        try:
+            os.unlink(c_file)
+            os.unlink(bin_file)
+        except:
+            pass

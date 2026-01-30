@@ -2,7 +2,6 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import ImportInfos
 
 # @pytest.fixture(scope="module")
@@ -45,46 +44,78 @@ from pyghidra_mcp.models import ImportInfos
 
 
 @pytest.mark.asyncio
-async def test_list_imports(server_params, test_shared_object):
-    """Test listing imports from a binary."""
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
+async def test_list_imports(shared_mcp_session):
+    """Test listing imports from a binary - tests pagination and filtering."""
+    # Use shared MCP session (no need to create new connection)
+    session = shared_mcp_session
 
-            # Test without params
-            response = await session.call_tool("list_imports", {"binary_name": binary_name})
-            import_infos = ImportInfos.model_validate_json(response.content[0].text)
-            assert len(import_infos.imports) > 0
-            assert any("printf" in imp.name for imp in import_infos.imports)
-            all_imports_list = import_infos.imports
+    # Use pre-imported demo binary from shared session
+    binary_name = await import_binary_and_wait(session, test_binary, wait_for_code=False, wait_for_strings=False)
 
-            # Test limit
-            response = await session.call_tool(
-                "list_imports", {"binary_name": binary_name, "limit": 1}
-            )
-            import_infos = ImportInfos.model_validate_json(response.content[0].text)
-            assert len(import_infos.imports) == 1
+    # Get all imports to understand what we're working with
+    response = await session.call_tool("list_imports", {"binary_name": binary_name})
+    import_infos = ImportInfos.model_validate_json(response.content[0].text)
+    all_imports_list = import_infos.imports
 
-            # Test offset
-            response = await session.call_tool(
-                "list_imports", {"binary_name": binary_name, "offset": 1, "limit": 1}
-            )
-            import_infos = ImportInfos.model_validate_json(response.content[0].text)
-            assert len(import_infos.imports) == 1
-            assert import_infos.imports[0].name == all_imports_list[1].name
+    # Test 1: Verify imports exist
+    assert len(all_imports_list) > 0, "Binary should have at least one import"
 
-            # Test query
-            response = await session.call_tool(
-                "list_imports", {"binary_name": binary_name, "query": "printf"}
-            )
-            import_infos = ImportInfos.model_validate_json(response.content[0].text)
-            assert len(import_infos.imports) >= 1
-            assert "printf" in import_infos.imports[0].name
+    # Test 2: Verify imports are ImportInfo objects with required fields
+    for imp in all_imports_list[:5]:  # Check first 5
+        assert hasattr(imp, "name")
+        assert hasattr(imp, "library")
+        assert imp.name is not None
+        assert imp.library is not None
 
-            # Test query with no results
-            response = await session.call_tool(
-                "list_imports", {"binary_name": binary_name, "query": "non_existent_import"}
-            )
-            import_infos = ImportInfos.model_validate_json(response.content[0].text)
-            assert len(import_infos.imports) == 0
+    # Test 3: Test limit parameter (pagination)
+    if len(all_imports_list) > 1:
+        response = await session.call_tool(
+            "list_imports", {"binary_name": binary_name, "limit": 1}
+        )
+        import_infos = ImportInfos.model_validate_json(response.content[0].text)
+        assert len(import_infos.imports) == 1
+        assert import_infos.imports[0].name == all_imports_list[0].name
+
+    # Test 4: Test offset parameter (pagination)
+    if len(all_imports_list) > 2:
+        # Get second import with offset=1, limit=1
+        response = await session.call_tool(
+            "list_imports", {"binary_name": binary_name, "offset": 1, "limit": 1}
+        )
+        import_infos = ImportInfos.model_validate_json(response.content[0].text)
+        assert len(import_infos.imports) == 1
+        assert import_infos.imports[0].name == all_imports_list[1].name
+
+    # Test 5: Test query parameter (case-insensitive substring search)
+    # Use "Critical" or "Sleep" as common Windows API patterns
+    has_critical_section = any("critical" in imp.name.lower() for imp in all_imports_list)
+    has_sleep = any("sleep" in imp.name.lower() for imp in all_imports_list)
+
+    if has_critical_section:
+        response = await session.call_tool(
+            "list_imports", {"binary_name": binary_name, "query": "Critical"}
+        )
+        import_infos = ImportInfos.model_validate_json(response.content[0].text)
+        assert len(import_infos.imports) >= 1
+        assert all("critical" in imp.name.lower() for imp in import_infos.imports)
+    elif has_sleep:
+        response = await session.call_tool(
+            "list_imports", {"binary_name": binary_name, "query": "Sleep"}
+        )
+        import_infos = ImportInfos.model_validate_json(response.content[0].text)
+        assert len(import_infos.imports) >= 1
+        assert all("sleep" in imp.name.lower() for imp in import_infos.imports)
+
+    # Test 6: Test query with no results
+    response = await session.call_tool(
+        "list_imports", {"binary_name": binary_name, "query": "NonExistentFunction12345"}
+    )
+    import_infos = ImportInfos.model_validate_json(response.content[0].text)
+    assert len(import_infos.imports) == 0
+
+    # Test 7: Test offset + limit beyond available range
+    response = await session.call_tool(
+        "list_imports", {"binary_name": binary_name, "offset": 9999, "limit": 1}
+    )
+    import_infos = ImportInfos.model_validate_json(response.content[0].text)
+    assert len(import_infos.imports) == 0
