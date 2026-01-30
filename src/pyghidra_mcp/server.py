@@ -1,15 +1,20 @@
 # Server
 # ---------------------------------------------------------------------------------
+import hashlib
 import json
-import logging
+import os
 import sys
+import threading
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import click
 import pyghidra
 from click_option_group import optgroup
+from loguru import logger
 from mcp.server import Server
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.shared.exceptions import McpError
@@ -27,6 +32,7 @@ from pyghidra_mcp.models import (
     CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
+    ImageBaseResult,
     ImportInfos,
     ProgramInfo,
     ProgramInfos,
@@ -35,24 +41,111 @@ from pyghidra_mcp.models import (
 )
 from pyghidra_mcp.tools import GhidraTools
 
-logging.basicConfig(
-    level=logging.INFO,
-    stream=sys.stderr,  # Critical for STDIO transport
-    format="%(asctime)s [%(levelname)s] %(message)s",
+# Configure loguru to output to stderr (critical for STDIO transport)
+# Use enqueue=True to prevent blocking in multi-threaded scenarios (e.g., with debuggers)
+logger.remove()
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+    level="INFO",
+    enqueue=True,  # Async logging to prevent blocking on stderr writes
 )
-logger = logging.getLogger(__name__)
+
+
+# Lazy Initialization
+# ---------------------------------------------------------------------------------
+
+# Global configuration for delayed context initialization
+_context_config: dict[str, Any] = {}
+_pyghidra_context: PyGhidraContext | None = None
+_pyghidra_launcher: Any = None  # Launcher for JVM cleanup
+_context_lock = threading.Lock()  # Protect context initialization from race conditions
+
+
+def get_or_create_context() -> PyGhidraContext:
+    """
+    Get or create the PyGhidraContext instance (lazy initialization).
+
+    This creates the context on first call, allowing multiple MCP server instances
+    to start without immediately contending for Ghidra project locks.
+
+    Thread-safe: Uses double-checked locking to prevent race conditions when
+    multiple threads attempt to create the context simultaneously.
+    """
+    global _pyghidra_context
+
+    # Fast path: no lock needed if context already exists
+    if _pyghidra_context is not None:
+        return _pyghidra_context
+
+    # Slow path: acquire lock for creation
+    with _context_lock:
+        # Double-check: another thread might have created it while we waited
+        if _pyghidra_context is not None:
+            return _pyghidra_context
+
+        if not _context_config:
+            raise RuntimeError(
+                "Context not initialized. Call init_pyghidra_context() first."
+            )
+
+        config = _context_config
+        _pyghidra_context = PyGhidraContext(
+            project_name=config["project_name"],
+            project_path=config["project_directory"],
+            force_analysis=config.get("force_analysis", False),
+            verbose_analysis=config.get("verbose_analysis", False),
+            no_symbols=config.get("no_symbols", False),
+            gdts=config.get("gdts", []),
+            program_options=config.get("program_options"),
+            gzfs_path=config.get("gzfs_path"),
+            threaded=config.get("threaded", True),
+            max_workers=config.get("max_workers"),
+            wait_for_analysis=config.get("wait_for_analysis", False),
+        )
+
+        logger.info(f"PyGhidraContext created: {_pyghidra_context.project_name}")
+        return _pyghidra_context
 
 
 # Init Pyghidra
 # ---------------------------------------------------------------------------------
 @asynccontextmanager
 async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
-    """Manage server startup and shutdown lifecycle."""
+    """Manage server startup and shutdown lifecycle.
+
+    Context is created lazily on first tool call, not at server startup.
+
+    CRITICAL: Following PyGhidra documentation pattern from first-script.md:95-98
+    - Always call launcher.terminate() in finally block
+    - Ensures JVM is properly shutdown even on errors
+    - Prevents resource leaks (memory, file handles, threads)
+    """
     try:
-        yield server._pyghidra_context  # type: ignore
+        yield None  # type: ignore
     finally:
-        # pyghidra_context.close()
-        pass
+        global _pyghidra_launcher
+        if _pyghidra_launcher is not None:
+            logger.info("Shutting down Ghidra JVM...")
+            try:
+                import jpype
+                if jpype.isJVMStarted():
+                    if hasattr(_pyghidra_launcher, 'stop'):
+                        _pyghidra_launcher.stop()
+                    # Shutdown JVM
+                    jpype.shutdownJVM()
+                    logger.info("Ghidra JVM terminated successfully")
+                _pyghidra_launcher = None
+            except Exception as e:
+                logger.error(f"Error terminating Ghidra JVM: {e}")
+
+        # Then close context
+        if _pyghidra_context is not None:
+            try:
+                _pyghidra_context.close()
+                logger.info("PyGhidra context closed")
+            except Exception as e:
+                logger.error(f"Error closing context: {e}")
 
 
 mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
@@ -64,14 +157,15 @@ mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
 async def decompile_function(
     binary_name: str, name_or_address: str, ctx: Context
 ) -> DecompiledFunction:
-    """Decompiles a function in a specified binary and returns its pseudo-C code.
+    """Decompiles a function in the currently loaded program and returns its pseudo-C code.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: The name of the binary containing the function.
         name_or_address: The name or address of the function to decompile.
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         return tools.decompile_function_by_name_or_addr(name_or_address)
@@ -94,13 +188,14 @@ def search_symbols_by_name(
     Global Variables, Parameters, and Local Variables.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: The name of the binary to search within.
         query: The substring to search for in symbol names (case-insensitive).
         offset: The number of results to skip.
         limit: The maximum number of results to return.
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         symbols = tools.search_symbols_by_name(query, offset, limit)
@@ -128,12 +223,13 @@ def search_code(binary_name: str, query: str, ctx: Context, limit: int = 5) -> C
     signature or key logic snippet to minimize irrelevant matches.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: Name of the binary to search within.
         query: Code snippet signature or description to match via semantic search.
         limit: Maximum number of top scoring results to return (default: 5).
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         results = tools.search_code(query, limit)
@@ -161,17 +257,20 @@ def list_project_binaries(ctx: Context) -> ProgramInfos:
     Use this to inspect the full set of binaries in the project, monitor analysis
     progress, or drive follow up actions such as listing imports/exports or running
     code searches on specific programs.
+
+    Args:
+        ctx: The MCP request context (provided by FastMCP)
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_infos = []
-        for name, pi in pyghidra_context.programs.items():
+        for _name, pi in pyghidra_context.programs.items():
             program_infos.append(
                 ProgramInfo(
-                    name=name,
+                    name=pi.name,
                     file_path=str(pi.file_path) if pi.file_path else None,
                     load_time=pi.load_time,
-                    analysis_complete=pi.analysis_complete,
+                    analysis_complete=pi.analysis_complete,  # Thread-safe property access
                     metadata={},
                     code_collection=pi.code_collection is not None,
                     strings_collection=pi.strings_collection is not None,
@@ -201,13 +300,14 @@ def list_project_binary_metadata(binary_name: str, ctx: Context) -> BinaryMetada
     and details from the executable format (e.g., ELF or PE).
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: The name of the binary to retrieve metadata for.
 
     Returns:
-        An object containing detailed metadata for the specified binary.
+        An object containing detailed metadata for the specified program.
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         metadata_dict = program_info.metadata
         return BinaryMetadata.model_validate(metadata_dict)
@@ -227,10 +327,11 @@ async def delete_project_binary(binary_name: str, ctx: Context) -> str:
     """Deletes a binary (program) from the project.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: The name of the binary to delete.
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         if pyghidra_context.delete_program(binary_name):
             return f"Successfully deleted binary: {binary_name}"
         else:
@@ -264,6 +365,7 @@ def list_exports(
     to list only initialization-related exports.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: Name of the binary to inspect.
         query: Strongly recommended. Regex pattern to match specific
                export names. Use to limit irrelevant results and narrow
@@ -272,7 +374,7 @@ def list_exports(
         limit: Maximum number of results to return.
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         exports = tools.list_exports(query=query, offset=offset, limit=limit)
@@ -303,6 +405,7 @@ def list_imports(
     For example: `query="socket"` to only see socket-related imports.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: Name of the binary to inspect.
         query: Strongly recommended. Regex pattern to match specific
                import names. Use to reduce irrelevant results and narrow
@@ -311,7 +414,7 @@ def list_imports(
         limit: Maximum number of results to return.
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         imports = tools.list_imports(query=query, offset=offset, limit=limit)
@@ -334,12 +437,13 @@ def list_cross_references(
     the error message will suggest other symbols that are close matches.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: The name of the binary to search for cross-references in.
         name_or_address: The name of the function, symbol, or a specific address (e.g., '0x1004010')
         to find cross-references to.
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         cross_references = tools.list_cross_references(name_or_address)
@@ -363,12 +467,13 @@ def search_strings(
     This can be very useful to gain general understanding of behaviors.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: The name of the binary to search within.
         query: A query to filter strings by.
         limit: The maximum number of results to return.
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         strings = tools.search_strings(query=query, limit=limit)
@@ -382,16 +487,37 @@ def search_strings(
 
 
 @mcp.tool()
+def get_image_base(binary_name: str, ctx: Context) -> ImageBaseResult:
+    """Get the image base address of a binary.
+
+    Args:
+        ctx: The MCP request context (provided by FastMCP)
+        binary_name: The name of the binary to get the image base for.
+    """
+    try:
+        pyghidra_context = get_or_create_context()
+        program_info = pyghidra_context.get_program_info(binary_name)
+        tools = GhidraTools(program_info)
+        image_base = tools.get_image_base()
+        return ImageBaseResult(image_base=image_base)
+    except ValueError as e:
+        raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e))) from e
+    except Exception as e:
+        raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Error getting image base: {e!s}")) from e
+
+
+@mcp.tool()
 def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> BytesReadResult:
     """Reads raw bytes from memory at a specified address.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: The name of the binary to read bytes from.
         address: The memory address to read from (supports hex format with or without 0x prefix).
         size: The number of bytes to read (default: 32, max: 8192).
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         return tools.read_bytes(address=address, size=size)
@@ -420,6 +546,7 @@ def gen_callgraph(
     the target function.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_name: The name of the binary containing the function.
         function_name: The name of the function to generate the call graph for.
         direction: Direction of the call graph (calling or called).
@@ -429,7 +556,7 @@ def gen_callgraph(
         bottom_layers: Number of bottom layers to show in a condensed graph.
     """
     try:
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        pyghidra_context = get_or_create_context()
         program_info = pyghidra_context.get_program_info(binary_name)
         tools = GhidraTools(program_info)
         return tools.gen_callgraph(
@@ -456,12 +583,13 @@ def import_binary(binary_path: str, ctx: Context) -> str:
     """Imports a binary from a designated path into the current Ghidra project.
 
     Args:
+        ctx: The MCP request context (provided by FastMCP)
         binary_path: The path to the binary file to import.
     """
     try:
-        # We would like to do context progress updates, but until that is more
-        # widely supported by clients, we will resort to this
-        pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+        # Import binary in background mode with progress reporting via logging
+        # (MCP progress context updates not yet widely supported by clients)
+        pyghidra_context = get_or_create_context()
         pyghidra_context.import_binary_backgrounded(binary_path)
         return (
             f"Importing {binary_path} in the background."
@@ -492,68 +620,84 @@ def init_pyghidra_context(
     list_project_binaries: bool,
     delete_project_binary: str | None,
 ) -> FastMCP:
-    bin_paths: list[str | Path] = [Path(p) for p in input_paths]
-    logger.info(f"Project: {project_name}")
-    logger.info(f"Project: Location {project_directory}")
+    """
+    Lightweight initialization that stores configuration without creating a Ghidra project.
+
+    The actual Ghidra project is created lazily on the first tool call via get_or_create_context().
+    This allows multiple MCP server instances to start without lock contention.
+    """
+    global _context_config
+
+    logger.info("Server initializing (lazy mode - project created on first tool call)...")
 
     program_options: dict | None = None
     if program_options_path:
         with open(program_options_path) as f:
             program_options = json.load(f)
 
-    # init pyghidra
-    pyghidra.start(False)  # setting Verbose output
+    # Store configuration for lazy initialization
+    _context_config = {
+        "project_name": project_name,
+        "project_directory": project_directory,
+        "force_analysis": force_analysis,
+        "verbose_analysis": verbose_analysis,
+        "no_symbols": no_symbols,
+        "gdts": gdts,
+        "program_options": program_options,
+        "gzfs_path": gzfs_path,
+        "threaded": threaded,
+        "max_workers": max_workers,
+        "wait_for_analysis": wait_for_analysis,
+    }
 
-    # init PyGhidraContext / import + analyze binaries
-    logger.info("Server initializing...")
-    pyghidra_context = PyGhidraContext(
-        project_name=project_name,
-        project_path=project_directory,
-        force_analysis=force_analysis,
-        verbose_analysis=verbose_analysis,
-        no_symbols=no_symbols,
-        gdts=gdts,
-        program_options=program_options,
-        gzfs_path=gzfs_path,
-        threaded=threaded,
-        max_workers=max_workers,
-        wait_for_analysis=wait_for_analysis,
-    )
+    # Only initialize pyghidra itself, don't create a project yet
+    # Redirect stdout to stderr at the OS level to prevent Java/pyghidra output from breaking MCP stdio protocol
+    stdout_fd = sys.stdout.fileno()
+    stderr_fd = sys.stderr.fileno()
 
-    if list_project_binaries:
-        binaries = pyghidra_context.list_binaries()
-        if binaries:
-            click.echo("Ghidra Project Binaries:")
-            for binary_name in binaries:
-                click.echo(f"- {binary_name}")
-        else:
-            click.echo("No binaries found in the project.")
-        sys.exit(0)
+    # Save original stdout fd
+    original_stdout_fd = os.dup(stdout_fd)
 
-    if delete_project_binary:
+    global _pyghidra_launcher
+
+    try:
+        # Redirect stdout to stderr
+        os.dup2(stderr_fd, stdout_fd)
+
+        # CRITICAL: Capture launcher reference for cleanup
+        # Following PyGhidra documentation pattern: launcher = api.start()
+        _pyghidra_launcher = pyghidra.start(False)  # Disable verbose output
+        logger.info("Ghidra JVM started successfully")
+    finally:
+        # Always restore original stdout and close the duplicated fd
+        # Use a nested try/except to ensure we close the fd even if dup2 fails
         try:
-            if pyghidra_context.delete_program(delete_project_binary):
-                click.echo(f"Successfully deleted binary: {delete_project_binary}")
-            else:
-                click.echo(f"Failed to delete binary: {delete_project_binary}", err=True)
-        except ValueError as e:
-            click.echo(f"Error: {e}", err=True)
-        sys.exit(0)
+            os.dup2(original_stdout_fd, stdout_fd)
+        finally:
+            os.close(original_stdout_fd)
 
-    if len(bin_paths) > 0:
-        logger.info(f"Adding new bins: {', '.join(map(str, bin_paths))}")
-        logger.info(f"Importing binaries to {project_directory}")
-        pyghidra_context.import_binaries(bin_paths)
+    # Note: input_paths are ignored in server mode - use import_binary tool instead
+    if input_paths:
+        logger.info(
+            f"Note: input_paths provided ({len(input_paths)} files) "
+            "but will not be imported automatically. "
+            "Use the import_binary tool instead."
+        )
 
-    logger.info(f"Analyzing project: {pyghidra_context.project}")
-    pyghidra_context.analyze_project()
+    # These flags require immediate project access, which doesn't fit lazy mode
+    if list_project_binaries or delete_project_binary:
+        logger.warning(
+            "--list-project-binaries and --delete-project-binary "
+            "require immediate project access, which is not supported in lazy mode. "
+            "Please start the server and use the tools instead."
+        )
+        if list_project_binaries:
+            click.echo("List binaries feature not available in lazy mode. Start server and use tools.")
+        if delete_project_binary:
+            click.echo("Delete binary feature not available in lazy mode. Start server and use tools.")
+        sys.exit(1)
 
-    if len(pyghidra_context.list_binaries()) == 0:
-        logger.warning("No binaries were imported and none exist in the project.")
-
-    mcp._pyghidra_context = pyghidra_context  # type: ignore
-    logger.info("Server intialized")
-
+    logger.info("Server ready - Ghidra project will be created on first tool call")
     return mcp
 
 
@@ -698,7 +842,15 @@ def main(
     For streamable-http and sse, it will start an HTTP server on the specified port (default 8000).
 
     """
-    project_name = project_path.stem
+    # Generate unique project name to avoid lock conflicts when multiple agents run concurrently
+    if input_paths:
+        # Use hash of first input file for project name
+        first_bin_hash = hashlib.sha256(str(input_paths[0]).encode()).hexdigest()[:12]
+        project_name = f"{project_path.stem}_{first_bin_hash}"
+    else:
+        # Fallback to process ID + timestamp if no input paths provided
+        project_name = f"{project_path.stem}_{os.getpid()}_{int(time.time())}"
+
     project_directory = str(project_path.parent)
     mcp.settings.port = port
     mcp.settings.host = host
@@ -721,18 +873,18 @@ def main(
         delete_project_binary=delete_project_binary,
     )
 
-    try:
-        if transport == "stdio":
-            mcp.run(transport="stdio")
-        elif transport in ["streamable-http", "http"]:
-            mcp.run(transport="streamable-http")
-        elif transport == "sse":
-            mcp.run(transport="sse")
-        else:
-            raise ValueError(f"Invalid transport: {transport}")
-    finally:
-        mcp._pyghidra_context.close()  # type: ignore
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    elif transport in ["streamable-http", "http"]:
+        mcp.run(transport="streamable-http")
+    elif transport == "sse":
+        mcp.run(transport="sse")
+    else:
+        raise ValueError(f"Invalid transport: {transport}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"Unknown error occured: {e}")
