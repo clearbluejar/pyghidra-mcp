@@ -14,11 +14,9 @@ from pyghidra_mcp.models import BytesReadResult, ImageBaseResult
 @pytest.mark.asyncio
 async def test_read_bytes_tool(shared_mcp_session):
     """Test that read_bytes works - basic smoke test."""
-    # Use shared MCP session (no need to create new connection)
+    # Use shared MCP session with pre-imported demo binary
     session = shared_mcp_session
-
-    # Use pre-imported demo binary from shared session
-    binary_name = await import_binary_and_wait(session, test_binary, wait_for_code=False, wait_for_strings=False)
+    binary_name = session.demo_binary_name
 
     # Get the image base address (differs between ELF and PE)
     response = await session.call_tool(

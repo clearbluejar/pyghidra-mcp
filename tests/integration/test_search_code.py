@@ -52,11 +52,9 @@ async def test_search_code(shared_mcp_session):
     """
     Tests searching for code using similarity search.
     """
-    # Use shared MCP session (no need to create new connection)
+    # Use shared MCP session with pre-imported demo binary
     session = shared_mcp_session
-
-    # Use pre-imported demo binary from shared session
-    binary_name = await import_binary_and_wait(session, test_binary, wait_for_strings=False)
+    binary_name = session.demo_binary_name
 
     # 1. Decompile a function to get its code to use as a query
     decompile_response = await session.call_tool(

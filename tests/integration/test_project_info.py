@@ -10,11 +10,9 @@ from mcp.client.stdio import stdio_client
 async def test_list_project_binaries_tool(shared_mcp_session):
     """Test the list_project_binaries tool."""
 
-    # Use shared MCP session (no need to create new connection)
+    # Use shared MCP session with pre-imported demo binary
     session = shared_mcp_session
-
-    # Use pre-imported demo binary from shared session
-    binary_name = await import_binary_and_wait(session, test_binary, wait_for_code=False, wait_for_strings=False)
+    binary_name = session.demo_binary_name
 
     # Call the list_project_binaries tool
     results = await session.call_tool("list_project_binaries", {})
