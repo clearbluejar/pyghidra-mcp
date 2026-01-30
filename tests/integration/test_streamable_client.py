@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import platform
+import socket
 import subprocess
 import sys
 import time
@@ -13,6 +14,18 @@ from mcp.client.streamable_http import streamable_http_client
 
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import DecompiledFunction
+
+
+async def _wait_for_port(host: str, port: int, timeout: int = 60):
+    """Wait for a TCP port to be accepting connections."""
+    start_time = asyncio.get_event_loop().time()
+    while (asyncio.get_event_loop().time() - start_time) < timeout:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True
+        except (ConnectionRefusedError, socket.timeout, OSError):
+            await asyncio.sleep(1)
+    return False
 
 @pytest.fixture(scope="module")
 def streamable_server(test_binary, ghidra_install_dir, base_url):
@@ -36,16 +49,14 @@ def streamable_server(test_binary, ghidra_install_dir, base_url):
     )
 
     async def wait_for_server(timeout=240):
-        async with aiohttp.ClientSession() as session:
-            for _ in range(timeout):  # Poll for 20 seconds
-                try:
-                    async with session.get(f"{base_url}/mcp") as response:
-                        if response.status == 406:
-                            return
-                except aiohttp.ClientConnectorError:
-                    pass
-                await asyncio.sleep(1)
+        port = int(base_url.split(":")[-1])
+        host = "127.0.0.1"
+
+        if not await _wait_for_port(host, port, timeout=timeout):
             raise RuntimeError("Server did not start in time")
+
+        # Give server a moment to fully initialize
+        await asyncio.sleep(2)
 
     asyncio.run(wait_for_server())
 
