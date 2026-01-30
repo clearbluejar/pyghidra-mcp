@@ -123,32 +123,90 @@ async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
     - Always call launcher.terminate() in finally block
     - Ensures JVM is properly shutdown even on errors
     - Prevents resource leaks (memory, file handles, threads)
+
+    NOTE: JVM cleanup only happens in stdio mode. For SSE/streamable-http,
+    the JVM lifecycle matches the HTTP server process lifecycle (via atexit).
     """
     try:
         yield None  # type: ignore
     finally:
-        global _pyghidra_launcher
-        if _pyghidra_launcher is not None:
-            logger.info("Shutting down Ghidra JVM...")
-            try:
-                import jpype
-                if jpype.isJVMStarted():
-                    if hasattr(_pyghidra_launcher, 'stop'):
-                        _pyghidra_launcher.stop()
-                    # Shutdown JVM
-                    jpype.shutdownJVM()
-                    logger.info("Ghidra JVM terminated successfully")
-                _pyghidra_launcher = None
-            except Exception as e:
-                logger.error(f"Error terminating Ghidra JVM: {e}")
+        global _pyghidra_launcher, _pyghidra_context
 
-        # Then close context
-        if _pyghidra_context is not None:
-            try:
-                _pyghidra_context.close()
-                logger.info("PyGhidra context closed")
-            except Exception as e:
-                logger.error(f"Error closing context: {e}")
+        # Only close JVM in stdio mode (where lifespan = process lifecycle)
+        # For SSE/streamable-http, JVM is managed by Starlette/atexit
+        if _transport_mode == "stdio":
+            if _pyghidra_launcher is not None:
+                logger.info("Shutting down Ghidra JVM...")
+                try:
+                    import jpype
+                    if jpype.isJVMStarted():
+                        if hasattr(_pyghidra_launcher, 'stop'):
+                            _pyghidra_launcher.stop()
+                        # Shutdown JVM
+                        jpype.shutdownJVM()
+                        logger.info("Ghidra JVM terminated successfully")
+                    _pyghidra_launcher = None
+                except Exception as e:
+                    logger.error(f"Error terminating Ghidra JVM: {e}")
+
+            # Then close context
+            if _pyghidra_context is not None:
+                try:
+                    _pyghidra_context.close()
+                    logger.info("PyGhidra context closed")
+                except Exception as e:
+                    logger.error(f"Error closing context: {e}")
+        else:
+            # For SSE/streamable-http, log but don't cleanup
+            logger.debug(f"Skipping JVM cleanup in lifespan (transport={_transport_mode})")
+
+
+# JVM Cleanup for SSE/HTTP Transports
+# ---------------------------------------------------------------------------------
+async def cleanup_jvm_http() -> None:
+    """Cleanup JVM for SSE/streamable-http transports."""
+    global _pyghidra_launcher, _pyghidra_context
+
+    logger.info("HTTP server shutting down, cleaning up JVM...")
+    if _pyghidra_launcher is not None:
+        try:
+            import jpype
+            if jpype.isJVMStarted():
+                if hasattr(_pyghidra_launcher, 'stop'):
+                    _pyghidra_launcher.stop()
+                jpype.shutdownJVM()
+                logger.info("Ghidra JVM terminated successfully")
+            _pyghidra_launcher = None
+        except Exception as e:
+            logger.error(f"Error terminating Ghidra JVM: {e}")
+
+    if _pyghidra_context is not None:
+        try:
+            _pyghidra_context.close()
+            logger.info("PyGhidra context closed")
+        except Exception as e:
+            logger.error(f"Error closing context: {e}")
+
+
+def cleanup_jvm_atexit() -> None:
+    """Synchronous atexit handler for JVM cleanup."""
+    logger.info("Process exiting, ensuring JVM cleanup...")
+    # Run async cleanup in new event loop if needed
+    try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(cleanup_jvm_http())
+        loop.close()
+    except Exception as e:
+        logger.error(f"Error in atexit JVM cleanup: {e}")
+
+
+# Register atexit handler for SSE/HTTP modes
+import atexit
+
+
+atexit.register(cleanup_jvm_atexit)
 
 
 mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
@@ -622,6 +680,7 @@ def init_pyghidra_context(
     wait_for_analysis: bool,
     list_project_binaries: bool,
     delete_project_binary: str | None,
+    transport: str = "stdio",
 ) -> FastMCP:
     """
     Lightweight initialization that stores configuration without creating a Ghidra project.
@@ -629,7 +688,10 @@ def init_pyghidra_context(
     The actual Ghidra project is created lazily on the first tool call via get_or_create_context().
     This allows multiple MCP server instances to start without lock contention.
     """
-    global _context_config
+    global _context_config, _transport_mode
+
+    # Store transport mode for JVM lifecycle management
+    _transport_mode = transport
 
     logger.info("Server initializing (lazy mode - project created on first tool call)...")
 
@@ -876,6 +938,7 @@ def main(
         wait_for_analysis=wait_for_analysis,
         list_project_binaries=list_project_binaries,
         delete_project_binary=delete_project_binary,
+        transport=transport,
     )
 
     if transport == "stdio":
