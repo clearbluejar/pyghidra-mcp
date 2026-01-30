@@ -2,11 +2,10 @@ import asyncio
 import json
 import os
 import platform
+import socket
 import subprocess
 import sys
-import time
 
-import aiohttp
 import pytest
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
@@ -17,90 +16,115 @@ from pyghidra_mcp.models import DecompiledFunction
 print(f"MCP_BASE_URL: Using dynamic port from pytest fixture")
 
 
-@pytest.fixture(scope="module")
-def sse_server(ghidra_install_dir, base_url, test_binary):
-    # Extract port from base_url
-    port = base_url.split(":")[-1]
+async def _wait_for_port(host: str, port: int, timeout: int = 60):
+    """Wait for a TCP port to be accepting connections."""
+    start_time = asyncio.get_event_loop().time()
+    while (asyncio.get_event_loop().time() - start_time) < timeout:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True
+        except (ConnectionRefusedError, socket.timeout, OSError):
+            await asyncio.sleep(1)
+    return False
 
-    # Start the SSE server with test_binary (cross-platform)
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "pyghidra_mcp", "--no-threaded", "--transport", "sse", "--port", port, test_binary],
-        env={**os.environ, "GHIDRA_INSTALL_DIR": ghidra_install_dir},
-        # stdout/stderr inherit from parent (no redirection)
-        # This prevents deadlock when pipe buffers fill up
-    )
 
-    async def wait_for_server(timeout=240):
-        async with aiohttp.ClientSession() as session:
-            for _ in range(timeout):  # Poll for 60 seconds
-                try:
-                    async with session.get(f"{base_url}/sse") as response:
-                        if response.status == 200:
-                            return
-                except aiohttp.ClientConnectorError:
-                    pass
+async def _wait_for_jvm_ready(session: ClientSession, timeout: int = 240):
+    """Wait for JVM to be ready by polling list_project_binaries."""
+    for i in range(timeout):
+        try:
+            response = await session.call_tool("list_project_binaries", {})
+        except Exception as e:
+            print(f"[WAIT] Server not ready yet: {e}, retrying...")
+            await asyncio.sleep(1)
+            continue
+
+        if response.content and len(response.content) > 0:
+            text_content = response.content[0].text
+
+            if i == 0:
+                print(f"\n[DEBUG] First list_project_binaries response:")
+                print(f"Length: {len(text_content)}")
+                print(f"Content (first 500 chars): {repr(text_content[:500])}")
+
+            if "without jvm" in text_content.lower() or "not started" in text_content.lower():
+                if i % 10 == 0:
+                    print(f"[WAIT] Waiting for JVM... ({i}/{timeout}s)")
                 await asyncio.sleep(1)
-            raise RuntimeError("Server did not start in time")
+                continue
 
-    asyncio.run(wait_for_server())
+            try:
+                data = json.loads(text_content)
+                print(f"[SUCCESS] JVM and server ready! Programs: {len(data.get('programs', []))}")
+                return
+            except json.JSONDecodeError:
+                print(f"[WARN] JSON decode error, retrying...")
+                await asyncio.sleep(1)
+                continue
+        else:
+            print(f"[WARN] Empty response, retrying...")
+            await asyncio.sleep(1)
+            continue
 
-    time.sleep(2)
-
-    yield test_binary, base_url
-    proc.terminate()
-    proc.wait()
+    raise RuntimeError(f"JVM did not start in {timeout} seconds")
 
 
 @pytest.mark.asyncio
-async def test_sse_client_smoke(sse_server):
-    test_binary_path, base_url = sse_server
-    # Generate the binary name that Ghidra will use
-    binary_name = PyGhidraContext._gen_unique_bin_name(test_binary_path)
+async def test_sse_client_smoke(ghidra_install_dir, base_url, test_binary, import_binary_and_wait):
+    """Test SSE client with lazy initialization."""
+    port = int(base_url.split(":")[-1])
+    host = "127.0.0.1"
 
-    # Use platform-specific entry point
-    # Windows: mainCRTStartup is the actual entry function
-    # Linux: main is more reliable as entry point may vary
-    if platform.system() == "Windows":
-        entry_function = "mainCRTStartup"
-    else:
-        # Linux/Unix: use 'main' as it's always available
-        entry_function = "main"
+    # Start the SSE server process
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pyghidra_mcp", "--transport", "sse", "--port", str(port)],
+        env={**os.environ, "GHIDRA_INSTALL_DIR": ghidra_install_dir},
+    )
 
-    async with sse_client(f"{base_url}/sse") as (read_stream, write_stream):
-        async with ClientSession(read_stream, write_stream) as session:
-            # Initializing session...
-            await session.initialize()
-            # Session initialized
+    try:
+        # Wait for HTTP server to be ready using TCP port check
+        # This avoids establishing an SSE connection which could trigger JVM shutdown
+        print(f"[WAIT] Waiting for HTTP server to start on port {port}...")
+        if not await _wait_for_port(host, port, timeout=60):
+            raise RuntimeError("HTTP server did not start in time")
+        print(f"[WAIT] HTTP server ready!")
 
-            # Wait for binary to be imported and analyzed (server started with test_binary)
-            # Note: The SSE server was started with test_binary, so it should already be imported
-            # We just need to wait for analysis to complete
-            timeout_seconds = 120
-            start_time = asyncio.get_event_loop().time()
+        # Establish SSE connection and keep it open
+        print(f"[WAIT] Establishing SSE connection and waiting for JVM...")
+        async with sse_client(f"{base_url}/sse") as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
 
-            while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
-                await asyncio.sleep(1)
-                prog_resp = await session.call_tool("list_project_binaries", {})
-                prog_result = json.loads(prog_resp.content[0].text)
-                prog_infos = prog_result.get("programs", [])
+                # Wait for JVM to be ready
+                await _wait_for_jvm_ready(session)
 
-                for pi in prog_infos:
-                    if binary_name in pi.get("name", ""):
-                        if pi.get("analysis_complete"):
-                            break
+                # Generate the binary name that Ghidra will use
+                binary_name = PyGhidraContext._gen_unique_bin_name(test_binary)
+
+                # Use platform-specific entry point
+                if platform.system() == "Windows":
+                    entry_function = "mainCRTStartup"
                 else:
-                    continue
-                break
+                    entry_function = "main"
 
-            # Decompile entry point function (platform-specific)
-            results = await session.call_tool(
-                "decompile_function",
-                {"binary_name": binary_name, "name_or_address": entry_function},
-            )
-            # We have results!
-            assert results is not None
-            content = json.loads(results.content[0].text)
-            assert isinstance(content, dict)
-            assert len(content.keys()) == len(DecompiledFunction.model_fields.keys())
-            assert entry_function in content["code"] or "main" in content["code"]
-            print(json.dumps(content, indent=2))
+                # Import binary and wait for analysis to complete
+                await import_binary_and_wait(session, test_binary, wait_for_code=False, wait_for_strings=False)
+
+                # Decompile entry point function
+                results = await session.call_tool(
+                    "decompile_function",
+                    {"binary_name": binary_name, "name_or_address": entry_function},
+                )
+
+                # Verify results
+                assert results is not None
+                content = json.loads(results.content[0].text)
+                assert isinstance(content, dict)
+                assert len(content.keys()) == len(DecompiledFunction.model_fields.keys())
+                assert entry_function in content["code"] or "main" in content["code"]
+                print(json.dumps(content, indent=2))
+
+    finally:
+        # Cleanup: terminate server process
+        print(f"[CLEANUP] Terminating server process...")
+        proc.terminate()
+        proc.wait()

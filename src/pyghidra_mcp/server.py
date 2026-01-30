@@ -668,6 +668,8 @@ def init_pyghidra_context(
         # Following PyGhidra documentation pattern: launcher = api.start()
         _pyghidra_launcher = pyghidra.start(False)  # Disable verbose output
         logger.info("Ghidra JVM started successfully")
+    except Exception as e:
+        raise
     finally:
         # Always restore original stdout and close the duplicated fd
         # Use a nested try/except to ensure we close the fd even if dup2 fails
