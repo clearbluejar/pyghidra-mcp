@@ -1,17 +1,22 @@
 import os
+import sys
 import tempfile
 
 import pytest
-from mcp import ClientSession, StdioServerParameters
+from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import CodeSearchResults, DecompiledFunction
 
 
 @pytest.fixture(scope="module")
 def test_binary():
-    """Create a simple test binary for testing."""
+    """
+    Create a test binary with a specific function for search_code testing.
+
+    NOTE: This fixture is customized for this test (includes function_to_find)
+    and cannot use the generic test_binary fixture from conftest.py.
+    """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
         f.write(
             """
@@ -30,7 +35,9 @@ int main() {
         )
         c_file = f.name
 
-    bin_file = c_file.replace(".c", "")
+    # On Windows, gcc adds .exe extension automatically
+    bin_ext = ".exe" if sys.platform == "win32" else ""
+    bin_file = c_file.replace(".c", bin_ext)
 
     os.system(f"gcc -o {bin_file} {c_file}")
 
@@ -40,49 +47,65 @@ int main() {
     os.unlink(bin_file)
 
 
-@pytest.fixture(scope="module")
-def server_params(test_binary):
-    """Get server parameters with a test binary."""
-    return StdioServerParameters(
-        command="python",  # Executable
-        # Run with test binary
-        args=["-m", "pyghidra_mcp", "--no-threaded", test_binary],  # no-thread for search_code
-        # Optional environment variables
-        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
-    )
-
-
 @pytest.mark.asyncio
-async def test_search_code(server_params):
+async def test_search_code(shared_mcp_session, test_binary):
     """
     Tests searching for code using similarity search.
+
+    NOTE: This test uses its own test_binary fixture (with function_to_find)
+    instead of the pre-imported demo binary, because it needs a specific function
+    for semantic code search testing.
     """
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            # Initialize the connection
-            await session.initialize()
+    # Use shared MCP session
+    session = shared_mcp_session
 
-            binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
+    # Import the test binary (with function_to_find)
+    from pyghidra_mcp.context import PyGhidraContext
+    import asyncio
 
-            # 1. Decompile a function to get its code to use as a query
-            decompile_response = await session.call_tool(
-                "decompile_function",
-                {"binary_name": binary_name, "name_or_address": "function_to_find"},
-            )
+    binary_name = PyGhidraContext._gen_unique_bin_name(test_binary)
+    await session.call_tool("import_binary", {"binary_path": test_binary})
 
-            decompiled_function = DecompiledFunction.model_validate_json(
-                decompile_response.content[0].text
-            )
-            query_code = decompiled_function.code
+    # Wait for import and analysis to complete
+    timeout_seconds = 120
+    start_time = asyncio.get_event_loop().time()
 
-            # 2. Use the decompiled code to search for the function
-            search_response = await session.call_tool(
-                "search_code", {"binary_name": binary_name, "query": query_code, "limit": 1}
-            )
+    while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
+        await asyncio.sleep(1)
+        prog_resp = await session.call_tool("list_project_binaries", {})
+        import json
+        prog_result = json.loads(prog_resp.content[0].text)
+        prog_infos = prog_result.get("programs", [])
 
-            search_results = CodeSearchResults.model_validate_json(search_response.content[0].text)
+        for pi in prog_infos:
+            if binary_name in pi.get("name", ""):
+                if (pi.get("analysis_complete") and
+                    pi.get("code_collection") and
+                    pi.get("strings_collection")):
+                    break
+        else:
+            continue
+        break
 
-            # 3. Assert the results
-            assert len(search_results.results) > 0
-            # The top result should be the function we searched for
-            assert "function_to_find" in search_results.results[0].function_name
+    # 1. Decompile a function to get its code to use as a query
+    decompile_response = await session.call_tool(
+        "decompile_function",
+        {"binary_name": binary_name, "name_or_address": "function_to_find"},
+    )
+
+    decompiled_function = DecompiledFunction.model_validate_json(
+        decompile_response.content[0].text
+    )
+    query_code = decompiled_function.code
+
+    # 2. Use the decompiled code to search for the function
+    search_response = await session.call_tool(
+        "search_code", {"binary_name": binary_name, "query": query_code, "limit": 1}
+    )
+
+    search_results = CodeSearchResults.model_validate_json(search_response.content[0].text)
+
+    # 3. Assert the results
+    assert len(search_results.results) > 0
+    # The top result should be the function we searched for
+    assert "function_to_find" in search_results.results[0].function_name

@@ -37,10 +37,14 @@ class ProgramInfo(BaseModel):
     analysis_complete: bool = Field(
         ..., description="Indicates if Ghidra's analysis of the program has completed."
     )
-    metadata: dict = Field(..., description="A dictionary of metadata associated with the program.")
-    code_collection: bool = Field(..., description="True if the chromadb code collection is ready")
+    metadata: dict = Field(
+        ..., description="Ghidra program metadata (e.g., architecture, compiler, language ID)"
+    )
+    code_collection: bool = Field(
+        ..., description="Whether the ChromaDB code collection has been created and populated with decompiled functions"
+    )
     strings_collection: bool = Field(
-        ..., description="True if the chromadb strings collection is ready"
+        ..., description="Whether the ChromaDB strings collection has been created and populated with extracted strings"
     )
 
 
@@ -102,11 +106,19 @@ class SymbolInfo(BaseModel):
 
     name: str = Field(..., description="The name of the symbol.")
     address: str = Field(..., description="The address of the symbol.")
-    type: str = Field(..., description="The type of the symbol.")
-    namespace: str = Field(..., description="The namespace of the symbol.")
-    source: str = Field(..., description="The source of the symbol.")
+    type: str = Field(
+        ..., description="Symbol type (e.g., FUNCTION, CODE, DATA, CLASS, NAMESPACE)"
+    )
+    namespace: str = Field(
+        ..., description="Symbol namespace (empty string for global namespace)"
+    )
+    source: str = Field(
+        ..., description="Symbol origin (e.g., DEFAULT, ANALYSIS, USER_DEFINED, COMPILER)"
+    )
     refcount: int = Field(..., description="The reference count of the symbol.")
-    external: bool = Field(..., description="Is symbol external.")
+    external: bool = Field(
+        ..., description="Whether the symbol is external to the binary (imported)"
+    )
 
 
 class SymbolSearchResults(BaseModel):
@@ -124,7 +136,9 @@ class CodeSearchResult(BaseModel):
         ..., description="The name of the function where the code was found."
     )
     code: str = Field(..., description="The code snippet that matched the search query.")
-    similarity: float = Field(..., description="The similarity score of the search result.")
+    similarity: float = Field(
+        ..., description="Semantic similarity score (0.0-1.0, higher is better match)"
+    )
 
 
 class CodeSearchResults(BaseModel):
@@ -143,7 +157,9 @@ class StringInfo(BaseModel):
 class StringSearchResult(StringInfo):
     """Represents a string search result found within the binary."""
 
-    similarity: float = Field(..., description="The similarity score of the search result.")
+    similarity: float = Field(
+        ..., description="Semantic similarity score (0.0-1.0, higher is better match)"
+    )
 
 
 class StringSearchResults(BaseModel):
@@ -155,13 +171,27 @@ class StringSearchResults(BaseModel):
 class BytesReadResult(BaseModel):
     """Represents the result of reading raw bytes from memory."""
 
-    address: str = Field(..., description="The normalized address where bytes were read from.")
+    address: str = Field(
+        ..., description="Normalized address in hex format with '0x' prefix (e.g., '0x401000')"
+    )
     size: int = Field(..., description="The actual number of bytes read.")
-    data: str = Field(..., description="The raw bytes as a hexadecimal string.")
+    data: str = Field(
+        ..., description="Raw bytes as hexadecimal string with '0x' prefix (e.g., '0x488b45')"
+    )
+
+
+class ImageBaseResult(BaseModel):
+    """Represents the result of getting the image base address."""
+
+    image_base: str = Field(..., description="The image base address of the program.")
 
 
 class BinaryMetadata(BaseModel):
-    """Detailed metadata for a Ghidra program."""
+    """Detailed metadata for a Ghidra program.
+
+    Fields are aliased to match Ghidra's internal metadata property names.
+    The ConfigDict subclass allows extra fields and populates by alias name.
+    """
 
     program_name: str | None = Field(default=None, alias="Program Name")
     language_id: str | None = Field(default=None, alias="Language ID")
@@ -171,8 +201,12 @@ class BinaryMetadata(BaseModel):
     address_size: int | None = Field(default=None, alias="Address Size")
     minimum_address: str | None = Field(default=None, alias="Minimum Address")
     maximum_address: str | None = Field(default=None, alias="Maximum Address")
-    num_bytes: int | None = Field(default=None, alias="# of Bytes")
-    num_memory_blocks: int | None = Field(default=None, alias="# of Memory Blocks")
+    num_bytes: int | None = Field(
+        default=None, alias="# of Bytes", description="File size in bytes"
+    )
+    num_memory_blocks: int | None = Field(
+        default=None, alias="# of Memory Blocks", description="Number of memory blocks/sections in the program"
+    )
     num_instructions: int | None = Field(default=None, alias="# of Instructions")
     num_defined_data: int | None = Field(default=None, alias="# of Defined Data")
     num_functions: int | None = Field(default=None, alias="# of Functions")
@@ -197,14 +231,25 @@ class BinaryMetadata(BaseModel):
 
 
 class CallGraphDirection(str, Enum):
-    """Represents the direction of the call graph."""
+    """Represents the direction of the call graph traversal.
+
+    Values:
+        CALLING: Functions that this function calls (outgoing edges/callees)
+        CALLED: Functions that call this function (incoming edges/callers)
+    """
 
     CALLING = "calling"
     CALLED = "called"
 
 
 class CallGraphDisplayType(str, Enum):
-    """Represents the display type of the call graph."""
+    """Represents the display type of the call graph visualization.
+
+    Values:
+        FLOW: Standard flowchart layout with all nodes and edges
+        FLOW_ENDS: Flowchart layout emphasizing entry and exit points
+        MIND: Mind-map style layout (radial/clustered visualization)
+    """
 
     FLOW = "flow"
     FLOW_ENDS = "flow_ends"
@@ -223,5 +268,11 @@ class CallGraphResult(BaseModel):
     display_type: CallGraphDisplayType = Field(
         ..., description="The type of the call graph visualization."
     )
-    graph: str = Field(..., description="The MermaidJS markdown string for the call graph.")
-    mermaid_url: str = Field(..., description="The MermaidJS image url")
+    graph: str = Field(
+        ...,
+        description="The MermaidJS markdown graph definition (ready for rendering)"
+    )
+    mermaid_url: str = Field(
+        ...,
+        description="Temporary MermaidJS rendering service URL (may expire, not suitable for long-term storage)"
+    )

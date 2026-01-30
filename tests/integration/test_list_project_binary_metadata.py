@@ -8,42 +8,32 @@ from pyghidra_mcp.models import BinaryMetadata, ProgramInfos
 
 
 @pytest.mark.asyncio
-async def test_list_project_binary_metadata(server_params_no_input):
+async def test_list_project_binary_metadata(shared_mcp_session):
     """
     Test the list_project_binary_metadata tool.
     """
-    async with stdio_client(server_params_no_input) as (read, write):
-        async with ClientSession(read, write) as session:
-            # Initialize the connection
-            await session.initialize()
+    # Use shared MCP session with pre-imported demo binary
+    session = shared_mcp_session
+    binary_name = session.demo_binary_name
 
-            # First, list binaries to get a valid binary name
-            tool_resp = await session.call_tool("list_project_binaries", {})
-            program_infos_result = json.loads(tool_resp.content[0].text)
-            program_infos = ProgramInfos(**program_infos_result)
+    # Get the metadata
+    tool_resp = await session.call_tool(
+        "list_project_binary_metadata", {"binary_name": binary_name}
+    )
 
-            assert program_infos is not None
-            assert len(program_infos.programs) > 0
-            binary_name = program_infos.programs[0].name
+    assert tool_resp is not None
+    metadata_result = json.loads(tool_resp.content[0].text)
 
-            # Get the metadata
-            tool_resp = await session.call_tool(
-                "list_project_binary_metadata", {"binary_name": binary_name}
-            )
+    # The server returns a pydantic model which is serialized.
+    # We load it back into the model for validation.
+    metadata = BinaryMetadata(**metadata_result)
 
-            assert tool_resp is not None
-            metadata_result = json.loads(tool_resp.content[0].text)
-
-            # The server returns a pydantic model which is serialized.
-            # We load it back into the model for validation.
-            metadata = BinaryMetadata(**metadata_result)
-
-            assert isinstance(metadata, BinaryMetadata)
-            assert metadata.executable_location is not None
-            assert metadata.compiler is not None
-            assert metadata.processor is not None
-            assert metadata.endian is not None
-            assert metadata.address_size is not None
-            assert binary_name is not None
-            assert metadata.program_name is not None
-            assert metadata.program_name in binary_name
+    assert isinstance(metadata, BinaryMetadata)
+    assert metadata.executable_location is not None
+    assert metadata.compiler is not None
+    assert metadata.processor is not None
+    assert metadata.endian is not None
+    assert metadata.address_size is not None
+    assert binary_name is not None
+    assert metadata.program_name is not None
+    assert metadata.program_name in binary_name
