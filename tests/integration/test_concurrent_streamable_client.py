@@ -74,47 +74,7 @@ def streamable_server(ghidra_install_dir, base_url):
 
     time.sleep(3)
 
-    async def wait_for_analysis(test_binary, timeout: int = 120) -> None:
-        """
-        Repeatedly call `list_project_binaries` until all programs have
-        analysis complete, or until *timeout* seconds elapse.
-        """
-        deadline = time.time() + timeout
-
-        # Open a single persistent connection - re-using it keeps the overhead low.
-        async with streamablehttp_client(f"{base_url}/mcp") as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-
-                while True:
-                    tool_resp = await session.call_tool("list_project_binaries", {})
-                    program_infos_result = json.loads(tool_resp.content[0].text)
-                    program_infos = ProgramInfos(**program_infos_result)
-
-                    has_test_binary = any(
-                        PyGhidraContext._gen_unique_bin_name(Path(test_binary)) in pi.name
-                        for pi in program_infos.programs
-                    )
-
-                    has_incomplete = any(
-                        not pi.analysis_complete for pi in program_infos.programs
-                    )
-
-                    if (
-                        not has_incomplete and has_test_binary
-                    ):  # All analysis complete - success!
-                        return
-
-                    if time.time() > deadline:  # pragma: no cover
-                        raise RuntimeError(f"Analysis still incomplete after {timeout}s")
-
-                    await asyncio.sleep(1)  # Wait a bit before the next call
-
-    asyncio.run(wait_for_analysis(test_binary))
-
-    time.sleep(2)
-
-    yield test_binary
+    yield base_url
     proc.terminate()
     proc.wait()
 
@@ -175,24 +135,22 @@ async def test_concurrent_streamable_client_invocations(streamable_server, test_
             # Import binary
             import_resp = await session.call_tool("import_binary", {"binary_path": test_binary})
 
-            # Wait for analysis AND collections to complete
+            # Wait for analysis to complete
             for _ in range(120):  # Wait up to 2 minutes
                 await asyncio.sleep(1)
                 prog_resp = await session.call_tool("list_project_binaries", {})
                 prog_result = json.loads(prog_resp.content[0].text)
                 prog_infos = ProgramInfos(**prog_result)
 
-                # Check if analysis complete AND collections ready
+                # Check if analysis complete
                 if any(
                     binary_name in pi.name
                     and pi.analysis_complete
-                    and pi.code_collection
-                    and pi.strings_collection
                     for pi in prog_infos.programs
                 ):
                     break
             else:
-                raise RuntimeError(f"Binary {binary_name} not ready (analysis + collections) after timeout")
+                raise RuntimeError(f"Binary {binary_name} not ready (analysis) after timeout")
 
             # Get image base address once (for read_bytes tool)
             image_base_resp = await session.call_tool(

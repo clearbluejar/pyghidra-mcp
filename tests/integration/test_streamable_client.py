@@ -28,10 +28,16 @@ async def _wait_for_port(host: str, port: int, timeout: int = 60):
     return False
 
 @pytest.fixture(scope="module")
-def streamable_server(test_binary, ghidra_install_dir, base_url):
+def streamable_server(test_binary, ghidra_install_dir):
     """Fixture to start the pyghidra-mcp server in a separate process."""
-    # Extract port from base_url
-    port = base_url.split(":")[-1]
+    # Get a dedicated port for this test (don't use session-scoped base_url)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+
+    host = "127.0.0.1"
+    base_url = f"http://{host}:{port}"
 
     proc = subprocess.Popen(
         [
@@ -41,7 +47,7 @@ def streamable_server(test_binary, ghidra_install_dir, base_url):
             "--transport",
             "streamable-http",
             "--port",
-            port,
+            str(port),
         ],
         env={**os.environ, "GHIDRA_INSTALL_DIR": ghidra_install_dir},
         # stdout/stderr inherit from parent (no redirection)
@@ -49,9 +55,6 @@ def streamable_server(test_binary, ghidra_install_dir, base_url):
     )
 
     async def wait_for_server(timeout=240):
-        port = int(base_url.split(":")[-1])
-        host = "127.0.0.1"
-
         if not await _wait_for_port(host, port, timeout=timeout):
             raise RuntimeError("Server did not start in time")
 
@@ -85,7 +88,7 @@ async def test_streamable_client_smoke(streamable_server, import_binary_and_wait
             # Session initialized
 
             # Import binary and wait for analysis
-            await import_binary_and_wait(session, test_binary, wait_for_code=False, wait_for_strings=False)
+            await import_binary_and_wait(session, test_binary)
 
             # Use platform-specific function to decompile
             # Windows: mainCRTStartup is the entry, main should also work

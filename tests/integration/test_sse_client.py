@@ -69,10 +69,16 @@ async def _wait_for_jvm_ready(session: ClientSession, timeout: int = 240):
 
 
 @pytest.mark.asyncio
-async def test_sse_client_smoke(ghidra_install_dir, base_url, test_binary, import_binary_and_wait):
+async def test_sse_client_smoke(ghidra_install_dir, test_binary, import_binary_and_wait):
     """Test SSE client with lazy initialization."""
-    port = int(base_url.split(":")[-1])
+    # Get a dedicated port for this test (don't use session-scoped base_url)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+
     host = "127.0.0.1"
+    base_url = f"http://{host}:{port}"
 
     # Start the SSE server process
     proc = subprocess.Popen(
@@ -107,7 +113,7 @@ async def test_sse_client_smoke(ghidra_install_dir, base_url, test_binary, impor
                     entry_function = "main"
 
                 # Import binary and wait for analysis to complete
-                await import_binary_and_wait(session, test_binary, wait_for_code=False, wait_for_strings=False)
+                await import_binary_and_wait(session, test_binary)
 
                 # Decompile entry point function
                 results = await session.call_tool(
