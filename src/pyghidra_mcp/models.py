@@ -121,27 +121,6 @@ class SymbolSearchResults(BaseModel):
     )
 
 
-<<<<<<< HEAD
-class CodeSearchResult(BaseModel):
-    """Represents a single search result from the codebase."""
-
-    function_name: str = Field(
-        ..., description="The name of the function where the code was found."
-    )
-    code: str = Field(..., description="The code snippet that matched the search query.")
-    similarity: float = Field(
-        ..., description="Semantic similarity score (0.0-1.0, higher is better match)"
-    )
-
-
-class CodeSearchResults(BaseModel):
-    """A container for a list of code search results."""
-
-    results: list[CodeSearchResult] = Field(..., description="A list of code search results.")
-
-
-=======
->>>>>>> e94108e (Squashed commit of the following:)
 class StringInfo(BaseModel):
     """Represents a string found within the binary."""
 

@@ -127,17 +127,6 @@ class PyGhidraContext:
 
         self.programs: dict[str, ProgramInfo] = {}
         self._init_project_programs()
-
-<<<<<<< HEAD
-        project_dir = self.project_path / self.project_name
-        chromadb_path = project_dir / "chromadb"
-        self.chroma_client = chromadb.PersistentClient(
-            path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
-        )
-
-=======
-        # From GhidraDiffEngine
->>>>>>> e94108e (Squashed commit of the following:)
         self.force_analysis = force_analysis
         self.verbose_analysis = verbose_analysis
         self.no_symbols = no_symbols
@@ -688,119 +677,7 @@ class PyGhidraContext:
 
         return "-".join((path.name, _sha1_file(path.absolute())[:6]))
 
-<<<<<<< HEAD
-    def _init_chroma_code_collection_for_program(self, program_info: ProgramInfo):
-        """
-        Initialize Chroma code collection for a single program.
-        """
-        from ghidra.program.model.listing import Function
-
-        logger.info(f"Initializing Chroma code collection for {program_info.name}")
-        try:
-            collection = self.chroma_client.get_collection(name=program_info.name)
-            logger.info(f"Collection '{program_info.name}' exists; skipping code ingest.")
-            program_info.code_collection = collection
-        except Exception as e:
-            logger.info(f"Creating new code collection '{program_info.name}'")
-            tools = GhidraTools(program_info)
-            functions = tools.get_all_functions()
-            decompiles = []
-            ids = []
-            metadatas = []
-
-            for i, func in enumerate(functions):
-                func: Function
-                try:
-                    if i % 10 == 0:
-                        logger.debug(f"Decompiling {i}/{len(functions)}")
-                    decompiled = tools.decompile_function(func)
-                    decompiles.append(decompiled.code)
-                    ids.append(decompiled.name)
-                    metadatas.append(
-                        {
-                            "function_name": decompiled.name,
-                            "entry_point": str(func.getEntryPoint()),
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to decompile {func.getSymbol().getName(True)}: {e}")
-
-            collection = self.chroma_client.create_collection(name=program_info.name)
-            try:
-                collection.add(
-                    documents=decompiles,
-                    metadatas=metadatas,
-                    ids=ids,
-                )
-            except Exception as e:
-                logger.error(f"Failed add decompiles to collection: {e}")
-
-            logger.info(f"Code analysis complete for collection '{program_info.name}'")
-            program_info.code_collection = collection
-
-    def _init_chroma_strings_collection_for_program(self, program_info: ProgramInfo):
-        """
-        Initialize Chroma strings collection for a single program.
-        """
-        collection_name = f"{program_info.name}_strings"
-        logger.info(f"Initializing Chroma strings collection for {program_info.name}")
-        try:
-            strings_collection = self.chroma_client.get_collection(name=collection_name)
-            logger.info(f"Collection '{collection_name}' exists; skipping strings ingest.")
-            program_info.strings_collection = strings_collection
-        except Exception:
-            logger.info(f"Creating new strings collection '{collection_name}'")
-            tools = GhidraTools(program_info)
-
-            ids = []
-            strings = tools.get_all_strings()
-            metadatas = [{"address": str(s.address)} for s in strings]
-            ids = [str(s.address) for s in strings]
-            strings = [s.value for s in strings]
-
-            strings_collection = self.chroma_client.create_collection(name=collection_name)
-            try:
-                strings_collection.add(
-                    documents=strings,
-                    metadatas=metadatas,  # type: ignore
-                    ids=ids,
-                )
-            except Exception as e:
-                logger.error(f"Failed to add strings to collection: {e}")
-
-            logger.info(f"Strings analysis complete for collection '{collection_name}'")
-            program_info.strings_collection = strings_collection
-
-    def _init_chroma_collections_for_program(self, program_info: ProgramInfo):
-        """
-        Initializes all Chroma collections (code and strings) for a single program.
-        """
-        self._init_chroma_code_collection_for_program(program_info)
-        self._init_chroma_strings_collection_for_program(program_info)
-
-    def _init_all_chroma_collections(self):
-        """
-        Initializes Chroma collections for all programs in the project.
-        If an executor is available, tasks are submitted asynchronously.
-        Otherwise, initialization runs in the main thread.
-        """
-        programs = list(self.programs.values())
-        mode = "background" if self.executor else "main thread"
-        logger.info("Initializing Chroma DB collections in %s...", mode)
-
-        # ensure analysis complete before init
-        assert all(prog.analysis_complete for prog in programs)
-
-        if self.executor:
-            # executor.map submits all tasks at once, returns an iterator of futures
-            self.executor.map(self._init_chroma_collections_for_program, programs)
-        else:
-            for program_info in programs:
-                self._init_chroma_collections_for_program(program_info)
-
-=======
     # Callback function that runs when the future is done to catch any exceptions
->>>>>>> e94108e (Squashed commit of the following:)
     def _analysis_done_callback(self, future: concurrent.futures.Future):
         try:
             future.result()
@@ -885,13 +762,6 @@ class PyGhidraContext:
                 logger.info(f"Completed {completed_count}/{prog_count} programs")
 
         logger.info("All programs analyzed.")
-<<<<<<< HEAD
-        # The chroma collections need to be initialized after analysis is complete
-        # At this point, threaded or not, all analysis is done
-        # Must run after analysis completes (ChromaDB requires analyzed functions)
-        self._init_all_chroma_collections()
-=======
->>>>>>> e94108e (Squashed commit of the following:)
 
     def analyze_program(  # noqa C901
         self,
