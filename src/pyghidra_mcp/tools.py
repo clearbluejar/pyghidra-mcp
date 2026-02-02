@@ -3,19 +3,18 @@ Comprehensive tool implementations for pyghidra-mcp.
 """
 
 import functools
-import logging
 import re
 import typing
 
 from ghidrecomp.callgraph import gen_callgraph
 from jpype import JByte
+from loguru import logger
 
 from pyghidra_mcp.models import (
     BytesReadResult,
     CallGraphDirection,
     CallGraphDisplayType,
     CallGraphResult,
-    CodeSearchResult,
     CrossReferenceInfo,
     DecompiledFunction,
     ExportInfo,
@@ -31,8 +30,6 @@ if typing.TYPE_CHECKING:
     from ghidra.program.model.symbol import Symbol
 
     from .context import ProgramInfo
-
-logger = logging.getLogger(__name__)
 
 
 def handle_exceptions(func):
@@ -50,15 +47,35 @@ def handle_exceptions(func):
 
 
 class GhidraTools:
-    """Comprehensive tool handler for Ghidra MCP tools"""
+    """Comprehensive tool handler for Ghidra MCP tools with thread-safe access"""
 
     def __init__(self, program_info: "ProgramInfo"):
         """Initialize with a Ghidra ProgramInfo object"""
         self.program_info = program_info
-        self.program = program_info.program
-        self.decompiler = program_info.decompiler
+        self._lock = program_info._lock
 
-    def _get_filename(self, func: "Function"):
+    @property
+    def program(self):
+        """Get the current program object (may be updated after save operations)"""
+        return self.program_info.program
+
+    @property
+    def decompiler(self):
+        """Get the current decompiler object (may be updated after save operations)"""
+        return self.program_info.decompiler
+
+    def _get_filename(self, func: "Function") -> str:
+        """Generate unique identifier for decompilation caching.
+
+        Creates a filename-safe identifier from function name and entry point.
+        Truncates long function names to 50 characters to keep identifiers manageable.
+
+        Args:
+            func: Ghidra Function object
+
+        Returns:
+            str: Unique identifier in format "name-address"
+        """
         max_path_len = 50
         return f"{func.getSymbol().getName(True)[:max_path_len]}-{func.entryPoint}"
 
@@ -199,43 +216,44 @@ class GhidraTools:
     def decompile_function_by_name_or_addr(
         self, name_or_address: str, timeout: int = 0
     ) -> DecompiledFunction:
-        """Finds and decompiles a function in a specified binary and returns its pseudo-C code."""
+        """Finds and decompiles a function in the currently loaded program and returns its pseudo-C code."""
 
         func = self.find_function(name_or_address)
         return self.decompile_function(func)
 
     def decompile_function(self, func: "Function", timeout: int = 0) -> DecompiledFunction:
-        """Decompiles a function in a specified binary and returns its pseudo-C code."""
+        """Decompiles a function in the currently loaded program and returns its pseudo-C code."""
         from ghidra.util.task import ConsoleTaskMonitor
 
-        monitor = ConsoleTaskMonitor()
-        result: DecompileResults = self.decompiler.decompileFunction(func, timeout, monitor)
-        if "" == result.getErrorMessage():
-            code = result.decompiledFunction.getC()
-            sig = result.decompiledFunction.getSignature()
-        else:
-            code = result.getErrorMessage()
-            sig = None
-        return DecompiledFunction(name=self._get_filename(func), code=code, signature=sig)
+        with self._lock:  # Thread-safe decompilation
+            monitor = ConsoleTaskMonitor()
+            result: DecompileResults = self.decompiler.decompileFunction(func, timeout, monitor)
+            if "" == result.getErrorMessage():
+                code = result.decompiledFunction.getC()
+                sig = result.decompiledFunction.getSignature()
+            else:
+                code = result.getErrorMessage()
+                sig = None
+            return DecompiledFunction(name=self._get_filename(func), code=code, signature=sig)
 
     @handle_exceptions
     def get_all_functions(self, include_externals=False) -> list["Function"]:
         """
-        Gets all functions within a binary.
-        Returns a python list that doesn't need to be re-intialized
+        Gets all functions in the currently loaded program.
+        Returns a python list that doesn't need to be re-initialized
         """
-
-        funcs = set()
-        fm = self.program.getFunctionManager()
-        functions = fm.getFunctions(True)
-        for func in functions:
-            func: Function
-            if not include_externals and func.isExternal():
-                continue
-            if not include_externals and func.thunk:
-                continue
-            funcs.add(func)
-        return list(funcs)
+        with self._lock:  # Thread-safe function listing
+            funcs = set()
+            fm = self.program.getFunctionManager()
+            functions = fm.getFunctions(True)
+            for func in functions:
+                func: Function
+                if not include_externals and func.isExternal():
+                    continue
+                if not include_externals and func.thunk:
+                    continue
+                funcs.add(func)
+            return list(funcs)
 
     @handle_exceptions
     def get_all_symbols(
@@ -245,43 +263,52 @@ class GhidraTools:
         Gets all symbols within a binary.
         Returns a python list that doesn't need to be re-initialized.
         """
+        with self._lock:
+            symbols = set()
+            from ghidra.program.model.symbol import SymbolTable
 
-        symbols = set()
-        from ghidra.program.model.symbol import SymbolTable
+            st: SymbolTable = self.program.getSymbolTable()
+            all_symbols = st.getAllSymbols(include_dynamic)
 
-        st: SymbolTable = self.program.getSymbolTable()
-        all_symbols = st.getAllSymbols(include_dynamic)
+            for sym in all_symbols:
+                sym: Symbol
+                if not include_externals and sym.isExternal():
+                    continue
+                symbols.add(sym)
 
-        for sym in all_symbols:
-            sym: Symbol
-            if not include_externals and sym.isExternal():
-                continue
-            symbols.add(sym)
-
-        return list(symbols)
+            return list(symbols)
 
     @handle_exceptions
     def get_all_strings(self) -> list[StringInfo]:
-        """Gets all defined strings for a binary"""
-        try:
-            from ghidra.program.util import DefinedStringIterator  # type: ignore
+        """Get all defined strings from the program.
 
-            data_iterator = DefinedStringIterator.forProgram(self.program)
-        except ImportError:
-            # Support Ghidra 11.3.2
-            from ghidra.program.util import DefinedDataIterator
+        Handles Ghidra version differences:
+        - Ghidra 11.3.2+: Uses getDefinedStrings() (includes strings from data types)
+        - Ghidra 11.x: Uses getStrings() (classic string listing)
 
-            data_iterator = DefinedDataIterator.definedStrings(self.program)
-
-        strings = []
-        for data in data_iterator:
+        Returns:
+            List of StringInfo objects with string content and location
+        """
+        with self._lock:  # Thread-safe string listing
             try:
-                string_value = data.getValue()
-                strings.append(StringInfo(value=str(string_value), address=str(data.getAddress())))
-            except Exception as e:
-                logger.debug(f"Could not get string value from data at {data.getAddress()}: {e}")
+                from ghidra.program.util import DefinedStringIterator  # type: ignore
 
-        return strings
+                data_iterator = DefinedStringIterator.forProgram(self.program)
+            except ImportError:
+                # Support Ghidra 11.3.2
+                from ghidra.program.util import DefinedDataIterator
+
+                data_iterator = DefinedDataIterator.definedStrings(self.program)
+
+            strings = []
+            for data in data_iterator:
+                try:
+                    string_value = data.getValue()
+                    strings.append(StringInfo(value=str(string_value), address=str(data.getAddress())))
+                except Exception as e:
+                    logger.debug(f"Could not get string value from data at {data.getAddress()}: {e}")
+
+            return strings
 
     @handle_exceptions
     def search_symbols_by_name(
@@ -317,169 +344,137 @@ class GhidraTools:
     def list_exports(
         self, query: str | None = None, offset: int = 0, limit: int = 25
     ) -> list[ExportInfo]:
-        """Lists all exported functions and symbols from a specified binary."""
-        exports = []
-        symbols = self.program.getSymbolTable().getAllSymbols(True)
-        for symbol in symbols:
-            if symbol.isExternalEntryPoint():
-                if query and not re.search(query, symbol.getName(), re.IGNORECASE):
-                    continue
-                exports.append(ExportInfo(name=symbol.getName(), address=str(symbol.getAddress())))
-        return exports[offset : limit + offset]
+        """Lists all exported functions and symbols from the currently loaded program."""
+        with self._lock:  # Thread-safe export listing
+            exports = []
+            symbols = self.program.getSymbolTable().getAllSymbols(True)
+            for symbol in symbols:
+                if symbol.isExternalEntryPoint():
+                    if query and not re.search(query, symbol.getName(), re.IGNORECASE):
+                        continue
+                    exports.append(ExportInfo(name=symbol.getName(), address=str(symbol.getAddress())))
+            return exports[offset : limit + offset]
 
     @handle_exceptions
     def list_imports(
         self, query: str | None = None, offset: int = 0, limit: int = 25
     ) -> list[ImportInfo]:
-        """Lists all imported functions and symbols for a specified binary."""
-        imports = []
-        symbols = self.program.getSymbolTable().getExternalSymbols()
-        for symbol in symbols:
-            if query and not re.search(query, symbol.getName(), re.IGNORECASE):
-                continue
-            imports.append(
-                ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace()))
-            )
-        return imports[offset : limit + offset]
+        """Lists all imported functions and symbols from the currently loaded program."""
+        with self._lock:
+            imports = []
+            symbols = self.program.getSymbolTable().getExternalSymbols()
+            for symbol in symbols:
+                if query and not re.search(query, symbol.getName(), re.IGNORECASE):
+                    continue
+                imports.append(
+                    ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace()))
+                )
+            return imports[offset : limit + offset]
 
     @handle_exceptions
     def list_cross_references(self, name_or_address: str) -> list[CrossReferenceInfo]:
         """Finds and lists all cross-references (x-refs) to a given function, symbol,
-        or address within a binary.
+        or address in the currently loaded program.
         """
-        # Use the unified resolver
-        sym: Symbol = self.find_symbol(name_or_address)
-        addr = sym.getAddress()
+        with self._lock:  # Thread-safe cross-reference listing
+            # Use the unified resolver
+            sym: Symbol = self.find_symbol(name_or_address)
+            addr = sym.getAddress()
 
-        cross_references: list[CrossReferenceInfo] = []
-        rm = self.program.getReferenceManager()
-        references = rm.getReferencesTo(addr)
+            cross_references: list[CrossReferenceInfo] = []
+            rm = self.program.getReferenceManager()
+            references = rm.getReferencesTo(addr)
 
-        for ref in references:
-            from_func = self.program.getFunctionManager().getFunctionContaining(
-                ref.getFromAddress()
-            )
-            cross_references.append(
-                CrossReferenceInfo(
-                    function_name=from_func.getName() if from_func else None,
-                    from_address=str(ref.getFromAddress()),
-                    to_address=str(ref.getToAddress()),
-                    type=str(ref.getReferenceType()),
+            for ref in references:
+                from_func = self.program.getFunctionManager().getFunctionContaining(
+                    ref.getFromAddress()
                 )
-            )
-        return cross_references
-
-    @handle_exceptions
-    def search_code(self, query: str, limit: int = 10) -> list[CodeSearchResult]:
-        """Searches the code in the binary for a given query."""
-        if not self.program_info.code_collection:
-            raise ValueError(
-                "Code indexing is not complete for this binary. Please try again later."
-            )
-
-        results = self.program_info.code_collection.query(query_texts=[query], n_results=limit)
-        search_results = []
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i]  # type: ignore
-                distance = results["distances"][0][i]  # type: ignore
-                search_results.append(
-                    CodeSearchResult(
-                        function_name=str(metadata["function_name"]),
-                        code=doc,
-                        similarity=1 - distance,
+                cross_references.append(
+                    CrossReferenceInfo(
+                        function_name=from_func.getName() if from_func else None,
+                        from_address=str(ref.getFromAddress()),
+                        to_address=str(ref.getToAddress()),
+                        type=str(ref.getReferenceType()),
                     )
                 )
-        return search_results
+            return cross_references
 
     @handle_exceptions
     def search_strings(self, query: str, limit: int = 100) -> list[StringSearchResult]:
-        """Searches for strings within a binary."""
+        """Searches for strings within a binary by direct filtering."""
+        if not query:
+            raise ValueError("Query string is required")
 
-        if not self.program_info.strings_collection:
-            raise ValueError(
-                "String indexing is not complete for this binary. Please try again later."
+        all_strings = self.get_all_strings()
+        query_lower = query.lower()
+
+        # Filter strings that contain the query (case-insensitive)
+        filtered_strings = [
+            s for s in all_strings
+            if query_lower in s.value.lower()
+        ][:limit]
+
+        return [
+            StringSearchResult(
+                value=s.value,
+                address=s.address,
+                similarity=1.0  # Exact match
             )
+            for s in filtered_strings
+        ]
 
-        search_results = []
-        results = self.program_info.strings_collection.get(
-            where_document={"$contains": query}, limit=limit
-        )
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"]):
-                metadata = results["metadatas"][i]  # type: ignore
-                search_results.append(
-                    StringSearchResult(
-                        value=doc,
-                        address=str(metadata["address"]),
-                        similarity=1,
-                    )
-                )
-            limit -= len(results["documents"])
-
-        results = self.program_info.strings_collection.query(query_texts=[query], n_results=limit)
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i]  # type: ignore
-                distance = results["distances"][0][i]  # type: ignore
-                search_results.append(
-                    StringSearchResult(
-                        value=doc,
-                        address=str(metadata["address"]),
-                        similarity=1 - distance,
-                    )
-                )
-
-        return search_results
+    @handle_exceptions
+    def get_image_base(self) -> str:
+        """Get the image base address of the loaded program."""
+        min_addr = self.program.getMinAddress()
+        if min_addr is None:
+            raise ValueError("Unable to determine image base - program has no address ranges")
+        return str(min_addr)
 
     @handle_exceptions
     def read_bytes(self, address: str, size: int = 32) -> BytesReadResult:
         """Reads raw bytes from memory at a specified address."""
-        # Maximum size limit to prevent excessive memory reads
-        max_read_size = 8192
+        with self._lock:
+            max_read_size = 8192
 
-        if size <= 0:
-            raise ValueError("size must be > 0")
+            if size <= 0:
+                raise ValueError("size must be > 0")
 
-        if size > max_read_size:
-            raise ValueError(f"Size {size} exceeds maximum {max_read_size}")
+            if size > max_read_size:
+                raise ValueError(f"Size {size} exceeds maximum {max_read_size}")
 
-        # Get address factory and parse address
-        af = self.program.getAddressFactory()
+            af = self.program.getAddressFactory()
 
-        try:
-            # Handle common hex address formats
-            addr_str = address
-            if address.lower().startswith("0x"):
-                addr_str = address[2:]
+            try:
+                addr_str = address
+                if address.lower().startswith("0x"):
+                    addr_str = address[2:]
 
-            addr = af.getAddress(addr_str)
-            if addr is None:
-                raise ValueError(f"Invalid address: {address}")
-        except Exception as e:
-            raise ValueError(f"Invalid address format '{address}': {e}") from e
+                addr = af.getAddress(addr_str)
+                if addr is None:
+                    raise ValueError(f"Invalid address: {address}")
+            except Exception as e:
+                raise ValueError(f"Invalid address format '{address}': {e}") from e
 
-        # Check if address is in valid memory
-        mem = self.program.getMemory()
-        if not mem.contains(addr):
-            raise ValueError(f"Address {address} is not in mapped memory")
+            mem = self.program.getMemory()
+            if not mem.contains(addr):
+                raise ValueError(f"Address {address} is not in mapped memory")
 
-        # Use JPype to handle byte arrays properly for PyGhidra
-        # Create Java byte array - JPype's runtime magic confuses static type checkers
-        buf = JByte[size]  # type: ignore[reportInvalidTypeArguments]
-        n = mem.getBytes(addr, buf)
+            # Use JPype to handle byte arrays properly for PyGhidra
+            # Create Java byte array - JPype's runtime magic confuses static type checkers
+            buf = JByte[size]  # type: ignore[reportInvalidTypeArguments]
+            n = mem.getBytes(addr, buf)
 
-        # Convert Java signed bytes (-128 to 127) to Python unsigned (0 to 255)
-        if n > 0:
-            data = bytes([b & 0xFF for b in buf[:n]])  # type: ignore[reportGeneralTypeIssues]
-        else:
-            data = b""
+            if n > 0:
+                data = bytes([b & 0xFF for b in buf[:n]])  # type: ignore[reportGeneralTypeIssues]
+            else:
+                data = b""
 
-        return BytesReadResult(
-            address=str(addr),
-            size=len(data),
-            data=data.hex(),
-        )
+            return BytesReadResult(
+                address=str(addr),
+                size=len(data),
+                data=data.hex(),
+            )
 
     @handle_exceptions
     def gen_callgraph(
@@ -494,45 +489,66 @@ class GhidraTools:
         top_layers: int = 5,
         bottom_layers: int = 5,
     ) -> CallGraphResult:
-        """Generates a call graph for a specified function."""
+        """Generate a call graph visualization for a function.
 
-        cg_func = self.find_function(function_name_or_address)
-        mermaid_url: str = ""
+        Creates MermaidJS call graph showing caller/callee relationships.
+        Supports multiple display types and condensation for large graphs.
 
-        # Call the ghidrecomp function
-        name, direction, _, graphs_data = gen_callgraph(
-            func=cg_func,
-            max_display_depth=max_depth,
-            direction=cg_direction.value,
-            max_run_time=max_run_time,
-            name=cg_func.getSymbol().getName(True),
-            include_refs=include_refs,
-            condense_threshold=condense_threshold,
-            top_layers=top_layers,
-            bottom_layers=bottom_layers,
-            wrap_mermaid=False,
-        )
+        Args:
+            function_name_or_address: Function name or entry point address
+            cg_direction: CALLING (outgoing/callees) or CALLED (incoming/callers)
+            cg_display_type: FLOW, FLOW_ENDS, or MIND visualization style
+            include_refs: Include cross-reference information in nodes
+            max_depth: Maximum graph depth (None for unlimited)
+            max_run_time: Maximum generation time in seconds (default: 60)
+            condense_threshold: Nodes threshold for condensation (default: 50)
+            top_layers: Number of top layers to preserve when condensing
+            bottom_layers: Number of bottom layers to preserve when condensing
 
-        selected_graph_content = ""
-        for graph_type, graph_content in graphs_data:
-            if CallGraphDisplayType(graph_type) == cg_display_type:
-                selected_graph_content = graph_content
-                break
+        Returns:
+            CallGraphResult with MermaidJS markdown and rendered image URL
 
-        if not selected_graph_content:
-            raise ValueError(
-                f"Cg display type {cg_display_type.value} not found for function {cg_func}."
+        Raises:
+            ValueError: If function not found
+            TimeoutError: If graph generation exceeds max_run_time
+        """
+        with self._lock:
+            cg_func = self.find_function(function_name_or_address)
+            mermaid_url: str = ""
+
+            name, direction, _, graphs_data = gen_callgraph(
+                func=cg_func,
+                max_display_depth=max_depth,
+                direction=cg_direction.value,
+                max_run_time=max_run_time,
+                name=cg_func.getSymbol().getName(True),
+                include_refs=include_refs,
+                condense_threshold=condense_threshold,
+                top_layers=top_layers,
+                bottom_layers=bottom_layers,
+                wrap_mermaid=False,
             )
 
-        for graph_type, graph_content in graphs_data:
-            if graph_type == "mermaid_url":
-                mermaid_url = graph_content.split("\n")[0]
-                break
+            selected_graph_content = ""
+            for graph_type, graph_content in graphs_data:
+                if CallGraphDisplayType(graph_type) == cg_display_type:
+                    selected_graph_content = graph_content
+                    break
 
-        return CallGraphResult(
-            function_name=name,
-            direction=CallGraphDirection(direction),
-            display_type=cg_display_type,
-            graph=selected_graph_content,
-            mermaid_url=mermaid_url,
-        )
+            if not selected_graph_content:
+                raise ValueError(
+                    f"Cg display type {cg_display_type.value} not found for function {cg_func}."
+                )
+
+            for graph_type, graph_content in graphs_data:
+                if graph_type == "mermaid_url":
+                    mermaid_url = graph_content.split("\n")[0]
+                    break
+
+            return CallGraphResult(
+                function_name=name,
+                direction=CallGraphDirection(direction),
+                display_type=cg_display_type,
+                graph=selected_graph_content,
+                mermaid_url=mermaid_url,
+            )

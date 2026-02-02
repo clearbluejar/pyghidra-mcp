@@ -1,18 +1,14 @@
 import concurrent.futures
 import hashlib
-import json
-import logging
 import multiprocessing
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Union
 
-import chromadb
 import pyghidra  # noqa
-from chromadb.config import Settings
-
-from pyghidra_mcp.tools import GhidraTools
+from loguru import logger
 
 if TYPE_CHECKING:
     from ghidra.app.decompiler import DecompInterface
@@ -21,14 +17,10 @@ if TYPE_CHECKING:
     from ghidra.program.flatapi import FlatProgramAPI
     from ghidra.program.model.listing import Program
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class ProgramInfo:
-    """Information about a loaded program"""
+    """Information about a loaded program with thread-safe access"""
 
     name: str
     program: "Program"
@@ -38,19 +30,64 @@ class ProgramInfo:
     ghidra_analysis_complete: bool
     file_path: Path | None = None
     load_time: float | None = None
-    code_collection: chromadb.Collection | None = None
-    strings_collection: chromadb.Collection | None = None
+    # Thread-safe lock for concurrent access to Ghidra program/decompiler
+    _lock: threading.RLock = field(default_factory=threading.RLock)
+    # Lock specifically for analysis_complete flag to prevent deadlocks
+    _analysis_lock: threading.Lock = field(default_factory=threading.Lock)
 
     @property
     def analysis_complete(self) -> bool:
-        """Check if Ghidra analysis is complete."""
-        return self.ghidra_analysis_complete
+        """
+        Check if Ghidra analysis is complete.
+
+        Thread-safe: Uses dedicated lock to ensure visibility of updates from background threads.
+        This uses a separate lock to avoid deadlocks with the main _lock.
+        """
+        try:
+            self._analysis_lock.acquire()
+            return self.ghidra_analysis_complete
+        finally:
+            self._analysis_lock.release()
+
+    def set_analysis_complete(self, value: bool):
+        """
+        Set the analysis complete flag.
+
+        Thread-safe: Uses dedicated lock to ensure updates are visible to all threads.
+        """
+        with self._analysis_lock:
+            self.ghidra_analysis_complete = value
+
+    def lock(self):
+        """Acquire the program lock for thread-safe access."""
+        self._lock.acquire()
+
+    def unlock(self):
+        """Release the program lock."""
+        self._lock.release()
+
+    def __enter__(self):
+        """Context manager support for with statement."""
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager support for with statement."""
+        self._lock.release()
 
 
 class PyGhidraContext:
     """
     Manages a Ghidra project, including its creation, program imports, and cleanup.
     """
+
+    # Lock file patterns used by Ghidra for project locking
+    _LOCK_FILE_PATTERNS: ClassVar[list[str]] = ["*.lock", "*.lock~"]
+
+    # Maximum retry attempts after LockException (1 retry = 2 total attempts).
+    # This handles stale locks from crashes while avoiding infinite loops
+    # if another process legitimately holds the lock.
+    _MAX_LOCK_RETRIES = 1
 
     def __init__(
         self,
@@ -90,14 +127,6 @@ class PyGhidraContext:
 
         self.programs: dict[str, ProgramInfo] = {}
         self._init_project_programs()
-
-        project_dir = self.project_path / self.project_name
-        chromadb_path = project_dir / "chromadb"
-        self.chroma_client = chromadb.PersistentClient(
-            path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
-        )
-
-        # From GhidraDiffEngine
         self.force_analysis = force_analysis
         self.verbose_analysis = verbose_analysis
         self.no_symbols = no_symbols
@@ -112,58 +141,167 @@ class PyGhidraContext:
         self.max_workers = max_workers if max_workers else cpu_count
 
         if not self.threaded:
-            logger.warn("--no-threaded flag forcing max_workers to 1")
+            logger.warning("--no-threaded flag forcing max_workers to 1")
             self.max_workers = 1
         self.executor = (
             concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
             if self.threaded
             else None
         )
-        self.import_executor = (
-            concurrent.futures.ThreadPoolExecutor(max_workers=1) if self.threaded else None
-        )
+        # import_executor must always exist to prevent blocking HTTP request handlers
+        # Even in --no-threaded mode, background import is necessary for non-blocking operation
+        self.import_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self.wait_for_analysis = wait_for_analysis
 
     def close(self, save: bool = True):
+        """Saves changes to all open programs and closes the project.
+
+        CRITICAL: Follows Ghidra's recommended decompiler disposal pattern:
+        1. decompiler.closeProgram() - Release program from decompiler
+        2. DecompDisposer.dispose(decompiler) - Dispose in background thread
+        3. project.close(program) - Close the program
         """
-        Saves changes to all open programs and closes the project.
-        """
-        for _program_name, program_info in self.programs.items():
-            program = program_info.program
-            self.project.close(program)
+        # Shutdown thread pools FIRST before closing programs
+        # Background tasks may still need to access programs/project
+        if self.import_executor:
+            logger.debug("Shutting down import executor...")
+            self.import_executor.shutdown(wait=True)
+            self.import_executor = None
 
         if self.executor:
+            logger.debug("Shutting down analysis executor...")
             self.executor.shutdown(wait=True)
+            self.executor = None
 
-        if self.import_executor:
-            self.import_executor.shutdown(wait=True)
+        # Close all programs and their decompilers properly
+        logger.debug(f"Closing {len(self.programs)} programs...")
+        for program_name, program_info in list(self.programs.items()):
+            try:
+                # CRITICAL: Properly dispose decompiler BEFORE closing program
+                # Following Ghidra pattern: closeProgram() → dispose() → close(program)
+                if program_info.decompiler:
+                    try:
+                        logger.debug(f"Closing decompiler for {program_name}")
+                        # Required by Ghidra's disposal pattern
+                        program_info.decompiler.closeProgram()
 
-        self.project.close()
-        logger.info(f"Project {self.project_name} closed.")
+                        # Use DecompDisposer for background thread disposal
+                        # This prevents deadlocks on synchronized methods
+                        from ghidra.app.decompiler import DecompDisposer
+                        DecompDisposer.dispose(program_info.decompiler)
+                        logger.debug(f"Disposed decompiler for {program_name}")
+                    except Exception as e:
+                        logger.warning(f"Error disposing decompiler for {program_name}: {e}")
+                    program_info.decompiler = None
+
+                program_info.flat_api = None
+
+                if program_info.program:
+                    try:
+                        self.project.close(program_info.program)
+                        logger.debug(f"Closed program {program_name}")
+                    except Exception as e:
+                        logger.warning(f"Error closing program {program_name}: {e}")
+                    program_info.program = None
+
+            except Exception as e:
+                logger.error(f"Error during cleanup of {program_name}: {e}")
+
+        # Clear programs dict to prevent access after close
+        self.programs.clear()
+
+        # Close the Ghidra project
+        try:
+            self.project.close()
+            logger.info(f"Project {self.project_name} closed successfully.")
+        except Exception as e:
+            logger.error(f"Error closing project: {e}")
 
     def _get_or_create_project(self) -> "GhidraProject":
         """
         Creates a new Ghidra project if it doesn't exist, otherwise opens the existing project.
 
+        Handles stale lock files from previous crashes by automatically cleaning and retrying.
+
         Returns:
             The Ghidra project object.
-        """
 
+        Raises:
+            RuntimeError: If unable to open project after lock cleanup and retry.
+        """
         from ghidra.base.project import GhidraProject
         from ghidra.framework.model import ProjectLocator
+        from ghidra.framework.store import LockException
 
         project_dir = self.project_path / self.project_name
         project_dir.mkdir(exist_ok=True, parents=True)
         project_dir_str = str(project_dir.absolute())
-
         locator = ProjectLocator(project_dir_str, self.project_name)
 
-        if locator.exists():
-            logger.info(f"Opening existing project: {self.project_name}")
-            return GhidraProject.openProject(project_dir_str, self.project_name, True)
-        else:
+        if not locator.exists():
             logger.info(f"Creating new project: {self.project_name}")
             return GhidraProject.createProject(project_dir_str, self.project_name, False)
+
+        # Try opening with stale lock recovery
+        for attempt in range(self._MAX_LOCK_RETRIES + 1):
+            try:
+                logger.info(f"Opening existing project: {self.project_name}")
+                return GhidraProject.openProject(project_dir_str, self.project_name, True)
+            except LockException:
+                if attempt >= self._MAX_LOCK_RETRIES:
+                    raise RuntimeError(
+                        f"Failed to open project '{self.project_name}' "
+                        f"after {attempt + 1} attempt(s). "
+                        f"Another Ghidra instance may be using this project."
+                    ) from None
+
+                # List lock files for diagnostic info
+                lock_files = [
+                    f for pattern in self._LOCK_FILE_PATTERNS
+                    for f in project_dir.glob(pattern)
+                ]
+                logger.warning(
+                    f"Project locked. Found {len(lock_files)} lock file(s): "
+                    f"{[f.name for f in lock_files]}. Cleaning stale locks. "
+                    f"Retry {attempt + 1}/{self._MAX_LOCK_RETRIES + 1}..."
+                )
+                self._clean_lock_files(project_dir)
+
+    @staticmethod
+    def _clean_lock_files(project_dir: Path) -> list[str]:
+        """
+        Remove stale Ghidra lock files from a project directory.
+
+        WARNING: This method deletes files without additional confirmation.
+        In multi-user environments, ensure no other Ghidra instance is actively
+        using the project before calling this method.
+
+        This is called when opening a project fails due to LockException,
+        typically caused by previous crashes or forced process termination.
+
+        Args:
+            project_dir: Path to the Ghidra project directory.
+
+        Returns:
+            List of successfully removed lock file names.
+        """
+        removed = []
+
+        for pattern in PyGhidraContext._LOCK_FILE_PATTERNS:
+            for lock_file in project_dir.glob(pattern):
+                try:
+                    lock_file.unlink()
+                    removed.append(lock_file.name)
+                    logger.info(f"Removed lock file: {lock_file}")
+                except OSError as e:
+                    logger.warning(f"Could not remove lock file {lock_file}: {e}")
+
+        if removed:
+            logger.info(f"Successfully cleaned {len(removed)} lock file(s): {', '.join(removed)}")
+        else:
+            logger.warning("No lock files were removed (may be held by another process)")
+
+        return removed
 
     def _init_project_programs(self):
         """
@@ -173,9 +311,19 @@ class PyGhidraContext:
 
         all_binary_paths = self.list_binaries()
         for binary_path_s in all_binary_paths:
-            binary_path = Path(binary_path_s)
+            # Get the parent folder path and filename from Ghidra pathname
+            # Ghidra pathnames use '/' as separator and are relative to project root
+            if '/' in binary_path_s:
+                folder_path, program_name = binary_path_s.rsplit('/', 1)
+                # Ensure folder_path starts with '/' for absolute path within project
+                if not folder_path.startswith('/'):
+                    folder_path = '/' + folder_path
+            else:
+                folder_path = '/'
+                program_name = binary_path_s
+
             program: Program = self.project.openProgram(
-                str(binary_path.parent), binary_path.name, False
+                folder_path, program_name, False
             )
             program_info = self._init_program_info(program)
             self.programs[binary_path_s] = program_info
@@ -216,31 +364,68 @@ class PyGhidraContext:
         """
         Deletes a program from the Ghidra project and saves the project.
 
+        CRITICAL: Properly disposes decompiler before deleting program.
+        Following Ghidra pattern: closeProgram() → dispose() → close() → delete()
+
         Args:
             program_name: The name of the program to delete.
 
         Returns:
             True if the program was deleted successfully, False otherwise.
         """
+        # Find program info using same logic as get_program_info
+        program_key = None
         program_info = self.programs.get(program_name)
+
         if not program_info:
-            available_progs = list(self.programs.keys())
-            raise ValueError(
-                f"Binary {program_name} not found. Available binaries: {available_progs}"
-            )
+            # Try to find by matching against pi.name
+            for key, pi in self.programs.items():
+                if pi.name == program_name:
+                    program_key = key
+                    program_info = pi
+                    break
+
+            if not program_info:
+                available_progs = [pi.name for pi in self.programs.values()]
+                raise ValueError(
+                    f"Binary {program_name} not found. Available binaries: {available_progs}"
+                )
         else:
-            logger.info(f"Deleting program: {program_name}")
-            try:
-                program_to_delete: Program = program_info.program
-                program_to_delete_df: DomainFile = program_to_delete.getDomainFile()
-                self.project.close(program_to_delete)
-                program_to_delete_df.delete()
-                # clean up program reference
-                del self.programs[program_name]
-                return True
-            except Exception as e:
-                logger.error(f"Error deleting program '{program_name}': {e}")
-                return False
+            program_key = program_name
+
+        logger.info(f"Deleting program: {program_name}")
+        try:
+            program_to_delete: Program = program_info.program
+            program_to_delete_df: DomainFile = program_to_delete.getDomainFile()
+
+            # CRITICAL: Properly dispose decompiler BEFORE closing program
+            if program_info.decompiler:
+                try:
+                    logger.debug(f"Closing decompiler for {program_name}")
+                    program_info.decompiler.closeProgram()  # ← Required by Ghidra!
+
+                    # Use DecompDisposer for background thread disposal
+                    from ghidra.app.decompiler import DecompDisposer
+                    DecompDisposer.dispose(program_info.decompiler)
+                    logger.debug(f"Disposed decompiler for {program_name}")
+                except Exception as e:
+                    logger.warning(f"Error disposing decompiler for {program_name}: {e}")
+                program_info.decompiler = None
+
+            # Clear references
+            program_info.flat_api = None
+            program_info.program = None
+
+            self.project.close(program_to_delete)
+            program_to_delete_df.delete()
+
+            # clean up program reference using the actual dictionary key
+            del self.programs[program_key]
+            logger.info(f"Successfully deleted program: {program_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting program '{program_name}': {e}")
+            return False
 
     def import_binary(
         self, binary_path: str | Path, analyze: bool = False, relative_path: Path | None = None
@@ -281,10 +466,12 @@ class PyGhidraContext:
             program_info = self.programs[full_path]
         else:
             logger.info(f"Importing new program: {program_name}")
-            program = self.project.importProgram(binary_path)
+            program = self.project.importProgram(binary_path)  # TODO: use ProgramLoader
             program.name = program_name
             if program:
                 self.project.saveAs(program, ghidra_folder.pathname, program_name, True)
+                # After saveAs, the program object is still valid but we need to get DomainFile
+                # The program is now saved in the project location
 
             program_info = self._init_program_info(program)
             self.programs[program.getDomainFile().pathname] = program_info
@@ -294,7 +481,6 @@ class PyGhidraContext:
 
         if analyze:
             self.analyze_program(program_info.program)
-            self._init_chroma_collections_for_program(program_info)
 
         logger.info(f"Program {program_name} is ready for use.")
 
@@ -416,36 +602,39 @@ class PyGhidraContext:
     def get_program_info(self, binary_name: str) -> "ProgramInfo":
         """Get program info or raise ValueError if not found."""
         program_info = self.programs.get(binary_name)
-        if not program_info:
-            # Exact program name not in the list
-            available_progs = list(self.programs.keys())
+        if program_info is None:
+            for pi in self.programs.values():
+                if pi.name == binary_name:
+                    program_info = pi
+                    break
 
-            # If the LLM gave us just the binary name, use that
-            available_prog_names = {
-                Path(prog).name: prog_info for prog, prog_info in self.programs.items()
-            }
-            program_info = available_prog_names.get(binary_name)
-
-            if not program_info:
+            if program_info is None:
+                available_progs = [pi.name for pi in self.programs.values()]
                 raise ValueError(
                     f"Binary {binary_name} not found. Available binaries: {available_progs}"
                 )
+
+        # Use thread-safe property access
         if not program_info.analysis_complete:
             raise RuntimeError(
-                json.dumps(
-                    {
-                        "message": f"Analysis incomplete for binary '{binary_name}'.",
-                        "binary_name": binary_name,
-                        "ghidra_analysis_complete": program_info.ghidra_analysis_complete,
-                        "code_collection": program_info.code_collection is not None,
-                        "strings_collection": program_info.strings_collection is not None,
-                        "suggestion": "Wait and try tool call again.",
-                    }
-                )
+                f"Analysis incomplete for binary '{binary_name}'. "
+                f"Ghidra analysis: {program_info.ghidra_analysis_complete}. "
+                "Wait and try tool call again."
             )
         return program_info
 
     def _init_program_info(self, program):
+        """Initialize ProgramInfo wrapper for a Ghidra program.
+
+        Creates a thread-safe ProgramInfo object with program metadata,
+        decompiler interface, and lock for concurrent access.
+
+        Args:
+            program: Ghidra Program object
+
+        Returns:
+            ProgramInfo: Thread-safe program wrapper
+        """
         from ghidra.program.flatapi import FlatProgramAPI
 
         assert program is not None
@@ -461,8 +650,6 @@ class PyGhidraContext:
             ghidra_analysis_complete=False,
             file_path=metadata["Executable Location"],
             load_time=time.time(),
-            code_collection=None,
-            strings_collection=None,
         )
 
         return program_info
@@ -478,130 +665,25 @@ class PyGhidraContext:
         def _sha1_file(path: Path) -> str:
             sha1 = hashlib.sha1()
 
-            with path.open("rb") as f:
-                for chunk in iter(lambda: f.read(65536), b""):
-                    sha1.update(chunk)
-
-            return sha1.hexdigest()
+            try:
+                with path.open("rb") as f:
+                    for chunk in iter(lambda: f.read(65536), b""):
+                        sha1.update(chunk)
+                return sha1.hexdigest()
+            except (FileNotFoundError, OSError):
+                # File doesn't exist or can't be read - use path-based hash instead
+                sha1.update(str(path).encode())
+                return sha1.hexdigest()
 
         return "-".join((path.name, _sha1_file(path.absolute())[:6]))
-
-    def _init_chroma_code_collection_for_program(self, program_info: ProgramInfo):
-        """
-        Initialize Chroma code collection for a single program.
-        """
-        from ghidra.program.model.listing import Function
-
-        logger.info(f"Initializing Chroma code collection for {program_info.name}")
-        try:
-            collection = self.chroma_client.get_collection(name=program_info.name)
-            logger.info(f"Collection '{program_info.name}' exists; skipping code ingest.")
-            program_info.code_collection = collection
-        except Exception:
-            logger.info(f"Creating new code collection '{program_info.name}'")
-            tools = GhidraTools(program_info)
-            functions = tools.get_all_functions()
-            decompiles = []
-            ids = []
-            metadatas = []
-
-            for i, func in enumerate(functions):
-                func: Function
-                try:
-                    if i % 10 == 0:
-                        logger.debug(f"Decompiling {i}/{len(functions)}")
-                    decompiled = tools.decompile_function(func)
-                    decompiles.append(decompiled.code)
-                    ids.append(decompiled.name)
-                    metadatas.append(
-                        {
-                            "function_name": decompiled.name,
-                            "entry_point": str(func.getEntryPoint()),
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to decompile {func.getSymbol().getName(True)}: {e}")
-
-            collection = self.chroma_client.create_collection(name=program_info.name)
-            try:
-                collection.add(
-                    documents=decompiles,
-                    metadatas=metadatas,
-                    ids=ids,
-                )
-            except Exception as e:
-                logger.error(f"Failed add decompiles to collection: {e}")
-
-            logger.info(f"Code analysis complete for collection '{program_info.name}'")
-            program_info.code_collection = collection
-
-    def _init_chroma_strings_collection_for_program(self, program_info: ProgramInfo):
-        """
-        Initialize Chroma strings collection for a single program.
-        """
-        collection_name = f"{program_info.name}_strings"
-        logger.info(f"Initializing Chroma strings collection for {program_info.name}")
-        try:
-            strings_collection = self.chroma_client.get_collection(name=collection_name)
-            logger.info(f"Collection '{collection_name}' exists; skipping strings ingest.")
-            program_info.strings_collection = strings_collection
-        except Exception:
-            logger.info(f"Creating new strings collection '{collection_name}'")
-            tools = GhidraTools(program_info)
-
-            ids = []
-            strings = tools.get_all_strings()
-            metadatas = [{"address": str(s.address)} for s in strings]
-            ids = [str(s.address) for s in strings]
-            strings = [s.value for s in strings]
-
-            strings_collection = self.chroma_client.create_collection(name=collection_name)
-            try:
-                strings_collection.add(
-                    documents=strings,
-                    metadatas=metadatas,  # type: ignore
-                    ids=ids,
-                )
-            except Exception as e:
-                logger.error(f"Failed to add strings to collection: {e}")
-
-            logger.info(f"Strings analysis complete for collection '{collection_name}'")
-            program_info.strings_collection = strings_collection
-
-    def _init_chroma_collections_for_program(self, program_info: ProgramInfo):
-        """
-        Initializes all Chroma collections (code and strings) for a single program.
-        """
-        self._init_chroma_code_collection_for_program(program_info)
-        self._init_chroma_strings_collection_for_program(program_info)
-
-    def _init_all_chroma_collections(self):
-        """
-        Initializes Chroma collections for all programs in the project.
-        If an executor is available, tasks are submitted asynchronously.
-        Otherwise, initialization runs in the main thread.
-        """
-        programs = list(self.programs.values())
-        mode = "background" if self.executor else "main thread"
-        logger.info("Initializing Chroma DB collections in %s...", mode)
-
-        # ensure analysis complete before init
-        assert all(prog.analysis_complete for prog in programs)
-
-        if self.executor:
-            # executor.map submits all tasks at once, returns an iterator of futures
-            self.executor.map(self._init_chroma_collections_for_program, programs)
-        else:
-            for program_info in programs:
-                self._init_chroma_collections_for_program(program_info)
 
     # Callback function that runs when the future is done to catch any exceptions
     def _analysis_done_callback(self, future: concurrent.futures.Future):
         try:
             future.result()
-            logging.info("Asynchronous analysis finished successfully.")
+            logger.info("Asynchronous analysis finished successfully.")
         except Exception as e:
-            logging.error(f"Asynchronous analysis failed with exception: {e}")
+            logger.error(f"Asynchronous analysis failed with exception: {e}")
             raise e
 
     def analyze_project(
@@ -640,8 +722,14 @@ class PyGhidraContext:
         force_analysis: bool = False,
         verbose_analysis: bool = False,
     ) -> None:
-        """
-        Analyzes all files found within the Ghidra project
+        """Analyze all programs in the project.
+
+        Runs Ghidra's auto-analysis on each program and waits for completion.
+        Supports both single-threaded and threaded analysis modes.
+        After analysis completes, initializes ChromaDB collections for semantic search.
+
+        Raises:
+            RuntimeError: If analysis fails for any program
         """
         domain_files = self.list_binary_domain_files()
 
@@ -674,9 +762,6 @@ class PyGhidraContext:
                 logger.info(f"Completed {completed_count}/{prog_count} programs")
 
         logger.info("All programs analyzed.")
-        # The chroma collections need to be initialized after analysis is complete
-        # At this point, threaded or not, all analysis is done
-        self._init_all_chroma_collections()  # DO NOT MOVE
 
     def analyze_program(  # noqa C901
         self,
@@ -685,6 +770,23 @@ class PyGhidraContext:
         force_analysis: bool = False,
         verbose_analysis: bool = False,
     ):
+        """Analyze a single Ghidra program with configurable options.
+
+        Runs Ghidra's auto-analysis with specified timeout settings.
+        Handles analysis options, decompiler configuration, and ChromaDB initialization.
+
+        Args:
+            df_or_prog: DomainFile or Program object to analyze
+            require_symbols: Whether to require symbols for analysis
+            force_analysis: Whether to force re-analysis even if already analyzed
+            verbose_analysis: Whether to enable verbose analysis output
+
+        Returns:
+            Program: The analyzed Ghidra Program object
+
+        Raises:
+            RuntimeError: If analysis fails critically
+        """
         from ghidra.app.script import GhidraScriptUtil
         from ghidra.framework.model import DomainFile
         from ghidra.program.flatapi import FlatProgramAPI
@@ -751,7 +853,9 @@ class PyGhidraContext:
                     self.set_analysis_option(program, k, v)
 
             if self.no_symbols:
-                logger.warn(f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}")
+                logger.warning(
+                    f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}"
+                )
                 self.set_analysis_option(program, "PDB Universal", False)
 
             logger.info(f"Starting Ghidra analysis of {program}...")
@@ -765,7 +869,13 @@ class PyGhidraContext:
                     raise Exception("Missing set analyzed flag method!")
             finally:
                 GhidraScriptUtil.releaseBundleHostReference()
+                # Save the program
                 self.project.save(program)
+
+                # NOTE: Decompiler remains valid after save()
+                # Based on Ghidra codebase analysis, there is NO evidence that
+                # program.save() invalidates DecompInterface. The decompiler
+                # only needs to be recreated if the program object changes.
         else:
             logger.info(f"Analysis already complete.. skipping {program}!")
 
@@ -778,7 +888,7 @@ class PyGhidraContext:
             self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
 
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
-        self.programs[df.pathname].ghidra_analysis_complete = True
+        self.programs[df.pathname].set_analysis_complete(True)
         return df_or_prog
 
     def set_analysis_option(  # noqa: C901
@@ -830,7 +940,7 @@ class PyGhidraContext:
                 if enum_for_option is None:
                     raise ValueError(
                         f"Attempted to set an Enum option {option_name} without an "
-                        + "existing enum value alreday set."
+                        + "existing enum value already set."
                     )
                 new_enum = None
                 try:
@@ -843,7 +953,7 @@ class PyGhidraContext:
                 if new_enum is None:
                     raise ValueError(
                         f"Attempted to set an Enum option {option_name} without an "
-                        + "existing enum value alreday set."
+                        + "existing enum value already set."
                     )
                 prog_options.setEnum(option_name, new_enum)
             case _:
@@ -932,6 +1042,17 @@ class PyGhidraContext:
         return dict(meta)
 
     def setup_decompiler(self, program: "Program") -> "DecompInterface":
+        """Configure and initialize decompiler interface for a program.
+
+        Creates DecompInterface with increased max payload size to handle
+        large function decompilations. Uses program's default decompiler options.
+
+        Args:
+            program: Ghidra Program object
+
+        Returns:
+            DecompInterface: Configured decompiler instance ready for use
+        """
         from ghidra.app.decompiler import DecompileOptions, DecompInterface
 
         prog_options = DecompileOptions()

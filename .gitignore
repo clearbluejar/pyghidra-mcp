@@ -207,8 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 
-pyghidra_mcp_projects/** 
-tests/pyghidra_mcp_projects/**
+**/pyghidra_mcp_projects/** 
 
 # Personal
 ghidra

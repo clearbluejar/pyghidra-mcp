@@ -450,6 +450,59 @@ Add the following JSON block to your `claude_desktop_config.json` file:
     }
 }
 ```
+
+## Transport Modes and JVM Lifecycle
+
+This server supports multiple transport protocols with different JVM lifecycle behaviors:
+
+### stdio (default)
+
+- **Lifecycle**: JVM starts when process starts, shuts down when process exits
+- **Use case**: Single MCP client per process
+- **Connection model**: One client = one process
+- **JVM cleanup**: Handled in `server_lifespan`
+
+### SSE (Server-Sent Events)
+
+- **Lifecycle**: JVM starts when HTTP server starts, shuts down when HTTP server exits
+- **Use case**: Long-running HTTP server with multiple clients
+- **Connection model**: Multiple clients connect/disconnect over server lifetime
+- **JVM cleanup**: Handled via atexit handler
+- **Important**: JVM stays alive across client connections
+
+### streamable-http
+
+- **Lifecycle**: JVM starts when HTTP server starts, shuts down when HTTP server exits
+- **Use case**: Long-running HTTP server with stateful or stateless sessions
+- **Connection model**: Multiple sessions/requests over server lifetime
+- **JVM cleanup**: Handled via atexit handler
+- **Important**: JVM stays alive across sessions/requests
+
+### Testing Guidelines
+
+When writing tests for SSE/streamable-http transports:
+
+✅ **DO**: Use TCP port checks for server health
+
+```python
+async def _wait_for_port(host: str, port: int, timeout: int = 60):
+    """Wait for a TCP port to be accepting connections."""
+    with socket.create_connection((host, port), timeout=1):
+        return True
+```
+
+❌ **DON'T**: Use HTTP endpoint checks that establish connections
+
+```python
+# This triggers lifespan cleanup!
+async with session.get(f"{base_url}/sse") as response:
+    if response.status == 200:
+        return  # JVM shuts down when this connection closes
+```
+
+The HTTP endpoint check establishes a connection that triggers lifespan cleanup,
+shutting down the JVM before your actual test runs.
+
 ## Inspiration
 
 This project implementation and design was inspired by these awesome projects:

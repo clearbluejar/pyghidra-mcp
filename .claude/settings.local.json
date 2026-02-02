@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 120 uv run python:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(tasklist:*)",
+      "Bash(uv run py-spy:*)",
+      "Bash(done:*)",
+      "Bash(grep:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(uv run python:*)"
+    ],
+    "additionalDirectories": [
+      "D:\\tools\\ghidra_12.0_PUBLIC\\Ghidra\\Features\\PyGhidra\\docs"
+    ]
+  }
+}
