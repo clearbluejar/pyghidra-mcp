@@ -238,10 +238,8 @@ int main() {
 
             for program in program_infos:
                 if demo_binary_name in program["name"]:
-                    # Check if analysis and collections are complete
-                    if (program.get("analysis_complete") and
-                        program.get("code_collection") and
-                        program.get("strings_collection")):
+                    # Check if analysis is complete
+                    if program.get("analysis_complete"):
                         print(f"SETUP: Demo binary '{demo_binary_name}' ready for use", flush=True)
                         print("="*70 + "\n", flush=True)
                         break
@@ -352,23 +350,13 @@ def find_binary_in_list_response():
 @pytest.fixture()
 def import_binary_and_wait():
     """
-    Async helper function that imports a binary and waits for specified conditions.
+    Async helper function that imports a binary and waits for analysis to complete.
     This is needed for lazy initialization mode where binaries are not auto-imported.
 
     NOTE: This fixture is synchronous (returns an async function) because it
     just creates and returns the async helper. Tests will await the returned function.
 
     Usage:
-        # Wait for analysis only (fastest - for tests that don't need search)
-        await import_binary_and_wait(session, binary_path, wait_for_code=False, wait_for_strings=False)
-
-        # Wait for analysis + code only (for search_code tests)
-        await import_binary_and_wait(session, binary_path, wait_for_strings=False)
-
-        # Wait for analysis + strings only (for search_strings tests)
-        await import_binary_and_wait(session, binary_path, wait_for_code=False)
-
-        # Wait for analysis + code + strings (default, slowest - for tests needing both)
         await import_binary_and_wait(session, binary_path)
     """
 
@@ -376,8 +364,6 @@ def import_binary_and_wait():
         session: ClientSession,
         binary_path: str,
         timeout_seconds: int = 240,
-        wait_for_code: bool = True,
-        wait_for_strings: bool = True,
     ):
         from pyghidra_mcp.context import PyGhidraContext
 
@@ -386,7 +372,7 @@ def import_binary_and_wait():
         # Import the binary
         response = await session.call_tool("import_binary", {"binary_path": binary_path})
 
-        # Wait for analysis to complete AND collections to be ready (if requested)
+        # Wait for analysis to complete
         start_time = asyncio.get_event_loop().time()
         while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
             await asyncio.sleep(1)
@@ -418,24 +404,12 @@ def import_binary_and_wait():
 
             for program in program_infos:
                 if binary_name in program["name"]:
-                    # Check if analysis is complete (always required)
-                    if not program.get("analysis_complete"):
-                        continue
-
-                    # Check if code collection is ready (only if requested)
-                    if wait_for_code and not program.get("code_collection"):
-                        continue
-
-                    # Check if strings collection is ready (only if requested)
-                    if wait_for_strings and not program.get("strings_collection"):
-                        continue
-
-                    # All conditions met
-                    return binary_name
+                    # Check if analysis is complete
+                    if program.get("analysis_complete"):
+                        return binary_name
 
         raise TimeoutError(
-            f"Binary {binary_name} not ready after {timeout_seconds} seconds "
-            f"(analysis_complete={wait_for_code and 'code+' or ''}{wait_for_strings and 'strings' or ''})"
+            f"Binary {binary_name} not ready after {timeout_seconds} seconds"
         )
 
     return _importer
