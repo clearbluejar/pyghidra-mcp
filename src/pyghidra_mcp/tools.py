@@ -373,7 +373,7 @@ class GhidraTools:
 
     def _search_code_literal(
         self,
-        literal_results: dict | None,
+        literal_results: typing.Any,
         limit: int,
         offset: int,
         include_full_code: bool,
@@ -425,6 +425,7 @@ class GhidraTools:
         preview_length: int,
         total_functions: int,  # Added total_functions to correctly calculate semantic_total
     ) -> tuple[list[CodeSearchResult], int]:  # Changed return type to int for semantic_total
+        assert self.program_info.code_collection is not None
         search_results: list[CodeSearchResult] = []
         # Semantic search
         results = self.program_info.code_collection.query(
