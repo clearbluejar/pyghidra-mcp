@@ -381,6 +381,7 @@ def gen_callgraph(
     condense_threshold: int = 50,
     top_layers: int = 3,
     bottom_layers: int = 3,
+    max_run_time: int = 120,
 ) -> CallGraphResult:
     """Generates a mermaidjs function call graph for a specified function.
 
@@ -397,6 +398,7 @@ def gen_callgraph(
         condense_threshold: Maximum number of edges before graph condensation is triggered.
         top_layers: Number of top layers to show in a condensed graph.
         bottom_layers: Number of bottom layers to show in a condensed graph.
+        max_run_time: Maximum run time in seconds (default: 120).
     """
     pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
@@ -407,7 +409,7 @@ def gen_callgraph(
         cg_display_type=display_type,
         include_refs=True,
         max_depth=None,
-        max_run_time=60,
+        max_run_time=max_run_time,
         condense_threshold=condense_threshold,
         top_layers=top_layers,
         bottom_layers=bottom_layers,
