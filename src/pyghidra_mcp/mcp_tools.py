@@ -13,7 +13,6 @@ from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
 
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
-    BinaryMetadata,
     BytesReadResult,
     CallGraphDirection,
     CallGraphDisplayType,
@@ -206,28 +205,19 @@ def list_project_binaries(ctx: Context) -> ProgramInfos:
 
 
 @mcp_error_handler
-def list_project_binary_metadata(binary_name: str, ctx: Context) -> BinaryMetadata:
+def list_project_binary_metadata(binary_name: str, ctx: Context) -> dict:
     """
-    Retrieve detailed metadata for a specific program (binary) in the active project.
+    Retrieve detailed metadata for a specified binary.
 
-    This tool provides extensive information about a binary, including its architecture,
-    compiler, executable format, and various analysis metrics like the number of
-    functions and symbols. It is useful for gaining a deep understanding of a
-    binary's composition and properties. For example, you can use it to determine
-    the processor (`Processor`), endianness (`Endian`), or check if it's a
-    relocatable file (`Relocatable`). The results also include hashes like MD5/SHA256
-    and details from the executable format (e.g., ELF or PE).
+    Returns a dictionary containing properties such as architecture, compiler,
+    endianness, file hashes, and analysis counts (functions, symbols, etc.).
 
     Args:
         binary_name: The name of the binary to retrieve metadata for.
-
-    Returns:
-        An object containing detailed metadata for the specified binary.
     """
     pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
-    metadata_dict = program_info.metadata
-    return BinaryMetadata.model_validate(metadata_dict)
+    return program_info.metadata
 
 
 @mcp_error_handler

@@ -4,7 +4,7 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from pyghidra_mcp.models import BinaryMetadata, ProgramInfos
+from pyghidra_mcp.models import ProgramInfos
 
 
 @pytest.mark.asyncio
@@ -32,18 +32,14 @@ async def test_list_project_binary_metadata(server_params):
             )
 
             assert tool_resp is not None
-            metadata_result = json.loads(tool_resp.content[0].text)
+            metadata = json.loads(tool_resp.content[0].text)
 
-            # The server returns a pydantic model which is serialized.
-            # We load it back into the model for validation.
-            metadata = BinaryMetadata(**metadata_result)
-
-            assert isinstance(metadata, BinaryMetadata)
-            assert metadata.executable_location is not None
-            assert metadata.compiler is not None
-            assert metadata.processor is not None
-            assert metadata.endian is not None
-            assert metadata.address_size is not None
+            assert isinstance(metadata, dict)
+            assert metadata.get("Executable Location") is not None
+            assert metadata.get("Compiler") is not None
+            assert metadata.get("Processor") is not None
+            assert metadata.get("Endian") is not None
+            assert metadata.get("Address Size") is not None
             assert binary_name is not None
-            assert metadata.program_name is not None
-            assert metadata.program_name in binary_name
+            assert metadata.get("Program Name") is not None
+            assert metadata.get("Program Name") in binary_name

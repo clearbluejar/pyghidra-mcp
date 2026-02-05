@@ -12,7 +12,6 @@ from mcp.client.streamable_http import streamablehttp_client
 
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
-    BinaryMetadata,
     BytesReadResult,
     CallGraphResult,
     CodeSearchResults,
@@ -186,15 +185,14 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         )
 
         # List project binary metadata
-        bin_metadata_result = json.loads(client_responses[3].content[0].text)
-        metadata = BinaryMetadata(**bin_metadata_result)
-        assert isinstance(metadata, BinaryMetadata)
-        assert metadata.executable_location is not None
-        assert metadata.compiler is not None
-        assert metadata.processor is not None
-        assert metadata.endian is not None
-        assert metadata.address_size is not None
-        assert os.path.basename(streamable_server) in metadata.program_name
+        metadata = json.loads(client_responses[3].content[0].text)
+        assert isinstance(metadata, dict)
+        assert metadata.get("Executable Location") is not None
+        assert metadata.get("Compiler") is not None
+        assert metadata.get("Processor") is not None
+        assert metadata.get("Endian") is not None
+        assert metadata.get("Address Size") is not None
+        assert os.path.basename(streamable_server) in metadata.get("Program Name")
 
         # List exports
         export_infos_result = json.loads(client_responses[4].content[0].text)
