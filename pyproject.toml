@@ -117,9 +117,9 @@ ignore = ["F821", "E402"]
 
 
 [tool.ruff.lint.isort]
-known-first-party = [
-    "pyghidra_mcp",
-]
+known-first-party = ["pyghidra_mcp"]
+known-third-party = ["jpype", "ghidrecomp"]
+
 combine-as-imports = true
 split-on-trailing-comma = true
 
