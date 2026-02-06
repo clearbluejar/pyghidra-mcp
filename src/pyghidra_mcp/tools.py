@@ -7,9 +7,9 @@ import logging
 import re
 import typing
 
+from ghidrecomp.callgraph import gen_callgraph
 from jpype import JByte
 
-from ghidrecomp.callgraph import gen_callgraph
 from pyghidra_mcp.models import (
     BytesReadResult,
     CallGraphDirection,
