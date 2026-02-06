@@ -170,7 +170,7 @@ You can create new projects in several ways, depending on your workflow:
 
 ```bash
 # Create a new project with default settings
-python -m pyghidra_mcp
+pyghidra_mcp
 
 # Creates: 
 $ tree pyghidra_mcp_projects/
@@ -186,7 +186,7 @@ pyghidra_mcp_projects/
 
 ```bash
 # Create project with custom name and location
-python -m pyghidra_mcp --project-path ~/analysis/malware_study --project-name malware_analysis
+pyghidra_mcp --project-path ~/analysis/malware_study --project-name malware_analysis
 
 $ tree ~/analysis/ 
 /home/vscode/analysis/
@@ -205,10 +205,10 @@ $ tree ~/analysis/
 mkdir ~/reverse_engineering_workspace
 
 # Project for suspicious binaries
-python -m pyghidra_mcp --project-path ~/reverse_engineering_workspace/suspicious_binaries --project-name suspicious_analysis
+pyghidra_mcp --project-path ~/reverse_engineering_workspace/suspicious_binaries --project-name suspicious_analysis
 
 # Project for packed malware  
-python -m pyghidra_mcp --project-path ~/reverse_engineering_workspace/packed_malware --project-name packed_analysis
+pyghidra_mcp --project-path ~/reverse_engineering_workspace/packed_malware --project-name packed_analysis
 ```
 
 ### Opening Existing Ghidra Projects
@@ -219,7 +219,7 @@ If you have existing Ghidra projects (`.gpr` files), you can open them directly 
 
 ```bash
 # Open existing Ghidra project (project name derived from filename)
-python -m pyghidra_mcp --project-path ~/existing/ghidra/my_research.gpr
+pyghidra_mcp --project-path ~/existing/ghidra/my_research.gpr
 
 # Result: ~/existing/ghidra/my_research-pyghidra-mcp/
 # └── chromadb/, gzfs/ (pyghidra-mcp additions)
