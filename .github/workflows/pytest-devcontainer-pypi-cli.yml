@@ -53,7 +53,7 @@ jobs:
           fi
 
           # Install pyghidra-mcp main package first (required for integration tests)
-          uv run pip install pyghidra-mcp
+          uv pip install pyghidra-mcp
 
           # Install pyghidra-mcp-cli from PyPI with dev dependencies
           uv add "pyghidra-mcp-cli[dev]"
