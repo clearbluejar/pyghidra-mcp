@@ -96,7 +96,7 @@ class PyGhidraMcpClient:
                 pass
             raise ServerNotRunningError(
                 f"Cannot connect to pyghidra-mcp server at {url}\n\n{get_server_start_message()}"
-            )
+            ) from None
         except (ConnectionError, OSError) as e:
             try:
                 await transport_gen.__aexit__(None, None, None)
@@ -113,10 +113,12 @@ class PyGhidraMcpClient:
             error_msg = str(e)
             if any(x in error_msg for x in ["ConnectError", "connection", "ConnectionRefused"]):
                 raise ServerNotRunningError(
-                    f"Cannot connect to pyghidra-mcp server at {url}\n\n{get_server_start_message()}"
+                    f"Cannot connect to pyghidra-mcp server at {url}\n\n"
+                    f"{get_server_start_message()}"
                 ) from e
             raise ServerNotRunningError(
-                f"Cannot connect to pyghidra-mcp server at {url}: {e}\n\n{get_server_start_message()}"
+                f"Cannot connect to pyghidra-mcp server at {url}: {e}\n\n"
+                f"{get_server_start_message()}"
             ) from e
 
         self._transport_cm = transport_gen

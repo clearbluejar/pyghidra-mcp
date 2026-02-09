@@ -4,11 +4,19 @@ A command-line client for the pyghidra-mcp server, providing a user-friendly int
 
 ## Installation
 
+Install the CLI package using [`uv`](https://docs.astral.sh/uv/) (recommended):
+
+```bash
+uvx pyghidra-mcp-cli
+```
+
+Or install with pip:
+
 ```bash
 pip install pyghidra-mcp-cli
 ```
 
-Or from source:
+Or install from source:
 
 ```bash
 cd cli

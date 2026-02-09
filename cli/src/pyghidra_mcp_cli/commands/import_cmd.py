@@ -1,6 +1,7 @@
 """Import command for pyghidra-mcp CLI."""
 
 import asyncio
+
 import click
 
 from ..client import PyGhidraMcpClient

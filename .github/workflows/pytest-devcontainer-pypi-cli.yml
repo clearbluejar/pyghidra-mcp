@@ -1,0 +1,67 @@
+name: Pytest PyPI CLI Package Devcontainer Across Versions
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: '30 5,15 * * *'
+  workflow_dispatch:
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [
+          "latest",
+          "11.3.2ghidra3.12python-bookworm",
+          "11.4.1ghidra3.11python-bookworm",
+          "11.3ghidra3.10python-bookworm",
+          # "11.3ghidra3.9python-bookworm",
+          "12.0ghidra3.13python-bookworm",
+        ]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Overwrite original devcontainer with workflow devcontainer
+      run: |
+        cp .github/workflows/devcontainer.json .devcontainer/devcontainer.json
+
+    - name: Test CLI with pytest on devcontainer
+      env:
+        DC_IMAGE_TAG: ${{ matrix.image }}
+      uses: devcontainers/ci@v0.3
+      with:
+        imageName: ghcr.io/clearbluejar/ghidra-python
+        cacheFrom: ghcr.io/clearbluejar/ghidra-python
+        imageTag: ${{ matrix.image }}
+        push: never
+        runCmd: |
+          env
+          ls /usr/local/include/
+          pip install --upgrade pip
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="/root/.cargo/bin:$PATH"
+          
+          # If Ghidra major version is 11, pin pyghidra==2.2.1 first
+          if [[ "$GHIDRA_VERSION" == 11.* ]]; then
+            echo "Detected Ghidra $GHIDRA_VERSION, pinning pyghidra==2.2.1..."
+            uv add "pyghidra==2.2.1"
+          fi
+
+          # Install pyghidra-mcp-cli from PyPI with dev dependencies
+          uv add "pyghidra-mcp-cli[dev]"
+          
+          # Run tests using the CLI's test command
+          uv run pytest tests/ -v --doctest-modules --junitxml=junit/pypi-test-results-${{ matrix.image }}.xml
+
+    - name: Upload CLI test results
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: cli-pypi-test-results-${{ matrix.image }}
+        path: junit/pypi-test-results-${{ matrix.image }}.xml
+        retention-days: 7

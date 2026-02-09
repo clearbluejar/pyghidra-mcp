@@ -1,0 +1,48 @@
+name: Release CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      run-tests:
+        description: 'Run tests before publishing'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  build-and-publish-cli:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+          pip install build
+
+      - name: Run tests
+        if: ${{ inputs.run-tests == 'true' }}
+        run: pytest
+
+      - name: Build CLI package
+        run: python -m build
+
+      - name: Show contents of CLI source distribution
+        run: |
+          echo "📂 Contents of CLI source distribution archive:"
+          tar -tf dist/*.tar.gz
+
+      - name: Publish CLI to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}

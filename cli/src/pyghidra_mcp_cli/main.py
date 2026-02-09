@@ -25,6 +25,7 @@ Prerequisites:
 
 import click
 
+from . import __version__
 from .commands import callgraph, decompile, delete, import_cmd, metadata, read, search, xref
 from .commands import list as list_mod
 
@@ -77,7 +78,7 @@ After starting the server, run this CLI again:
     show_default=True,
     help="Output format.",
 )
-@click.version_option(version="0.1.0", prog_name="pyghidra-mcp-cli")
+@click.version_option(version=__version__, prog_name="pyghidra-mcp-cli")
 @click.pass_context
 def cli(
     ctx: click.Context,

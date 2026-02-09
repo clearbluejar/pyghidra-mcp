@@ -1,0 +1,86 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Pytest Local Repo CLI Devcontainer Across Versions
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'cli/src/pyghidra_mcp_cli/**'
+      - 'cli/tests/**'
+      - 'cli/pyproject.toml'
+      - 'cli/Makefile'
+      - '.github/workflows/pytest-devcontainer-repo-cli.yml'
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '30 5,15 * * *'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [
+          "latest",
+          "12.0ghidra3.13python-bookworm",
+          "11.3.2ghidra3.12python-bookworm",
+          "11.4.1ghidra3.11python-bookworm",
+          "11.3ghidra3.10python-bookworm",
+        ]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Overwrite original devcontainer with workflow devcontainer
+      run: cp .github/workflows/devcontainer.json .devcontainer/devcontainer.json
+
+    - name: Test CLI with pytest on devcontainer
+      env:
+        DC_IMAGE_TAG: ${{ matrix.image }}
+      uses: devcontainers/ci@v0.3
+      with:
+        imageName: ghcr.io/clearbluejar/ghidra-python
+        cacheFrom: ghcr.io/clearbluejar/ghidra-python
+        imageTag: ${{ matrix.image }}
+        push: never
+        runCmd: |
+          # Install uv first
+          pip install --upgrade pip
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="/root/.cargo/bin:$PATH"
+
+          # Change to CLI directory
+          cd cli
+
+          # If Ghidra major version is 11, pin pyghidra==2.2.1 first
+          if [[ "$GHIDRA_VERSION" == 11.* ]]; then
+            echo "Detected Ghidra $GHIDRA_VERSION, pinning pyghidra==2.2.1..."
+            uv add "pyghidra==2.2.1"
+          fi
+
+          # Install CLI dependencies with uv
+          uv sync --extra dev
+
+          # Run CLI tests using the CLI's test approach
+          uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
+          uv run pytest tests/integration/ -v --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
+
+    - name: Upload unit test results
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: cli-unit-test-results-${{ matrix.image }}
+        path: junit/unit-test-results-${{ matrix.image }}.xml
+        retention-days: 7
+
+    - name: Upload integration test results
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: cli-integration-test-results-${{ matrix.image }}
+        path: junit/integration-test-results-${{ matrix.image }}.xml
+        retention-days: 7
