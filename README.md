@@ -94,6 +94,7 @@ graph TD
   - [Yet another Ghidra MCP?](#yet-another-ghidra-mcp)
   - [Contents](#contents)
   - [Getting started](#getting-started)
+  - [CLI Client](#cli-client)
   - [Project Creation, Management, and Opening Existing Projects](#project-creation-management-and-opening-existing-projects)
     - [Creating New Projects](#creating-new-projects)
       - [Self-Contained Project Structure](#self-contained-project-structure)
@@ -155,6 +156,46 @@ Or, run as a [Docker container](https://ghcr.io/clearbluejar/pyghidra-mcp):
 ```bash
 docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
 ```
+
+## CLI Client
+
+For a more interactive command-line experience, you can use the separate **pyghidra-mcp-cli** package, which provides a user-friendly interface for interacting with a running pyghidra-mcp server.
+
+### Installation
+
+Install the CLI client using [`uv`](https://docs.astral.sh/uv/) (recommended):
+
+```bash
+uvx pyghidra-mcp-cli
+```
+
+Or install with pip:
+
+```bash
+pip install pyghidra-mcp-cli
+```
+
+### Quick Start with CLI
+
+1. **Start the server** (in one terminal):
+```bash
+pyghidra-mcp --transport streamable-http /bin/ls
+```
+
+2. **Use the CLI** (in another terminal):
+```bash
+# List available binaries
+pyghidra-mcp-cli list binaries
+
+# Decompile a function
+pyghidra-mcp-cli decompile --binary ls main
+
+# Search for symbols
+pyghidra-mcp-cli search symbols --binary ls printf -l 10
+```
+
+> [!NOTE]
+> The CLI connects to pyghidra-mcp via HTTP to avoid the 10-60 second startup overhead of spawning a new Ghidra process for each command. See the [CLI README](./cli/README.md) for complete documentation.
 
 ## Project Creation, Management, and Opening Existing Projects
 
