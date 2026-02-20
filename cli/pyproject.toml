@@ -21,6 +21,7 @@ dev = [
     "ruff>=0.11.4",
     "pyright>=1.1.0",
     "tomli>=2.0.1",
+    "pyghidra-mcp>=0.1.14",
 ]
 
 [build-system]
