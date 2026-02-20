@@ -46,17 +46,21 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           export PATH="/root/.cargo/bin:$PATH"
           
+          # Create and activate an isolated virtual environment
+          uv venv
+          . .venv/bin/activate
+          
           # If Ghidra major version is 11, pin pyghidra==2.2.1 first
           if [[ "$GHIDRA_VERSION" == 11.* ]]; then
             echo "Detected Ghidra $GHIDRA_VERSION, pinning pyghidra==2.2.1..."
-            uv add "pyghidra==2.2.1"
+            uv pip install "pyghidra==2.2.1"
           fi
 
-          # Install pyghidra-mcp main package first (required for integration tests)
-          # uv pip install pyghidra-mcp
-
           # Install pyghidra-mcp-cli from PyPI with dev dependencies
-          uv add "pyghidra-mcp-cli[dev]"
+          uv pip install "pyghidra-mcp-cli[dev]"
+          
+          # Change to CLI directory where the tests are located
+          cd cli
           
           # Run tests using the CLI's test approach
           uv run pytest tests/ -v --doctest-modules --junitxml=junit/pypi-test-results-${{ matrix.image }}.xml
