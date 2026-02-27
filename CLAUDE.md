@@ -41,7 +41,7 @@ The server package lives in `src/pyghidra_mcp/` with a clear layered design:
 
 - **server.py** — CLI entry point (Click), FastMCP server setup, transport configuration (stdio/streamable-http/sse), tool registration, lifespan management
 - **mcp_tools.py** — Async MCP tool handlers that wrap `GhidraTools` methods. Uses `@mcp_error_handler` decorator for centralized error handling (ValueError → INVALID_PARAMS, others → INTERNAL_ERROR)
-- **tools.py** — Core Ghidra analysis logic (`GhidraTools` class): decompilation, symbol/import/export listing, cross-references, call graphs, byte/string search. Uses `@handle_exceptions` decorator. Interacts with Ghidra via JPype/pyghidra
+- **tools.py** — Core Ghidra analysis logic (`GhidraTools` class): decompilation, symbol/import/export listing, cross-references, call graphs, byte/string search. Uses `@handle_exceptions` decorator. Interacts with Ghidra via [JPype/pyghidra](docs/ghidra-python-bindings.md)
 - **context.py** — `PyGhidraContext` manages Ghidra project lifecycle: project creation, binary import/analysis, ChromaDB collections for semantic search, thread pool for concurrent analysis. Contains `ProgramInfo` dataclass tracking per-binary state
 - **models.py** — Pydantic models for all MCP tool responses (DecompiledFunction, ProgramInfo, ExportInfo, etc.)
 
