@@ -82,11 +82,11 @@ class PyGhidraMcpClient:
     async def _connect_internal(self) -> None:
         """Internal connection logic - establish connection to the pyghidra-mcp server."""
         from mcp.client.session import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client
 
         url = f"http://{self.host}:{self.port}/mcp"
 
-        transport_gen = streamablehttp_client(url)
+        transport_gen = streamable_http_client(url)
         try:
             read, write, _ = await asyncio.wait_for(transport_gen.__aenter__(), timeout=5.0)
         except asyncio.TimeoutError:

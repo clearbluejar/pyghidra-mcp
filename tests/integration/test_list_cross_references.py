@@ -1,4 +1,5 @@
 import json
+import platform
 
 import pytest
 from mcp import ClientSession
@@ -29,6 +30,7 @@ async def test_list_cross_references(server_params):
             cross_reference_infos = CrossReferenceInfos(**cross_reference_infos_result)
 
             assert len(cross_reference_infos.cross_references) > 0
+            name = "entry" if platform.system() == "Darwin" else "main"
             assert any(
-                [ref.function_name == "main" for ref in cross_reference_infos.cross_references]
+                ref.function_name == name for ref in cross_reference_infos.cross_references
             )

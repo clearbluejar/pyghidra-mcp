@@ -41,14 +41,12 @@ int main() {
 
 
 @pytest.fixture(scope="module")
-def server_params(test_binary):
+def server_params(test_binary, ghidra_env):
     """Get server parameters with a test binary."""
     return StdioServerParameters(
-        command="python",  # Executable
-        # Run with test binary
-        args=["-m", "pyghidra_mcp", "--no-threaded", test_binary],  # no-thread for search_code
-        # Optional environment variables
-        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+        command="python",
+        args=["-m", "pyghidra_mcp", "--no-threaded", test_binary],
+        env=ghidra_env,
     )
 
 

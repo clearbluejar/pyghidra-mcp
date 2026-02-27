@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +12,27 @@ import aiohttp
 import pytest
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
+
+
+@pytest.fixture(scope="session")
+def ghidra_env():
+    """Derive a valid environment for locating Ghidra or skip if unavailable.
+
+    Policy:
+    - If GHIDRA_INSTALL_DIR is set and is a valid directory, use it.
+    - Else if /ghidra exists, set GHIDRA_INSTALL_DIR to /ghidra.
+    - Else skip tests that require a Ghidra installation.
+    """
+    env = os.environ.copy()
+    ghidra_dir = env.get("GHIDRA_INSTALL_DIR")
+    if ghidra_dir and os.path.isdir(ghidra_dir):
+        return env
+    if os.path.isdir("/ghidra"):
+        env["GHIDRA_INSTALL_DIR"] = "/ghidra"
+        return env
+    pytest.skip(
+        "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, or ensure /ghidra exists."
+    )
 
 
 @pytest.fixture(scope="module")
@@ -56,7 +78,7 @@ int main() {
 
 
 @pytest.fixture(scope="module")
-def streamable_server(test_binary, test_dir):
+def streamable_server(test_binary, test_dir, ghidra_env):
     """Fixture to start the pyghidra-mcp server in a separate process with isolated project."""
     project_dir = os.path.join(test_dir, "project.gpr")
 
@@ -65,14 +87,21 @@ def streamable_server(test_binary, test_dir):
             "pyghidra-mcp",
             "--transport",
             "streamable-http",
+            "--wait-for-analysis",
             "--project-path",
             project_dir,
             test_binary,
         ],
-        env={**os.environ, "GHIDRA_INSTALL_DIR": "/ghidra"},
+        env=ghidra_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+
+    if proc.poll() is not None:
+        out, err = proc.communicate(timeout=5)
+        raise RuntimeError(
+            f"pyghidra-mcp exited early with code {proc.returncode}.\nSTDOUT:\n{out}\nSTDERR:\n{err}"
+        )
 
     async def wait_for_server(timeout=120):
         async with aiohttp.ClientSession() as session:
@@ -90,10 +119,17 @@ def streamable_server(test_binary, test_dir):
 
     time.sleep(10)
 
-    yield test_binary
-
-    proc.terminate()
-    proc.wait(timeout=10)
+    try:
+        yield test_binary
+    finally:
+        try:
+            proc.terminate()
+            proc.wait(timeout=10)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
 
 @pytest.fixture
@@ -139,9 +175,10 @@ async def test_list_binaries(client, streamable_server):
 async def test_decompile_function(client, binary_name):
     """Test decompiling a function."""
     async with client:
-        result = await client.decompile_function(binary_name, "main")
+        name = "entry" if platform.system() == "Darwin" else "main"
+        result = await client.decompile_function(binary_name, name)
         assert "code" in result
-        assert "main" in result["code"]
+        assert name in result["code"]
 
 
 @pytest.mark.asyncio
@@ -219,8 +256,9 @@ async def test_list_cross_references(client, binary_name):
 @pytest.mark.asyncio
 async def test_read_bytes(client, binary_name):
     """Test reading bytes from memory."""
+    address = "100000000" if platform.system() == "Darwin" else "100000"
     async with client:
-        result = await client.read_bytes(binary_name, address="100000", size=32)
+        result = await client.read_bytes(binary_name, address=address, size=32)
         assert "data" in result
         assert "address" in result
         assert result["size"] == 32
@@ -230,9 +268,10 @@ async def test_read_bytes(client, binary_name):
 async def test_gen_callgraph(client, binary_name):
     """Test generating a call graph."""
     async with client:
+        name = "entry" if platform.system() == "Darwin" else "main"
         result = await client.gen_callgraph(
             binary_name,
-            function_name="main",
+            function_name=name,
             direction="calling",
             display_type="flow",
             condense_threshold=50,
@@ -242,7 +281,7 @@ async def test_gen_callgraph(client, binary_name):
         )
         assert "graph" in result
         assert "function_name" in result
-        assert "main" in result["function_name"]
+        assert name in result["function_name"]
 
 
 @pytest.mark.asyncio
