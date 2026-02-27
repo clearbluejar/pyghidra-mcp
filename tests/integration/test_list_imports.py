@@ -12,16 +12,16 @@ async def test_list_imports(server_params_shared_object, test_shared_object):
     async with stdio_client(server_params_shared_object) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            binary_name = PyGhidraContext._gen_unique_bin_name(
-                server_params_shared_object.args[-1]
-            )
+            binary_name = PyGhidraContext._gen_unique_bin_name(server_params_shared_object.args[-1])
 
             # Test without params
             response = await session.call_tool("list_imports", {"binary_name": binary_name})
             import_infos = ImportInfos.model_validate_json(response.content[0].text)
             assert len(import_infos.imports) > 0
             assert any("printf" in imp.name for imp in import_infos.imports)
-            assert any("malloc" in imp.name for imp in import_infos.imports) # in shared object but not in binary
+            assert any(
+                "malloc" in imp.name for imp in import_infos.imports
+            )  # in shared object but not in binary
             all_import_names = [imp.name for imp in import_infos.imports]
 
             # Test limit (filter to a known import for determinism)

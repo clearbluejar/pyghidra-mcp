@@ -1,6 +1,5 @@
 import json
 import os
-import platform
 import tempfile
 from pathlib import Path
 
@@ -25,7 +24,8 @@ def ghidra_env():
         env["GHIDRA_INSTALL_DIR"] = "/ghidra"
         return env
     pytest.skip(
-        "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, or ensure /ghidra exists."
+        "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, "
+        "or ensure /ghidra exists."
     )
 
 
@@ -184,6 +184,7 @@ def custom_project_directory():
     """Create temporary directory for custom named projects"""
     with tempfile.TemporaryDirectory() as temp_dir:
         yield Path(temp_dir)
+
 
 @pytest.fixture(scope="module")
 def server_params_custom_project_name(custom_project_directory, ghidra_env):

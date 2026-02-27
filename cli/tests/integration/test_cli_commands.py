@@ -31,7 +31,8 @@ def ghidra_env():
         env["GHIDRA_INSTALL_DIR"] = "/ghidra"
         return env
     pytest.skip(
-        "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, or ensure /ghidra exists."
+        "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, "
+        "or ensure /ghidra exists."
     )
 
 
@@ -100,7 +101,8 @@ def streamable_server(test_binary, test_dir, ghidra_env):
     if proc.poll() is not None:
         out, err = proc.communicate(timeout=5)
         raise RuntimeError(
-            f"pyghidra-mcp exited early with code {proc.returncode}.\nSTDOUT:\n{out}\nSTDERR:\n{err}"
+            f"pyghidra-mcp exited early with code {proc.returncode}.\n"
+            f"STDOUT:\n{out}\nSTDERR:\n{err}"
         )
 
     async def wait_for_server(timeout=120):

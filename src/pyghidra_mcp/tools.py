@@ -93,7 +93,7 @@ class GhidraTools:
         name_lc = name_or_address.lower()
         functions = self.get_all_functions(include_externals=include_externals)
         seen: set = set()
-        matches: list["Function"] = []
+        matches: list[Function] = []
 
         if exact:
             for f in functions:
