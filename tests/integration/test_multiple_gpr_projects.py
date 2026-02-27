@@ -16,7 +16,7 @@ def multi_project_directory():
 
 
 @pytest.fixture(scope="module")
-def server_params_specific_project(multi_project_directory):
+def server_params_specific_project(multi_project_directory, ghidra_env):
     """Server pointing to specific project directory in multi-project directory"""
     project_dir = multi_project_directory / "afd-11"
     return StdioServerParameters(
@@ -30,12 +30,12 @@ def server_params_specific_project(multi_project_directory):
             "afd-11",
             "--wait-for-analysis",
         ],
-        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+        env=ghidra_env,
     )
 
 
 @pytest.fixture(scope="module")
-def server_params_other_project(multi_project_directory):
+def server_params_other_project(multi_project_directory, ghidra_env):
     """Server pointing to different project directory in same directory"""
     project_dir = multi_project_directory / "macos-test"
     return StdioServerParameters(
@@ -49,7 +49,7 @@ def server_params_other_project(multi_project_directory):
             "macos-test",
             "--wait-for-analysis",
         ],
-        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+        env=ghidra_env,
     )
 
 
@@ -147,7 +147,7 @@ async def test_projects_are_isolated(
 
 
 @pytest.mark.asyncio
-async def test_shared_base_directory_projects():
+async def test_shared_base_directory_projects(ghidra_env):
     """Test that multiple .gpr projects in same base directory get separate artifact directories"""
     with tempfile.TemporaryDirectory() as temp_dir:
         base_dir = Path(temp_dir)
@@ -167,7 +167,7 @@ async def test_shared_base_directory_projects():
                 "proj1",
                 "--no-threaded",
             ],
-            env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+            env=ghidra_env,
         )
 
         server_params2 = StdioServerParameters(
@@ -181,7 +181,7 @@ async def test_shared_base_directory_projects():
                 "proj2",
                 "--no-threaded",
             ],
-            env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+            env=ghidra_env,
         )
 
         # Start first project
