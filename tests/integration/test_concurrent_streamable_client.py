@@ -28,6 +28,54 @@ from pyghidra_mcp.models import (
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
 
+async def wait_for_server(timeout=120):
+    async with aiohttp.ClientSession() as session:
+        for _ in range(timeout):
+            try:
+                async with session.get(f"{base_url}/mcp") as response:
+                    if response.status == 406:
+                        return
+            except aiohttp.ClientConnectorError:
+                pass
+            await asyncio.sleep(1)
+        raise RuntimeError("Server did not start in time")
+
+
+async def wait_for_collections(test_binary, timeout: int = 120) -> None:
+    """
+    Repeatedly call `list_project_binaries` until all programs have both
+    collections populated, or until *timeout* seconds elapse.
+    """
+    deadline = time.time() + timeout
+
+    async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            while True:
+                tool_resp = await session.call_tool("list_project_binaries", {})
+                program_infos_result = json.loads(tool_resp.content[0].text)
+                program_infos = ProgramInfos(**program_infos_result)
+
+                has_test_binary = any(
+                    PyGhidraContext._gen_unique_bin_name(Path(test_binary)) in pi.name
+                    for pi in program_infos.programs
+                )
+
+                has_missing = any(
+                    pi.code_collection is False or pi.strings_collection is False
+                    for pi in program_infos.programs
+                )
+
+                if not has_missing and has_test_binary:  # All collections are present - success!
+                    return
+
+                if time.time() > deadline:  # pragma: no cover
+                    raise RuntimeError(f"Collections still missing after {timeout}s: ")
+
+                await asyncio.sleep(1)
+
+
 @pytest.fixture(scope="module")
 def streamable_server(test_binary, ghidra_env):
     """Fixture to start the pyghidra-mcp server in a separate process."""
@@ -44,18 +92,6 @@ def streamable_server(test_binary, ghidra_env):
         env=ghidra_env,
     )
 
-    async def wait_for_server(timeout=120):
-        async with aiohttp.ClientSession() as session:
-            for _ in range(timeout):
-                try:
-                    async with session.get(f"{base_url}/mcp") as response:
-                        if response.status == 406:
-                            return
-                except aiohttp.ClientConnectorError:
-                    pass
-                await asyncio.sleep(1)
-            raise RuntimeError("Server did not start in time")
-
     try:
         asyncio.run(wait_for_server())
     except Exception:
@@ -64,42 +100,6 @@ def streamable_server(test_binary, ghidra_env):
         raise
 
     time.sleep(3)
-
-    async def wait_for_collections(test_binary, timeout: int = 120) -> None:
-        """
-        Repeatedly call `list_project_binaries` until all programs have both
-        collections populated, or until *timeout* seconds elapse.
-        """
-        deadline = time.time() + timeout
-
-        async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-
-                while True:
-                    tool_resp = await session.call_tool("list_project_binaries", {})
-                    program_infos_result = json.loads(tool_resp.content[0].text)
-                    program_infos = ProgramInfos(**program_infos_result)
-
-                    has_test_binary = any(
-                        PyGhidraContext._gen_unique_bin_name(Path(test_binary)) in pi.name
-                        for pi in program_infos.programs
-                    )
-
-                    has_missing = any(
-                        pi.code_collection is False or pi.strings_collection is False
-                        for pi in program_infos.programs
-                    )
-
-                    if (
-                        not has_missing and has_test_binary
-                    ):  # All collections are present - success!
-                        return
-
-                    if time.time() > deadline:  # pragma: no cover
-                        raise RuntimeError(f"Collections still missing after {timeout}s: ")
-
-                    await asyncio.sleep(1)
 
     try:
         asyncio.run(wait_for_collections(test_binary))
@@ -125,7 +125,8 @@ async def invoke_tool_concurrently(server_binary_path):
             decomp_name = "entry" if platform.system() == "Darwin" else "main"
             tasks = [
                 session.call_tool(
-                    "decompile_function", {"binary_name": binary_name, "name_or_address": decomp_name}
+                    "decompile_function",
+                    {"binary_name": binary_name, "name_or_address": decomp_name},
                 ),
                 session.call_tool(
                     "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
@@ -223,7 +224,9 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         cross_references_result = json.loads(client_responses[6].content[0].text)
         cross_reference_infos = CrossReferenceInfos(**cross_references_result)
         assert len(cross_reference_infos.cross_references) > 0
-        assert any(ref.function_name == expected_main for ref in cross_reference_infos.cross_references)
+        assert any(
+            ref.function_name == expected_main for ref in cross_reference_infos.cross_references
+        )
 
         # Search symbols results
         search_symbols_result = json.loads(client_responses[7].content[0].text)

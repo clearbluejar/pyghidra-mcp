@@ -21,10 +21,13 @@ print(f"MCP_BASE_URL: {base_url}")
 def sse_server(test_binary, ghidra_env):
     proc = subprocess.Popen(
         [
-            "python", "-m", "pyghidra_mcp",
+            "python",
+            "-m",
+            "pyghidra_mcp",
             "--no-threaded",
             "--wait-for-analysis",
-            "--transport", "sse",
+            "--transport",
+            "sse",
             test_binary,
         ],
         env=ghidra_env,

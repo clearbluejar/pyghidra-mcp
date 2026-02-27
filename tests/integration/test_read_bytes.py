@@ -5,6 +5,7 @@ Simple smoke test to verify read_bytes works through the MCP interface.
 """
 
 import platform
+
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
