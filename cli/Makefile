@@ -3,6 +3,8 @@
 
 .PONY: help install install-dev test test-unit lint format typecheck clean pre-commit-install check dev build
 
+export UV_CACHE_DIR := $(CURDIR)/.uv-cache
+
 # Default target
 help:
 	@echo "PyGhidra MCP CLI - Command-line client for pyghidra-mcp"
@@ -56,6 +58,10 @@ typecheck:
 # Pre-commit setup
 pre-commit-install:
 	@echo "Installing pre-commit hooks..."
+	# Ensure pre-commit is available in the environment.
+	# (It's intentionally not a runtime dependency, so it must be installed via the dev extra.)
+	uv run python -c "import shutil,sys; sys.exit(0 if shutil.which('pre-commit') else 1)" \
+		|| (echo "Error: pre-commit is not installed. Run 'make install-dev' (or 'uv sync --extra dev') first." && exit 1)
 	uv run pre-commit install
 	@echo "Pre-commit hooks installed"
 	@echo "Hooks will run automatically on git commit"
