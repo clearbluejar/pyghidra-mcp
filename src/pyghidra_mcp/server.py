@@ -12,6 +12,7 @@ import pyghidra
 from click_option_group import optgroup
 from mcp.server import Server
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from pyghidra_mcp import mcp_tools
 from pyghidra_mcp.__init__ import __version__
@@ -37,7 +38,10 @@ async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
         pass
 
 
-mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
+mcp = FastMCP("pyghidra-mcp",
+              lifespan=server_lifespan,
+              transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False)
+             )  # type: ignore
 
 
 # MCP Tools
