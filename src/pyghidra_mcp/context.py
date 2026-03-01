@@ -562,11 +562,10 @@ class PyGhidraContext:
 
             collection = self.chroma_client.create_collection(name=program_info.name)
             try:
-                collection.add(
-                    documents=decompiles,
-                    metadatas=metadatas,
-                    ids=ids,
-                )
+                BATCH_SIZE = 5000
+                for i in range(0, len(decompiles), BATCH_SIZE):
+                    batch_end = min(i + BATCH_SIZE, len(decompiles))
+                    collection.add(documents=decompiles[i:batch_end], metadatas=metadatas[i:batch_end], ids=ids[i:batch_end],)
             except Exception as e:
                 logger.error(f"Failed add decompiles to collection: {e}")
 
@@ -595,11 +594,10 @@ class PyGhidraContext:
 
             strings_collection = self.chroma_client.create_collection(name=collection_name)
             try:
-                strings_collection.add(
-                    documents=strings,
-                    metadatas=metadatas,  # type: ignore
-                    ids=ids,
-                )
+                BATCH_SIZE = 5000
+                for i in range(0, len(strings), BATCH_SIZE):
+                    batch_end = min(i + BATCH_SIZE, len(strings))
+                    strings_collection.add(documents=strings[i:batch_end], metadatas=metadatas[i:batch_end], ids=ids[i:batch_end],)
             except Exception as e:
                 logger.error(f"Failed to add strings to collection: {e}")
 
