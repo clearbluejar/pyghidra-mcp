@@ -189,14 +189,13 @@ class PyGhidraContext:
         """
         from ghidra.program.model.listing import Program
 
-        all_binary_paths = self.list_binaries()
-        for binary_path_s in all_binary_paths:
-            binary_path = Path(binary_path_s)
+        domain_files = self.list_binary_domain_files()
+        for df in domain_files:
             program: Program = self.project.openProgram(
-                str(binary_path.parent), binary_path.name, False
+                df.getParent().getPathname(), df.getName(), False
             )
             program_info = self._init_program_info(program)
-            self.programs[binary_path_s] = program_info
+            self.programs[df.getPathname()] = program_info
 
     def list_binaries(self) -> list[str]:
         """List all the binaries within the Ghidra project."""
