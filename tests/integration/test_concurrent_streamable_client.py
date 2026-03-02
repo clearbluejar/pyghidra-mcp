@@ -77,13 +77,20 @@ async def wait_for_collections(test_binary, timeout: int = 120) -> None:
 
 
 @pytest.fixture(scope="module")
-def streamable_server(test_binary, ghidra_env):
+def streamable_project_args(tmp_path_factory):
+    project_path = tmp_path_factory.mktemp("concurrent-streamable-project")
+    return ["--project-path", str(project_path), "--project-name", "concurrent_streamable_project"]
+
+
+@pytest.fixture(scope="module")
+def streamable_server(test_binary, ghidra_env, streamable_project_args):
     """Fixture to start the pyghidra-mcp server in a separate process."""
     proc = subprocess.Popen(
         [
             "python",
             "-m",
             "pyghidra_mcp",
+            *streamable_project_args,
             "--wait-for-analysis",
             "--transport",
             "streamable-http",
@@ -123,6 +130,7 @@ async def invoke_tool_concurrently(server_binary_path):
 
             read_addr = "100000000" if platform.system() == "Darwin" else "100000"
             decomp_name = "entry" if platform.system() == "Darwin" else "main"
+            name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
             tasks = [
                 session.call_tool(
                     "decompile_function",
@@ -137,7 +145,7 @@ async def invoke_tool_concurrently(server_binary_path):
                 session.call_tool("list_imports", {"binary_name": binary_name}),
                 session.call_tool(
                     "list_cross_references",
-                    {"binary_name": binary_name, "name_or_address": "function_one"},
+                    {"binary_name": binary_name, "name_or_address": name_one},
                 ),
                 session.call_tool(
                     "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
@@ -168,6 +176,8 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     """
     num_clients = 6
     expected_main = "entry" if platform.system() == "Darwin" else "main"
+    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+    name_two = "_function_two" if platform.system() == "Darwin" else "function_two"
     tasks = [invoke_tool_concurrently(streamable_server) for _ in range(num_clients)]
     results = await asyncio.gather(*tasks)
 
@@ -186,8 +196,8 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         search_results_result = json.loads(client_responses[1].content[0].text)
         search_results = SymbolSearchResults(**search_results_result)
         assert len(search_results.symbols) >= 2
-        assert any("function_one" in s.name for s in search_results.symbols)
-        assert any("function_two" in s.name for s in search_results.symbols)
+        assert any(name_one in s.name for s in search_results.symbols)
+        assert any(name_two in s.name for s in search_results.symbols)
 
         # List project binaries
         program_infos_result = json.loads(client_responses[2].content[0].text)
@@ -212,7 +222,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         export_infos_result = json.loads(client_responses[4].content[0].text)
         export_infos = ExportInfos(**export_infos_result)
         assert len(export_infos.exports) > 0
-        assert any(["function_one" in export.name for export in export_infos.exports])
+        assert any([name_one in export.name for export in export_infos.exports])
 
         # List imports
         import_infos_result = json.loads(client_responses[5].content[0].text)
@@ -232,14 +242,14 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         search_symbols_result = json.loads(client_responses[7].content[0].text)
         search_symbols = SymbolSearchResults(**search_symbols_result)
         assert len(search_symbols.symbols) >= 2
-        assert any("function_one" in s.name for s in search_symbols.symbols)
-        assert any("function_two" in s.name for s in search_symbols.symbols)
+        assert any(name_one in s.name for s in search_symbols.symbols)
+        assert any(name_two in s.name for s in search_symbols.symbols)
 
         # Search code results
         search_code_result = json.loads(client_responses[8].content[0].text)
         code_search_results = CodeSearchResults(**search_code_result)
         assert len(code_search_results.results) > 0
-        assert "function_one" in code_search_results.results[0].function_name
+        assert name_one in code_search_results.results[0].function_name
         # Verify new fields
         assert code_search_results.query == "Function One"
         assert code_search_results.search_mode.value == "semantic"  # Default mode

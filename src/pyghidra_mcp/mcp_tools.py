@@ -122,6 +122,29 @@ def search_symbols_by_name(
 
 
 @mcp_error_handler
+def search_functions_by_name(
+    binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
+) -> SymbolSearchResults:
+    """Searches for functions, excluding non-function symbols, within a binary by name.
+
+    This tool searches for functions by a case-insensitive substring. Unlike
+    `search_symbols_by_name`, it does not return labels, namespaces, variables,
+    or other non-function symbol types.
+
+    Args:
+        binary_name: The name of the binary to search within.
+        query: The substring to search for in function names (case-insensitive).
+        offset: The number of results to skip.
+        limit: The maximum number of results to return.
+    """
+    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    symbols = tools.search_functions_by_name(query, offset, limit)
+    return SymbolSearchResults(symbols=symbols)
+
+
+@mcp_error_handler
 def search_code(
     binary_name: str,
     query: str,

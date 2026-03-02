@@ -18,12 +18,19 @@ print(f"MCP_BASE_URL: {base_url}")
 
 
 @pytest.fixture(scope="module")
-def sse_server(test_binary, ghidra_env):
+def sse_project_args(tmp_path_factory):
+    project_path = tmp_path_factory.mktemp("sse-project")
+    return ["--project-path", str(project_path), "--project-name", "sse_client_project"]
+
+
+@pytest.fixture(scope="module")
+def sse_server(test_binary, ghidra_env, sse_project_args):
     proc = subprocess.Popen(
         [
             "python",
             "-m",
             "pyghidra_mcp",
+            *sse_project_args,
             "--no-threaded",
             "--wait-for-analysis",
             "--transport",

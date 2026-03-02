@@ -1,3 +1,5 @@
+import platform
+
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
@@ -10,6 +12,7 @@ from pyghidra_mcp.models import CallGraphResult
 async def test_gen_callgraph_tool(server_params, test_binary):
     """Test the gen_callgraph tool."""
 
+    name_two = "_function_two" if platform.system() == "Darwin" else "function_two"
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the connection
@@ -22,7 +25,7 @@ async def test_gen_callgraph_tool(server_params, test_binary):
                 "gen_callgraph",
                 {
                     "binary_name": binary_name,
-                    "function_name": "function_two",
+                    "function_name": name_two,
                     "direction": "calling",
                     "display_type": "flow",
                 },
@@ -42,7 +45,7 @@ async def test_gen_callgraph_tool(server_params, test_binary):
             assert data.startswith("{") and data.endswith("}")
             call_graph_data = CallGraphResult.model_validate_json(data)
 
-            assert "function_two" in call_graph_data.function_name
+            assert name_two in call_graph_data.function_name
             assert call_graph_data.direction == "calling"
             assert call_graph_data.display_type == "flow"
             assert len(call_graph_data.graph) > 0

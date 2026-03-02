@@ -17,13 +17,20 @@ base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
 
 @pytest.fixture(scope="module")
-def streamable_server(test_binary, ghidra_env):
+def streamable_project_args(tmp_path_factory):
+    project_path = tmp_path_factory.mktemp("streamable-project")
+    return ["--project-path", str(project_path), "--project-name", "streamable_client_project"]
+
+
+@pytest.fixture(scope="module")
+def streamable_server(test_binary, ghidra_env, streamable_project_args):
     """Fixture to start the pyghidra-mcp server in a separate process."""
     proc = subprocess.Popen(
         [
             "python",
             "-m",
             "pyghidra_mcp",
+            *streamable_project_args,
             "--wait-for-analysis",
             "--transport",
             "streamable-http",

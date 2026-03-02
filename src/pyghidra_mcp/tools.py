@@ -118,11 +118,11 @@ class GhidraTools:
         include_externals: bool = True,
     ) -> "Function":
         """
-        Resolve a single function by name or address.
+        Resolve a single function by name or address (exact match only).
         Raises if ambiguous or not found.
         """
         matches = self._lookup_functions(
-            name_or_address, exact=True, partial=True, include_externals=include_externals
+            name_or_address, exact=True, partial=False, include_externals=include_externals
         )
 
         if len(matches) == 1:
@@ -138,6 +138,20 @@ class GhidraTools:
             )
         else:
             raise ValueError(f"Function or symbol '{name_or_address}' not found.")
+
+    @handle_exceptions
+    def find_functions(
+        self,
+        name_or_address: str,
+        include_externals: bool = True,
+    ) -> list["Function"]:
+        """
+        Return all functions that match name_or_address (exact or partial).
+        Never raises; returns empty list if none.
+        """
+        return self._lookup_functions(
+            name_or_address, exact=True, partial=True, include_externals=include_externals
+        )
 
     def _lookup_symbols(
         self,
@@ -197,10 +211,10 @@ class GhidraTools:
     @handle_exceptions
     def find_symbol(self, name_or_address: str) -> "Symbol":
         """
-        Resolve a single symbol by name or address.
+        Resolve a single symbol by name or address (exact match only).
         Raises if ambiguous or not found.
         """
-        matches = self._lookup_symbols(name_or_address, exact=True, partial=True)
+        matches = self._lookup_symbols(name_or_address, exact=True, partial=False)
 
         if len(matches) == 1:
             return matches[0]
@@ -321,6 +335,37 @@ class GhidraTools:
                 symbols_info.append(
                     SymbolInfo(
                         name=symbol.name,
+                        address=str(symbol.getAddress()),
+                        type=str(symbol.getSymbolType()),
+                        namespace=str(symbol.getParentNamespace()),
+                        source=str(symbol.getSource()),
+                        refcount=ref_count,
+                        external=symbol.isExternal(),
+                    )
+                )
+        return symbols_info[offset : limit + offset]
+
+    @handle_exceptions
+    def search_functions_by_name(
+        self, query: str, offset: int = 0, limit: int = 100
+    ) -> list[SymbolInfo]:
+        """Searches for functions within a binary by name."""
+
+        if not query:
+            raise ValueError("Query string is required")
+
+        symbols_info = []
+        functions = self.find_functions(query)
+        rm = self.program.getReferenceManager()
+
+        # Search for functions containing the query string
+        for func in functions:
+            symbol = func.getSymbol()
+            if query.lower() in symbol.getName(True).lower():
+                ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
+                symbols_info.append(
+                    SymbolInfo(
+                        name=symbol.getName(),
                         address=str(symbol.getAddress()),
                         type=str(symbol.getSymbolType()),
                         namespace=str(symbol.getParentNamespace()),
