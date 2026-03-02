@@ -111,42 +111,77 @@ void shared_func_two() {
     os.unlink(so_file)
 
 
+def _isolated_project_args(project_root: Path, fixture_name: str) -> list[str]:
+    project_path = project_root / fixture_name
+    project_name = f"{fixture_name}_project"
+    return ["--project-path", str(project_path), "--project-name", project_name]
+
+
 @pytest.fixture(scope="module")
-def server_params_no_input(ghidra_env):
+def isolated_project_root(tmp_path_factory, request):
+    module_name = Path(str(request.node.path)).stem
+    return tmp_path_factory.mktemp(f"{module_name}-projects")
+
+
+@pytest.fixture(scope="module")
+def server_params_no_input(ghidra_env, isolated_project_root):
     """Get server parameters with no test binary."""
     return StdioServerParameters(
         command="python",
-        args=["-m", "pyghidra_mcp", "--wait-for-analysis"],
+        args=[
+            "-m",
+            "pyghidra_mcp",
+            *_isolated_project_args(isolated_project_root, "server_params_no_input"),
+            "--wait-for-analysis",
+        ],
         env=ghidra_env,
     )
 
 
 @pytest.fixture(scope="module")
-def server_params(test_binary, ghidra_env):
+def server_params(test_binary, ghidra_env, isolated_project_root):
     """Get server parameters with a test binary."""
     return StdioServerParameters(
         command="python",
-        args=["-m", "pyghidra_mcp", "--wait-for-analysis", test_binary],
+        args=[
+            "-m",
+            "pyghidra_mcp",
+            *_isolated_project_args(isolated_project_root, "server_params"),
+            "--wait-for-analysis",
+            test_binary,
+        ],
         env=ghidra_env,
     )
 
 
 @pytest.fixture(scope="module")
-def server_params_no_thread(test_binary, ghidra_env):
+def server_params_no_thread(test_binary, ghidra_env, isolated_project_root):
     """Get server parameters with a test binary."""
     return StdioServerParameters(
         command="python",
-        args=["-m", "pyghidra_mcp", "--no-threaded", test_binary],
+        args=[
+            "-m",
+            "pyghidra_mcp",
+            *_isolated_project_args(isolated_project_root, "server_params_no_thread"),
+            "--no-threaded",
+            test_binary,
+        ],
         env=ghidra_env,
     )
 
 
 @pytest.fixture(scope="module")
-def server_params_shared_object(test_shared_object, ghidra_env):
+def server_params_shared_object(test_shared_object, ghidra_env, isolated_project_root):
     """Get server parameters with a test binary."""
     return StdioServerParameters(
         command="python",
-        args=["-m", "pyghidra_mcp", "--wait-for-analysis", test_shared_object],
+        args=[
+            "-m",
+            "pyghidra_mcp",
+            *_isolated_project_args(isolated_project_root, "server_params_shared_object"),
+            "--wait-for-analysis",
+            test_shared_object,
+        ],
         env=ghidra_env,
     )
 

@@ -1,4 +1,5 @@
 import os
+import platform
 import tempfile
 
 import pytest
@@ -41,11 +42,17 @@ int main() {
 
 
 @pytest.fixture(scope="module")
-def server_params(test_binary, ghidra_env):
+def search_code_project_args(tmp_path_factory):
+    project_path = tmp_path_factory.mktemp("search-code-project")
+    return ["--project-path", str(project_path), "--project-name", "search_code_project"]
+
+
+@pytest.fixture(scope="module")
+def server_params(test_binary, ghidra_env, search_code_project_args):
     """Get server parameters with a test binary."""
     return StdioServerParameters(
         command="python",
-        args=["-m", "pyghidra_mcp", "--no-threaded", test_binary],
+        args=["-m", "pyghidra_mcp", *search_code_project_args, "--no-threaded", test_binary],
         env=ghidra_env,
     )
 
@@ -55,6 +62,7 @@ async def test_search_code(server_params):
     """
     Tests searching for code using similarity search.
     """
+    name = "_function_to_find" if platform.system() == "Darwin" else "function_to_find"
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the connection
@@ -65,7 +73,7 @@ async def test_search_code(server_params):
             # 1. Decompile a function to get its code to use as a query
             decompile_response = await session.call_tool(
                 "decompile_function",
-                {"binary_name": binary_name, "name_or_address": "function_to_find"},
+                {"binary_name": binary_name, "name_or_address": name},
             )
 
             decompiled_function = DecompiledFunction.model_validate_json(
@@ -83,7 +91,7 @@ async def test_search_code(server_params):
             # 3. Assert the results
             assert len(search_results.results) > 0
             # The top result should be the function we searched for
-            assert "function_to_find" in search_results.results[0].function_name
+            assert name in search_results.results[0].function_name
 
             # 4. Verify new fields are populated
             # 4. Verify new fields are populated

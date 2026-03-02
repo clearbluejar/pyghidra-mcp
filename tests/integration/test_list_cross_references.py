@@ -15,6 +15,7 @@ async def test_list_cross_references(server_params):
     Tests the list_cross_references tool to ensure it returns
     a list of cross-references from the binary.
     """
+    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -23,7 +24,7 @@ async def test_list_cross_references(server_params):
 
             response = await session.call_tool(
                 "list_cross_references",
-                {"binary_name": binary_name, "name_or_address": "function_one"},
+                {"binary_name": binary_name, "name_or_address": name_one},
             )
 
             cross_reference_infos_result = json.loads(response.content[0].text)
