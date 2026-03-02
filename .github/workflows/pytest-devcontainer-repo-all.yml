@@ -9,7 +9,7 @@ on:
     paths:
       - 'src/pyghidra_mcp/**'
       - 'tests/**'
-      - '.github/workflows/pytest-devcontainer-all.yml'
+      - '.github/workflows/pytest-devcontainer-repo-all.yml'
   pull_request:
     branches: [ "main" ]
   schedule:
@@ -77,4 +77,123 @@ jobs:
       with:
         name: integration-test-results-${{ matrix.image }}
         path: junit/integration-test-results-${{ matrix.image }}.xml
+        retention-days: 7
+
+  test-macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      GHIDRA_RELEASE_API: https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: pip
+        cache-dependency-path: pyproject.toml
+
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "21"
+
+    - name: Resolve latest Ghidra release asset
+      id: ghidra-asset
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        import re
+        import urllib.request
+
+        api_url = os.environ["GHIDRA_RELEASE_API"]
+        with urllib.request.urlopen(api_url) as resp:
+            release_data = json.load(resp)
+
+        asset = next(
+            (
+                candidate
+                for candidate in release_data.get("assets", [])
+                if re.match(r"ghidra_.*_PUBLIC_.*\.zip$", candidate["name"])
+            ),
+            None,
+        )
+
+        if asset is None:
+            raise SystemExit("No Ghidra public zip asset found in latest release.")
+
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"asset_name={asset['name']}\n")
+            output.write(f"download_url={asset['browser_download_url']}\n")
+        PY
+
+    - name: Cache Ghidra
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ runner.temp }}/ghidra-download
+          ${{ runner.temp }}/ghidra-install
+        key: ${{ runner.os }}-ghidra-${{ steps.ghidra-asset.outputs.asset_name }}
+
+    - name: Install Ghidra
+      run: |
+        set -euxo pipefail
+        GHIDRA_DOWNLOAD_DIR="${RUNNER_TEMP}/ghidra-download"
+        GHIDRA_INSTALL_ROOT="${RUNNER_TEMP}/ghidra-install"
+
+        mkdir -p "${GHIDRA_DOWNLOAD_DIR}" "${GHIDRA_INSTALL_ROOT}"
+
+        GHIDRA_ZIP="${GHIDRA_DOWNLOAD_DIR}/${{ steps.ghidra-asset.outputs.asset_name }}"
+        if [ ! -f "${GHIDRA_ZIP}" ]; then
+          curl -fsSL "${{ steps.ghidra-asset.outputs.download_url }}" -o "${GHIDRA_ZIP}"
+        fi
+
+        GHIDRA_DIR="$(find "${GHIDRA_INSTALL_ROOT}" -maxdepth 1 -type d -name 'ghidra_*_PUBLIC*' | head -n1 || true)"
+        if [ -z "${GHIDRA_DIR}" ]; then
+          unzip -q "${GHIDRA_ZIP}" -d "${GHIDRA_INSTALL_ROOT}"
+          GHIDRA_DIR="$(find "${GHIDRA_INSTALL_ROOT}" -maxdepth 1 -type d -name 'ghidra_*_PUBLIC*' | head -n1)"
+        fi
+
+        xattr -dr com.apple.quarantine "${GHIDRA_DIR}" || true
+        echo "GHIDRA_INSTALL_DIR=${GHIDRA_DIR}" >> "${GITHUB_ENV}"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[dev]
+
+    - name: Run unit tests on macOS
+      run: |
+        mkdir -p junit
+        python -m pytest tests/unit/ --doctest-modules --junitxml=junit/unit-test-results-macos.xml
+
+    - name: Run integration smoke tests on macOS
+      run: |
+        mkdir -p junit
+        python -m pytest \
+          tests/integration/test_sse_client.py \
+          tests/integration/test_streamable_client.py \
+          tests/integration/test_search_code.py \
+          -v \
+          --doctest-modules \
+          --junitxml=junit/integration-smoke-test-results-macos.xml
+
+    - name: Upload unit test results (macOS)
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results-macos
+        path: junit/unit-test-results-macos.xml
+        retention-days: 7
+
+    - name: Upload integration smoke test results (macOS)
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-smoke-test-results-macos
+        path: junit/integration-smoke-test-results-macos.xml
         retention-days: 7
