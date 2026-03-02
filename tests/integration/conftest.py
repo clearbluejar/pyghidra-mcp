@@ -1,5 +1,7 @@
 import json
 import os
+import platform
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -96,19 +98,26 @@ void shared_func_two() {
         )
         c_file = f.name
 
-    # 2. Compile as a shared object
-    so_file = c_file.replace(".c", ".so")
-    cmd = f"gcc -fPIC -shared -o {so_file} {c_file}"
-    ret = os.system(cmd)
-    if ret != 0:
-        raise RuntimeError(f"Compilation failed: {cmd}")
+    # 2. Compile as a shared object (Mach-O on macOS, ELF shared object on Linux)
+    is_macos = platform.system() == "Darwin"
+    shared_ext = ".dylib" if is_macos else ".so"
+    shared_file = c_file.replace(".c", shared_ext)
+    compile_cmd = (
+        ["gcc", "-dynamiclib", "-o", shared_file, c_file]
+        if is_macos
+        else ["gcc", "-fPIC", "-shared", "-o", shared_file, c_file]
+    )
+    result = subprocess.run(compile_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        cmd_text = " ".join(compile_cmd)
+        raise RuntimeError(f"Compilation failed: {cmd_text}\nSTDERR:\n{result.stderr}")
 
-    # 3. Yield path to .so for tests
-    yield so_file
+    # 3. Yield path to shared library for tests
+    yield shared_file
 
     # 4. Clean up
     os.unlink(c_file)
-    os.unlink(so_file)
+    os.unlink(shared_file)
 
 
 def _isolated_project_args(project_root: Path, fixture_name: str) -> list[str]:
