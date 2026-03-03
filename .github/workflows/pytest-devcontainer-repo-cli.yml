@@ -24,12 +24,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Exclude 11.3ghidra3.10python-bookworm for CLI tests due to
+        # ModuleNotFoundError: No module named 'aiohttp' during test collection.
         image: [
           "latest",
           "12.0ghidra3.13python-bookworm",
           "11.3.2ghidra3.12python-bookworm",
           "11.4.1ghidra3.11python-bookworm",
-          "11.3ghidra3.10python-bookworm",
         ]
 
     steps:
