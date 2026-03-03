@@ -64,6 +64,53 @@ class GhidraTools:
         max_path_len = 50
         return f"{func.getSymbol().getName(True)[:max_path_len]}-{func.entryPoint}"
 
+    def _lookup_functions(
+        self,
+        name_or_address: str,
+        *,
+        exact: bool = True,
+        partial: bool = False,
+        include_externals: bool = True,
+    ) -> list["Function"]:
+        """
+        Resolve functions by name or address.
+        Returns a flat list of unique Function objects.
+        Search modes (exact, partial) are optional and only applied if enabled.
+        """
+        af = self.program.getAddressFactory()
+        fm = self.program.getFunctionManager()
+
+        # Try interpreting as an address first
+        try:
+            addr = af.getAddress(name_or_address)
+            if addr:
+                func = fm.getFunctionAt(addr)
+                if func:
+                    return [func]
+        except Exception:
+            pass  # Not an address, fall back to name search
+
+        name_lc = name_or_address.lower()
+        functions = self.get_all_functions(include_externals=include_externals)
+        seen: set = set()
+        matches: list[Function] = []
+
+        if exact:
+            for f in functions:
+                key = f.getEntryPoint()
+                if key not in seen and name_lc == f.getSymbol().getName(True).lower():
+                    seen.add(key)
+                    matches.append(f)
+
+        if partial:
+            for f in functions:
+                key = f.getEntryPoint()
+                if key not in seen and name_lc in f.getSymbol().getName(True).lower():
+                    seen.add(key)
+                    matches.append(f)
+
+        return matches
+
     @handle_exceptions
     def find_function(
         self,
@@ -71,57 +118,40 @@ class GhidraTools:
         include_externals: bool = True,
     ) -> "Function":
         """
-        Resolve a function by name or address.
-        - If name_or_address is an address, return the function at that entry point.
-        - If it's a name, return exact match if unique.
-        - If multiple exact matches, raise with suggestions (signature + entry point).
-        - If none, raise with 'Did you mean...' suggestions from partial matches.
+        Resolve a single function by name or address (exact match only).
+        Raises if ambiguous or not found.
         """
-        af = self.program.getAddressFactory()
-        fm = self.program.getFunctionManager()
+        matches = self._lookup_functions(
+            name_or_address, exact=True, partial=False, include_externals=include_externals
+        )
 
-        # Try interpreting as an address
-        try:
-            addr = af.getAddress(name_or_address)
-            if addr:
-                func = fm.getFunctionAt(addr)
-                if func:
-                    return func
-        except Exception:
-            pass  # Not an address, continue with name search
-
-        # Name-based search
-        functions = self.get_all_functions(include_externals=include_externals)
-        exact_matches = [
-            f for f in functions if name_or_address.lower() == f.getSymbol().getName(True).lower()
-        ]
-
-        if len(exact_matches) == 1:
-            return exact_matches[0]
-        elif len(exact_matches) > 1:
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
             suggestions = [
                 f"{f.getSymbol().getName(True)}({f.getSignature()}) @ {f.getEntryPoint()}"
-                for f in exact_matches
+                for f in matches
             ]
             raise ValueError(
                 f"Ambiguous match for '{name_or_address}'. Did you mean one of these: "
                 + ", ".join(suggestions)
             )
+        else:
+            raise ValueError(f"Function or symbol '{name_or_address}' not found.")
 
-        # No exact matches → suggest partials
-        partial_matches = [
-            f for f in functions if name_or_address.lower() in f.getSymbol().getName(True).lower()
-        ]
-        if partial_matches:
-            suggestions = [
-                f"{f.getSymbol().getName(True)} @ {f.getEntryPoint()}" for f in partial_matches
-            ]
-            raise ValueError(
-                f"Function '{name_or_address}' not found. Did you mean one of these: "
-                + ", ".join(suggestions)
-            )
-
-        raise ValueError(f"Function or symbol '{name_or_address}' not found.")
+    @handle_exceptions
+    def find_functions(
+        self,
+        name_or_address: str,
+        include_externals: bool = True,
+    ) -> list["Function"]:
+        """
+        Return all functions that match name_or_address (exact or partial).
+        Never raises; returns empty list if none.
+        """
+        return self._lookup_functions(
+            name_or_address, exact=True, partial=True, include_externals=include_externals
+        )
 
     def _lookup_symbols(
         self,
@@ -181,10 +211,10 @@ class GhidraTools:
     @handle_exceptions
     def find_symbol(self, name_or_address: str) -> "Symbol":
         """
-        Resolve a single symbol by name or address.
+        Resolve a single symbol by name or address (exact match only).
         Raises if ambiguous or not found.
         """
-        matches = self._lookup_symbols(name_or_address, exact=True, partial=True)
+        matches = self._lookup_symbols(name_or_address, exact=True, partial=False)
 
         if len(matches) == 1:
             return matches[0]
@@ -305,6 +335,37 @@ class GhidraTools:
                 symbols_info.append(
                     SymbolInfo(
                         name=symbol.name,
+                        address=str(symbol.getAddress()),
+                        type=str(symbol.getSymbolType()),
+                        namespace=str(symbol.getParentNamespace()),
+                        source=str(symbol.getSource()),
+                        refcount=ref_count,
+                        external=symbol.isExternal(),
+                    )
+                )
+        return symbols_info[offset : limit + offset]
+
+    @handle_exceptions
+    def search_functions_by_name(
+        self, query: str, offset: int = 0, limit: int = 100
+    ) -> list[SymbolInfo]:
+        """Searches for functions within a binary by name."""
+
+        if not query:
+            raise ValueError("Query string is required")
+
+        symbols_info = []
+        functions = self.find_functions(query)
+        rm = self.program.getReferenceManager()
+
+        # Search for functions containing the query string
+        for func in functions:
+            symbol = func.getSymbol()
+            if query.lower() in symbol.getName(True).lower():
+                ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
+                symbols_info.append(
+                    SymbolInfo(
+                        name=symbol.getName(),
                         address=str(symbol.getAddress()),
                         type=str(symbol.getSymbolType()),
                         namespace=str(symbol.getParentNamespace()),

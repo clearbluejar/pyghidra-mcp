@@ -22,8 +22,8 @@ async def test_list_exports(server_params_shared_object):
             response = await session.call_tool("list_exports", {"binary_name": binary_name})
             export_infos = ExportInfos.model_validate_json(response.content[0].text)
             assert len(export_infos.exports) >= 2
-            assert any("function_one" in export.name for export in export_infos.exports)
-            assert any("function_two" in export.name for export in export_infos.exports)
+            assert any("shared_func_one" in export.name for export in export_infos.exports)
+            assert any("shared_func_two" in export.name for export in export_infos.exports)
             all_exports_list = export_infos.exports
 
             # Test limit
@@ -43,11 +43,11 @@ async def test_list_exports(server_params_shared_object):
 
             # Test query
             response = await session.call_tool(
-                "list_exports", {"binary_name": binary_name, "query": "function_one"}
+                "list_exports", {"binary_name": binary_name, "query": "shared_func_one"}
             )
             export_infos = ExportInfos.model_validate_json(response.content[0].text)
             assert len(export_infos.exports) >= 1
-            assert "function_one" in export_infos.exports[0].name
+            assert "shared_func_one" in export_infos.exports[0].name
 
             # Test query with no results
             response = await session.call_tool(
