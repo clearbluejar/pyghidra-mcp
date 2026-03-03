@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  cli-test-linux:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -88,8 +88,8 @@ jobs:
         path: junit/integration-test-results-${{ matrix.image }}.xml
         retention-days: 7
 
-  test-macos:
-    name: test-macos (${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python)
+  cli-test-macos:
+    name: cli-test-macos (${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python)
     runs-on: macos-latest
     timeout-minutes: 120
     strategy:

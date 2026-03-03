@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  test-linux:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
