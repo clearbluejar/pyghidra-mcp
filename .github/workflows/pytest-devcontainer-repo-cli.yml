@@ -89,10 +89,23 @@ jobs:
         retention-days: 7
 
   test-macos:
+    name: test-macos (${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python)
     runs-on: macos-latest
-    timeout-minutes: 90
-    env:
-      GHIDRA_RELEASE_API: https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ghidra_version: latest
+            python_version: "3.13"
+          - ghidra_version: "12.0"
+            python_version: "3.13"
+          - ghidra_version: "11.3.2"
+            python_version: "3.12"
+          - ghidra_version: "11.4.1"
+            python_version: "3.11"
+          # 11.3/3.10 intentionally excluded for CLI because this combo currently fails
+          # with ModuleNotFoundError: No module named 'aiohttp' during integration test import.
 
     steps:
     - uses: actions/checkout@v4
@@ -100,7 +113,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "3.12"
+        python-version: ${{ matrix.python_version }}
         cache: pip
         cache-dependency-path: |
           cli/pyproject.toml
@@ -112,8 +125,10 @@ jobs:
         distribution: temurin
         java-version: "21"
 
-    - name: Resolve latest Ghidra release asset
+    - name: Resolve Ghidra release asset
       id: ghidra-asset
+      env:
+        GHIDRA_VERSION: ${{ matrix.ghidra_version }}
       run: |
         python - <<'PY'
         import json
@@ -121,7 +136,15 @@ jobs:
         import re
         import urllib.request
 
-        api_url = os.environ["GHIDRA_RELEASE_API"]
+        ghidra_version = os.environ["GHIDRA_VERSION"]
+        if ghidra_version == "latest":
+            api_url = "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest"
+        else:
+            api_url = (
+                "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/tags/"
+                f"Ghidra_{ghidra_version}_build"
+            )
+
         with urllib.request.urlopen(api_url) as resp:
             release_data = json.load(resp)
 
@@ -135,7 +158,7 @@ jobs:
         )
 
         if asset is None:
-            raise SystemExit("No Ghidra public zip asset found in latest release.")
+            raise SystemExit(f"No Ghidra public zip asset found for {ghidra_version}.")
 
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write(f"asset_name={asset['name']}\n")
@@ -148,7 +171,7 @@ jobs:
         path: |
           ${{ runner.temp }}/ghidra-download
           ${{ runner.temp }}/ghidra-install
-        key: ${{ runner.os }}-ghidra-${{ steps.ghidra-asset.outputs.asset_name }}
+        key: ${{ runner.os }}-ghidra-${{ matrix.ghidra_version }}-${{ steps.ghidra-asset.outputs.asset_name }}
 
     - name: Install Ghidra
       run: |
@@ -181,39 +204,41 @@ jobs:
         path: |
           ~/.cache/uv
           cli/.venv
-        key: ${{ runner.os }}-uv-${{ hashFiles('cli/uv.lock') }}
+        key: ${{ runner.os }}-uv-${{ matrix.ghidra_version }}-${{ matrix.python_version }}-${{ hashFiles('cli/uv.lock') }}
 
     - name: Install CLI dependencies
       working-directory: cli
-      run: uv sync --extra dev
+      run: |
+        uv sync --extra dev
+
+        if [[ "${{ matrix.ghidra_version }}" == 11.* ]]; then
+          uv run pip install "pyghidra==2.2.1"
+        fi
 
     - name: Run CLI unit tests on macOS
       working-directory: cli
       run: |
         mkdir -p junit
-        uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-macos.xml
+        uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
 
-    - name: Run CLI integration smoke tests on macOS
+    - name: Run CLI integration tests on macOS
       working-directory: cli
       run: |
         mkdir -p junit
-        uv run pytest tests/integration/test_cli_commands.py \
-          -v \
-          -k "test_list_binaries or test_decompile_function or test_search_symbols" \
-          --junitxml=junit/integration-smoke-test-results-macos.xml
+        uv run pytest tests/integration/ -v --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
 
     - name: Upload CLI unit test results (macOS)
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
-        name: cli-unit-test-results-macos
-        path: cli/junit/unit-test-results-macos.xml
+        name: cli-unit-test-results-macos-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python
+        path: cli/junit/unit-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
         retention-days: 7
 
-    - name: Upload CLI integration smoke test results (macOS)
+    - name: Upload CLI integration test results (macOS)
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
-        name: cli-integration-smoke-test-results-macos
-        path: cli/junit/integration-smoke-test-results-macos.xml
+        name: cli-integration-test-results-macos-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python
+        path: cli/junit/integration-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
         retention-days: 7
