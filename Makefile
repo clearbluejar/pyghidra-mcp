@@ -1,7 +1,7 @@
 # PyGhidra MCP Makefile
 # Development and deployment commands for the PyGhidra MCP server
 
-.PHONY: help install install-dev run test test-integration test-unit lint format typecheck clean pre-commit-install check dev build
+.PHONY: help install install-dev run test test-benchmarks test-integration test-unit lint format typecheck clean pre-commit-install check dev build
 
 # Default target
 help:
@@ -12,6 +12,7 @@ help:
 	@echo "  install-dev        Install with development dependencies"
 	@echo "  run                Run the MCP server"
 	@echo "  test               Run the full test suite (unit and integration)"
+	@echo "  test-benchmarks    Run benchmark comparison smoke tests"
 	@echo "  test-unit          Run unit tests"
 	@echo "  test-integration   Run integration tests"
 	@echo "  lint               Check code style with ruff"
@@ -49,6 +50,10 @@ test-unit:
 test-integration:
 	@echo "Running integration tests..."
 	uv run pytest tests/integration/ -v
+
+test-benchmarks:
+	@echo "Running benchmark smoke tests..."
+	uv run pytest tests/benchmarks/ -v
 
 # Code quality targets
 lint:

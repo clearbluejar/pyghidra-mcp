@@ -8,6 +8,12 @@ from pathlib import Path
 import pytest
 from mcp import StdioServerParameters
 
+from tests.benchmark_helpers import (
+    GeneratedBinaryArtifact,
+    GeneratedBinarySpec,
+    build_generated_binary,
+)
+
 
 @pytest.fixture(scope="session")
 def ghidra_env():
@@ -29,6 +35,13 @@ def ghidra_env():
         "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, "
         "or ensure /ghidra exists."
     )
+
+
+def _run_compile_command(compile_cmd: list[str]) -> None:
+    result = subprocess.run(compile_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        cmd_text = " ".join(compile_cmd)
+        raise RuntimeError(f"Compilation failed: {cmd_text}\nSTDERR:\n{result.stderr}")
 
 
 @pytest.fixture(scope="module")
@@ -62,8 +75,7 @@ int main() {
         c_file = f.name
 
     bin_file = c_file.replace(".c", "")
-
-    os.system(f"gcc -o {bin_file} {c_file}")
+    _run_compile_command(["gcc", "-o", bin_file, c_file])
 
     yield bin_file
 
@@ -107,10 +119,7 @@ void shared_func_two() {
         if is_macos
         else ["gcc", "-fPIC", "-shared", "-o", shared_file, c_file]
     )
-    result = subprocess.run(compile_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        cmd_text = " ".join(compile_cmd)
-        raise RuntimeError(f"Compilation failed: {cmd_text}\nSTDERR:\n{result.stderr}")
+    _run_compile_command(compile_cmd)
 
     # 3. Yield path to shared library for tests
     yield shared_file
@@ -130,6 +139,54 @@ def _isolated_project_args(project_root: Path, fixture_name: str) -> list[str]:
 def isolated_project_root(tmp_path_factory, request):
     module_name = Path(str(request.node.path)).stem
     return tmp_path_factory.mktemp(f"{module_name}-projects")
+
+
+@pytest.fixture(scope="module")
+def generated_binary_factory(tmp_path_factory):
+    base_dir = tmp_path_factory.mktemp("generated-executables")
+
+    def _build(spec: GeneratedBinarySpec) -> GeneratedBinaryArtifact:
+        return build_generated_binary(base_dir / spec.stem, spec, shared=False)
+
+    return _build
+
+
+@pytest.fixture(scope="module")
+def generated_shared_object_factory(tmp_path_factory):
+    base_dir = tmp_path_factory.mktemp("generated-shared-objects")
+
+    def _build(spec: GeneratedBinarySpec) -> GeneratedBinaryArtifact:
+        return build_generated_binary(base_dir / spec.stem, spec, shared=True)
+
+    return _build
+
+
+@pytest.fixture(scope="module")
+def stdio_server_params_factory(ghidra_env, isolated_project_root):
+    fixture_index = 0
+
+    def _make(
+        binary_path: str | Path,
+        *,
+        fixture_name: str,
+        wait_for_analysis: bool = True,
+        threaded: bool = True,
+    ) -> StdioServerParameters:
+        nonlocal fixture_index
+        fixture_index += 1
+        args = [
+            "-m",
+            "pyghidra_mcp",
+            *_isolated_project_args(isolated_project_root, f"{fixture_name}_{fixture_index}"),
+        ]
+        if wait_for_analysis:
+            args.append("--wait-for-analysis")
+        if not threaded:
+            args.append("--no-threaded")
+        args.append(str(binary_path))
+        return StdioServerParameters(command="python", args=args, env=ghidra_env)
+
+    return _make
 
 
 @pytest.fixture(scope="module")
