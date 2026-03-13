@@ -43,20 +43,24 @@ mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
 # MCP Tools
 # ---------------------------------------------------------------------------------
 # Register tools from mcp_tools module
-mcp.tool()(mcp_tools.decompile_function)
-mcp.tool()(mcp_tools.search_symbols_by_name)
-mcp.tool()(mcp_tools.search_functions_by_name)
-mcp.tool()(mcp_tools.search_code)
-mcp.tool()(mcp_tools.list_project_binaries)
-mcp.tool()(mcp_tools.list_project_binary_metadata)
-mcp.tool()(mcp_tools.delete_project_binary)
-mcp.tool()(mcp_tools.list_exports)
-mcp.tool()(mcp_tools.list_imports)
-mcp.tool()(mcp_tools.list_cross_references)
-mcp.tool()(mcp_tools.search_strings)
-mcp.tool()(mcp_tools.read_bytes)
-mcp.tool()(mcp_tools.gen_callgraph)
-mcp.tool()(mcp_tools.import_binary)
+mcp.tool(description="Decompile one exact function or address.")(mcp_tools.decompile_function)
+mcp.tool(description="Search symbols by partial name.")(mcp_tools.search_symbols_by_name)
+mcp.tool(description="Search functions by partial name.")(mcp_tools.search_functions_by_name)
+mcp.tool(description="Search code semantically or literally.")(mcp_tools.search_code)
+mcp.tool(description="List project binaries and readiness.")(mcp_tools.list_project_binaries)
+mcp.tool(description="Get metadata for one project binary.")(mcp_tools.list_project_binary_metadata)
+mcp.tool(description="Delete a project binary.")(mcp_tools.delete_project_binary)
+mcp.tool(description="List exports; narrow with query.")(mcp_tools.list_exports)
+mcp.tool(description="List imports; narrow with query.")(mcp_tools.list_imports)
+mcp.tool(description="List xrefs to one symbol or address.")(mcp_tools.list_cross_references)
+mcp.tool(description="Search extracted strings by text.")(mcp_tools.search_strings)
+mcp.tool(description="Read raw bytes at one address.")(mcp_tools.read_bytes)
+mcp.tool(description="Generate a Mermaid call graph.")(mcp_tools.gen_callgraph)
+mcp.tool(description="Import a binary or directory in background.")(mcp_tools.import_binary)
+
+list_project_binaries_tool = mcp._tool_manager.get_tool("list_project_binaries")
+if list_project_binaries_tool is not None:
+    list_project_binaries_tool.parameters["additionalProperties"] = False
 
 
 def init_pyghidra_context(

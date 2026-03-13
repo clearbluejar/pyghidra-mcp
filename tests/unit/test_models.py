@@ -1,4 +1,5 @@
 from pyghidra_mcp.models import (
+    BinaryMetadata,
     BytesReadResult,
     CodeSearchResult,
     CodeSearchResults,
@@ -53,6 +54,13 @@ def test_program_basic_infos_model():
     assert len(infos.programs) == 2
     assert infos.programs[0].name == "test_program1"
     assert infos.programs[1].analysis_complete is False
+
+
+def test_binary_metadata_model():
+    """Test the BinaryMetadata root model."""
+    metadata = BinaryMetadata({"Compiler": "gcc", "Address Size": 64})
+    assert metadata.root["Compiler"] == "gcc"
+    assert metadata.root["Address Size"] == 64
 
 
 def test_program_info_model():

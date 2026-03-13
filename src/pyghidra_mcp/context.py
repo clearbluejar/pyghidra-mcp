@@ -39,11 +39,25 @@ class ProgramInfo:
     load_time: float | None = None
     code_collection: chromadb.Collection | None = None
     strings_collection: chromadb.Collection | None = None
+    ghidra_tools: GhidraTools | None = None
+    derived_cache_version: int = 0
 
     @property
     def analysis_complete(self) -> bool:
         """Check if Ghidra analysis is complete."""
         return self.ghidra_analysis_complete
+
+    def get_tools(self) -> GhidraTools:
+        """Return the shared GhidraTools instance for this program."""
+        if self.ghidra_tools is None:
+            self.ghidra_tools = GhidraTools(self)
+        return self.ghidra_tools
+
+    def invalidate_derived_caches(self) -> None:
+        """Invalidate cached lookup data for this program."""
+        self.derived_cache_version += 1
+        if self.ghidra_tools is not None:
+            self.ghidra_tools.invalidate_derived_caches(self.derived_cache_version)
 
 
 class PyGhidraContext:
@@ -249,6 +263,7 @@ class PyGhidraContext:
         else:
             logger.info(f"Deleting program: {program_name}")
             try:
+                self.invalidate_program_derived_caches(program_info=program_info)
                 program_to_delete: Program = program_info.program
                 program_to_delete_df: DomainFile = program_to_delete.getDomainFile()
                 self.project.close(program_to_delete)
@@ -309,6 +324,8 @@ class PyGhidraContext:
 
         if not program:
             raise ImportError(f"Failed to import binary: {binary_path}")
+
+        self.invalidate_program_derived_caches(program_info=program_info)
 
         if analyze:
             self.analyze_program(program_info.program)
@@ -477,11 +494,27 @@ class PyGhidraContext:
                         "ghidra_analysis_complete": program_info.ghidra_analysis_complete,
                         "code_collection": program_info.code_collection is not None,
                         "strings_collection": program_info.strings_collection is not None,
-                        "suggestion": "Wait and try tool call again.",
+                        "suggestion": (
+                            "Wait for list_project_binaries() to report the binary as ready, "
+                            "then retry the tool call."
+                        ),
                     }
                 )
             )
         return program_info
+
+    def invalidate_program_derived_caches(
+        self,
+        *,
+        program_info: ProgramInfo | None = None,
+        binary_name: str | None = None,
+    ) -> None:
+        """Invalidate cached lookup data for a program."""
+        if program_info is None:
+            if binary_name is None:
+                raise ValueError("Either program_info or binary_name is required")
+            program_info = self.get_program_info(binary_name)
+        program_info.invalidate_derived_caches()
 
     def _init_program_info(self, program):
         from ghidra.program.flatapi import FlatProgramAPI
@@ -535,9 +568,10 @@ class PyGhidraContext:
             collection = self.chroma_client.get_collection(name=program_info.name)
             logger.info(f"Collection '{program_info.name}' exists; skipping code ingest.")
             program_info.code_collection = collection
+            self.invalidate_program_derived_caches(program_info=program_info)
         except Exception:
             logger.info(f"Creating new code collection '{program_info.name}'")
-            tools = GhidraTools(program_info)
+            tools = program_info.get_tools()
             functions = tools.get_all_functions()
             decompiles = []
             ids = []
@@ -572,6 +606,7 @@ class PyGhidraContext:
 
             logger.info(f"Code analysis complete for collection '{program_info.name}'")
             program_info.code_collection = collection
+            self.invalidate_program_derived_caches(program_info=program_info)
 
     def _init_chroma_strings_collection_for_program(self, program_info: ProgramInfo):
         """
@@ -583,9 +618,10 @@ class PyGhidraContext:
             strings_collection = self.chroma_client.get_collection(name=collection_name)
             logger.info(f"Collection '{collection_name}' exists; skipping strings ingest.")
             program_info.strings_collection = strings_collection
+            self.invalidate_program_derived_caches(program_info=program_info)
         except Exception:
             logger.info(f"Creating new strings collection '{collection_name}'")
-            tools = GhidraTools(program_info)
+            tools = program_info.get_tools()
 
             ids = []
             strings = tools.get_all_strings()
@@ -605,6 +641,7 @@ class PyGhidraContext:
 
             logger.info(f"Strings analysis complete for collection '{collection_name}'")
             program_info.strings_collection = strings_collection
+            self.invalidate_program_derived_caches(program_info=program_info)
 
     def _init_chroma_collections_for_program(self, program_info: ProgramInfo):
         """
@@ -836,7 +873,9 @@ class PyGhidraContext:
             self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
 
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
-        self.programs[df.pathname].ghidra_analysis_complete = True
+        program_info = self.programs[df.pathname]
+        program_info.ghidra_analysis_complete = True
+        self.invalidate_program_derived_caches(program_info=program_info)
         return df_or_prog
 
     def set_analysis_option(  # noqa: C901

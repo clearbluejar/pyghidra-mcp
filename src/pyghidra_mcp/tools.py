@@ -2,6 +2,8 @@
 Comprehensive tool implementations for pyghidra-mcp.
 """
 
+from __future__ import annotations
+
 import functools
 import logging
 import re
@@ -54,13 +56,59 @@ def handle_exceptions(func):
 class GhidraTools:
     """Comprehensive tool handler for Ghidra MCP tools"""
 
-    def __init__(self, program_info: "ProgramInfo"):
+    def __init__(self, program_info: ProgramInfo):
         """Initialize with a Ghidra ProgramInfo object"""
         self.program_info = program_info
         self.program = program_info.program
         self.decompiler = program_info.decompiler
+        self._cache_version = getattr(program_info, "derived_cache_version", 0)
+        self._functions_cache: dict[bool, list[Function]] = {}
+        self._symbols_cache: dict[tuple[bool, bool], list[Symbol]] = {}
+        self._strings_cache: list[StringInfo] | None = None
+        self._export_symbols_cache: list[Symbol] | None = None
+        self._import_symbols_cache: list[Symbol] | None = None
+        self._code_collection_count: int | None = None
 
-    def _get_filename(self, func: "Function"):
+    def _ensure_cache_version(self) -> None:
+        current_version = getattr(self.program_info, "derived_cache_version", 0)
+        if current_version != self._cache_version:
+            self.invalidate_derived_caches(current_version)
+
+    def invalidate_derived_caches(self, version: int | None = None) -> None:
+        """Invalidate cached lookup data derived from the program."""
+        self._functions_cache.clear()
+        self._symbols_cache.clear()
+        self._strings_cache = None
+        self._export_symbols_cache = None
+        self._import_symbols_cache = None
+        self._code_collection_count = None
+        if version is None:
+            version = getattr(self.program_info, "derived_cache_version", 0)
+        self._cache_version = version
+
+    def _get_code_collection_count(self) -> int:
+        self._ensure_cache_version()
+        if self._code_collection_count is None:
+            assert self.program_info.code_collection is not None
+            self._code_collection_count = self.program_info.code_collection.count()
+        return self._code_collection_count
+
+    def _get_export_symbols(self) -> list[Symbol]:
+        self._ensure_cache_version()
+        if self._export_symbols_cache is None:
+            symbols = self.program.getSymbolTable().getAllSymbols(True)
+            self._export_symbols_cache = [
+                symbol for symbol in symbols if symbol.isExternalEntryPoint()
+            ]
+        return self._export_symbols_cache
+
+    def _get_import_symbols(self) -> list[Symbol]:
+        self._ensure_cache_version()
+        if self._import_symbols_cache is None:
+            self._import_symbols_cache = list(self.program.getSymbolTable().getExternalSymbols())
+        return self._import_symbols_cache
+
+    def _get_filename(self, func: Function):
         max_path_len = 50
         return f"{func.getSymbol().getName(True)[:max_path_len]}-{func.entryPoint}"
 
@@ -71,7 +119,7 @@ class GhidraTools:
         exact: bool = True,
         partial: bool = False,
         include_externals: bool = True,
-    ) -> list["Function"]:
+    ) -> list[Function]:
         """
         Resolve functions by name or address.
         Returns a flat list of unique Function objects.
@@ -116,7 +164,7 @@ class GhidraTools:
         self,
         name_or_address: str,
         include_externals: bool = True,
-    ) -> "Function":
+    ) -> Function:
         """
         Resolve a single function by name or address (exact match only).
         Raises if ambiguous or not found.
@@ -144,7 +192,7 @@ class GhidraTools:
         self,
         name_or_address: str,
         include_externals: bool = True,
-    ) -> list["Function"]:
+    ) -> list[Function]:
         """
         Return all functions that match name_or_address (exact or partial).
         Never raises; returns empty list if none.
@@ -160,7 +208,7 @@ class GhidraTools:
         exact: bool = True,
         partial: bool = False,
         dynamic: bool = False,
-    ) -> list["Symbol"]:
+    ) -> list[Symbol]:
         """
         Resolve symbols by name or address.
         Returns a single flat list of unique Symbol objects.
@@ -201,7 +249,7 @@ class GhidraTools:
         return list(matches)
 
     @handle_exceptions
-    def find_symbols(self, name_or_address: str) -> list["Symbol"]:
+    def find_symbols(self, name_or_address: str) -> list[Symbol]:
         """
         Return all symbols that match name_or_address (exact or partial).
         Never raises; returns empty list if none.
@@ -209,7 +257,7 @@ class GhidraTools:
         return self._lookup_symbols(name_or_address, exact=True, partial=True)
 
     @handle_exceptions
-    def find_symbol(self, name_or_address: str) -> "Symbol":
+    def find_symbol(self, name_or_address: str) -> Symbol:
         """
         Resolve a single symbol by name or address (exact match only).
         Raises if ambiguous or not found.
@@ -236,7 +284,7 @@ class GhidraTools:
         func = self.find_function(name_or_address)
         return self.decompile_function(func)
 
-    def decompile_function(self, func: "Function", timeout: int = 0) -> DecompiledFunction:
+    def decompile_function(self, func: Function, timeout: int = 0) -> DecompiledFunction:
         """Decompiles a function in a specified binary and returns its pseudo-C code."""
         from ghidra.util.task import ConsoleTaskMonitor
 
@@ -251,13 +299,18 @@ class GhidraTools:
         return DecompiledFunction(name=self._get_filename(func), code=code, signature=sig)
 
     @handle_exceptions
-    def get_all_functions(self, include_externals=False) -> list["Function"]:
+    def get_all_functions(self, include_externals=False) -> list[Function]:
         """
         Gets all functions within a binary.
         Returns a python list that doesn't need to be re-intialized
         """
+        self._ensure_cache_version()
+        cached = self._functions_cache.get(include_externals)
+        if cached is not None:
+            return cached
 
-        funcs = set()
+        funcs = []
+        seen = set()
         fm = self.program.getFunctionManager()
         functions = fm.getFunctions(True)
         for func in functions:
@@ -266,35 +319,53 @@ class GhidraTools:
                 continue
             if not include_externals and func.thunk:
                 continue
-            funcs.add(func)
-        return list(funcs)
+            key = func.getEntryPoint()
+            if key in seen:
+                continue
+            seen.add(key)
+            funcs.append(func)
+
+        self._functions_cache[include_externals] = funcs
+        return funcs
 
     @handle_exceptions
     def get_all_symbols(
         self, include_externals: bool = False, include_dynamic=False
-    ) -> list["Symbol"]:
+    ) -> list[Symbol]:
         """
         Gets all symbols within a binary.
         Returns a python list that doesn't need to be re-initialized.
         """
+        self._ensure_cache_version()
+        cache_key = (include_externals, include_dynamic)
+        cached = self._symbols_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
-        symbols = set()
-        from ghidra.program.model.symbol import SymbolTable
-
-        st: SymbolTable = self.program.getSymbolTable()
+        symbols = []
+        seen = set()
+        st = self.program.getSymbolTable()
         all_symbols = st.getAllSymbols(include_dynamic)
 
         for sym in all_symbols:
             sym: Symbol
             if not include_externals and sym.isExternal():
                 continue
-            symbols.add(sym)
+            if sym in seen:
+                continue
+            seen.add(sym)
+            symbols.append(sym)
 
-        return list(symbols)
+        self._symbols_cache[cache_key] = symbols
+        return symbols
 
     @handle_exceptions
     def get_all_strings(self) -> list[StringInfo]:
         """Gets all defined strings for a binary"""
+        self._ensure_cache_version()
+        if self._strings_cache is not None:
+            return self._strings_cache
+
         try:
             from ghidra.program.util import DefinedStringIterator  # type: ignore
 
@@ -313,6 +384,7 @@ class GhidraTools:
             except Exception as e:
                 logger.debug(f"Could not get string value from data at {data.getAddress()}: {e}")
 
+        self._strings_cache = strings
         return strings
 
     @handle_exceptions
@@ -324,26 +396,27 @@ class GhidraTools:
         if not query:
             raise ValueError("Query string is required")
 
-        symbols_info = []
-        symbols = self.find_symbols(query)
+        query_lc = query.lower()
+        symbols = [
+            symbol
+            for symbol in self.get_all_symbols(include_externals=True)
+            if query_lc in symbol.getName(True).lower()
+        ]
+        paginated_symbols = symbols[offset : offset + limit]
         rm = self.program.getReferenceManager()
 
-        # Search for symbols containing the query string
-        for symbol in symbols:
-            if query.lower() in symbol.getName(True).lower():
-                ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
-                symbols_info.append(
-                    SymbolInfo(
-                        name=symbol.name,
-                        address=str(symbol.getAddress()),
-                        type=str(symbol.getSymbolType()),
-                        namespace=str(symbol.getParentNamespace()),
-                        source=str(symbol.getSource()),
-                        refcount=ref_count,
-                        external=symbol.isExternal(),
-                    )
-                )
-        return symbols_info[offset : limit + offset]
+        return [
+            SymbolInfo(
+                name=symbol.name,
+                address=str(symbol.getAddress()),
+                type=str(symbol.getSymbolType()),
+                namespace=str(symbol.getParentNamespace()),
+                source=str(symbol.getSource()),
+                refcount=len(list(rm.getReferencesTo(symbol.getAddress()))),
+                external=symbol.isExternal(),
+            )
+            for symbol in paginated_symbols
+        ]
 
     @handle_exceptions
     def search_functions_by_name(
@@ -354,56 +427,80 @@ class GhidraTools:
         if not query:
             raise ValueError("Query string is required")
 
-        symbols_info = []
-        functions = self.find_functions(query)
+        query_lc = query.lower()
+        functions = [
+            func
+            for func in self.get_all_functions()
+            if query_lc in func.getSymbol().getName(True).lower()
+        ]
+        paginated_functions = functions[offset : offset + limit]
         rm = self.program.getReferenceManager()
 
-        # Search for functions containing the query string
-        for func in functions:
-            symbol = func.getSymbol()
-            if query.lower() in symbol.getName(True).lower():
-                ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
-                symbols_info.append(
-                    SymbolInfo(
-                        name=symbol.getName(),
-                        address=str(symbol.getAddress()),
-                        type=str(symbol.getSymbolType()),
-                        namespace=str(symbol.getParentNamespace()),
-                        source=str(symbol.getSource()),
-                        refcount=ref_count,
-                        external=symbol.isExternal(),
-                    )
-                )
-        return symbols_info[offset : limit + offset]
+        return [
+            SymbolInfo(
+                name=symbol.getName(),
+                address=str(symbol.getAddress()),
+                type=str(symbol.getSymbolType()),
+                namespace=str(symbol.getParentNamespace()),
+                source=str(symbol.getSource()),
+                refcount=len(list(rm.getReferencesTo(symbol.getAddress()))),
+                external=symbol.isExternal(),
+            )
+            for func in paginated_functions
+            for symbol in [func.getSymbol()]
+        ]
 
     @handle_exceptions
     def list_exports(
         self, query: str | None = None, offset: int = 0, limit: int = 25
     ) -> list[ExportInfo]:
         """Lists all exported functions and symbols from a specified binary."""
+        if limit <= 0:
+            return []
+
+        pattern = re.compile(query, re.IGNORECASE) if query else None
         exports = []
-        symbols = self.program.getSymbolTable().getAllSymbols(True)
-        for symbol in symbols:
-            if symbol.isExternalEntryPoint():
-                if query and not re.search(query, symbol.getName(), re.IGNORECASE):
-                    continue
-                exports.append(ExportInfo(name=symbol.getName(), address=str(symbol.getAddress())))
-        return exports[offset : limit + offset]
+        matches_seen = 0
+
+        for symbol in self._get_export_symbols():
+            if pattern and not pattern.search(symbol.getName()):
+                continue
+            if matches_seen < offset:
+                matches_seen += 1
+                continue
+            exports.append(ExportInfo(name=symbol.getName(), address=str(symbol.getAddress())))
+            matches_seen += 1
+            if len(exports) >= limit:
+                break
+
+        return exports
 
     @handle_exceptions
     def list_imports(
         self, query: str | None = None, offset: int = 0, limit: int = 25
     ) -> list[ImportInfo]:
         """Lists all imported functions and symbols for a specified binary."""
+        if limit <= 0:
+            return []
+
+        pattern = re.compile(query, re.IGNORECASE) if query else None
         imports = []
-        symbols = self.program.getSymbolTable().getExternalSymbols()
-        for symbol in symbols:
-            if query and not re.search(query, symbol.getName(), re.IGNORECASE):
+        matches_seen = 0
+
+        for symbol in self._get_import_symbols():
+            if pattern and not pattern.search(symbol.getName()):
+                continue
+            if matches_seen < offset:
+                matches_seen += 1
                 continue
             imports.append(
                 ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace()))
             )
-        return imports[offset : limit + offset]
+            matches_seen += 1
+            if len(imports) >= limit:
+                break
+
+        return imports
 
     @handle_exceptions
     def list_cross_references(self, name_or_address: str) -> list[CrossReferenceInfo]:
@@ -432,28 +529,34 @@ class GhidraTools:
             )
         return cross_references
 
+    def _get_literal_match_ids(self, query: str) -> typing.Any:
+        assert self.program_info.code_collection is not None
+        return self.program_info.code_collection.get(
+            where_document={"$contains": query},
+            include=[],
+        )
+
+    def _get_literal_result_page(self, query: str, limit: int, offset: int) -> typing.Any:
+        assert self.program_info.code_collection is not None
+        return self.program_info.code_collection.get(
+            where_document={"$contains": query},
+            limit=limit,
+            offset=offset,
+        )
+
     def _search_code_literal(
         self,
         literal_results: typing.Any,
-        limit: int,
-        offset: int,
         include_full_code: bool,
         preview_length: int,
     ) -> list[CodeSearchResult]:
         search_results: list[CodeSearchResult] = []
         if literal_results and literal_results.get("documents"):
-            # Apply offset and limit
             docs = literal_results["documents"] or []
-            metadatas = literal_results["metadatas"] or []
+            metadatas = literal_results.get("metadatas") or []
 
-            # Paginate
-            start_idx = offset
-            end_idx = offset + limit
-            paginated_docs = docs[start_idx:end_idx]
-            paginated_meta = metadatas[start_idx:end_idx] if metadatas else []
-
-            for i, doc in enumerate(paginated_docs):
-                metadata = paginated_meta[i] if i < len(paginated_meta) else {}
+            for i, doc in enumerate(docs):
+                metadata = metadatas[i] if i < len(metadatas) else {}
                 code = doc
                 preview = None
 
@@ -469,7 +572,7 @@ class GhidraTools:
                             else "unknown"
                         ),
                         code=code,
-                        similarity=1.0,  # Exact match
+                        similarity=1.0,
                         search_mode=SearchMode.LITERAL,
                         preview=preview,
                     )
@@ -582,30 +685,25 @@ class GhidraTools:
         """
         if not self.program_info.code_collection:
             raise ValueError(
-                "Code indexing is not complete for this binary. Please try again later."
+                "Code indexing is not complete for this binary. Wait for "
+                "list_project_binaries() to show code_collection=true, then retry search_code."
             )
 
-        # ALWAYS get literal count (reuse for literal mode search)
-        literal_results = self.program_info.code_collection.get(where_document={"$contains": query})
+        literal_id_results = self._get_literal_match_ids(query)
         literal_total = (
-            len(literal_results["ids"]) if literal_results and literal_results.get("ids") else 0
+            len(literal_id_results["ids"])
+            if literal_id_results and literal_id_results.get("ids")
+            else 0
         )
-
-        # Total functions in collection (absolute total)
-        total_functions = self.program_info.code_collection.count()
-
-        # Default semantic total to "available" (filtered by limit)
-        # If we filter and get FEWER than requested, we effectively found "all" above threshold
-        # in this range.
-        # But we don't know beyond the limit.
-        # So we default to total_functions as "estimated matches" if we hit the limit.
+        total_functions = self._get_code_collection_count()
         semantic_total = total_functions
 
-        search_results: list[CodeSearchResult] = []
-
         if search_mode == SearchMode.LITERAL:
+            literal_page = self._get_literal_result_page(query, limit, offset)
             search_results = self._search_code_literal(
-                literal_results, limit, offset, include_full_code, preview_length
+                literal_page,
+                include_full_code,
+                preview_length,
             )
         else:
             search_results, estimated_total = self._search_code_semantic(
@@ -638,13 +736,16 @@ class GhidraTools:
 
         if not self.program_info.strings_collection:
             raise ValueError(
-                "String indexing is not complete for this binary. Please try again later."
+                "String indexing is not complete for this binary. Wait for "
+                "list_project_binaries() to show strings_collection=true, then retry "
+                "search_strings."
             )
 
         search_results = []
         results = self.program_info.strings_collection.get(
             where_document={"$contains": query}, limit=limit
         )
+        remaining_limit = limit
         if results and results["documents"]:
             for i, doc in enumerate(results["documents"]):
                 metadata = results["metadatas"][i]  # type: ignore
@@ -655,9 +756,14 @@ class GhidraTools:
                         similarity=1,
                     )
                 )
-            limit -= len(results["documents"])
+            remaining_limit -= len(results["documents"])
 
-        results = self.program_info.strings_collection.query(query_texts=[query], n_results=limit)
+        if remaining_limit <= 0:
+            return search_results
+
+        results = self.program_info.strings_collection.query(
+            query_texts=[query], n_results=remaining_limit
+        )
         if results and results["documents"]:
             for i, doc in enumerate(results["documents"][0]):
                 metadata = results["metadatas"][0][i]  # type: ignore

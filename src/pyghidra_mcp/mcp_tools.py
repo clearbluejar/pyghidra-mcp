@@ -6,13 +6,16 @@ This module contains all MCP tool implementations with centralized error handlin
 
 import functools
 import logging
+from typing import Annotated
 
 from mcp.server.fastmcp import Context
 from mcp.shared.exceptions import McpError
 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
+from pydantic import Field
 
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
+    BinaryMetadata,
     BytesReadResult,
     CallGraphDirection,
     CallGraphDisplayType,
@@ -31,6 +34,18 @@ from pyghidra_mcp.models import (
 from pyghidra_mcp.tools import GhidraTools
 
 logger = logging.getLogger(__name__)
+
+
+def _get_pyghidra_context(ctx: Context) -> PyGhidraContext:
+    return ctx.request_context.lifespan_context
+
+
+def _get_program_info(ctx: Context, binary_name: str):
+    return _get_pyghidra_context(ctx).get_program_info(binary_name)
+
+
+def _get_program_tools(ctx: Context, binary_name: str) -> GhidraTools:
+    return _get_program_info(ctx, binary_name).get_tools()
 
 
 def _get_action_name(func_name: str) -> str:
@@ -84,7 +99,12 @@ def mcp_error_handler(func):
 
 @mcp_error_handler
 async def decompile_function(
-    binary_name: str, name_or_address: str, ctx: Context
+    binary_name: str,
+    name_or_address: Annotated[
+        str,
+        Field(description="Exact name or hex address."),
+    ],
+    ctx: Context,
 ) -> DecompiledFunction:
     """Decompiles a function in a specified binary and returns its pseudo-C code.
 
@@ -92,9 +112,7 @@ async def decompile_function(
         binary_name: The name of the binary containing the function.
         name_or_address: The name or address of the function to decompile.
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     return tools.decompile_function_by_name_or_addr(name_or_address)
 
 
@@ -114,9 +132,7 @@ def search_symbols_by_name(
         offset: The number of results to skip.
         limit: The maximum number of results to return.
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     symbols = tools.search_symbols_by_name(query, offset, limit)
     return SymbolSearchResults(symbols=symbols)
 
@@ -137,9 +153,7 @@ def search_functions_by_name(
         offset: The number of results to skip.
         limit: The maximum number of results to return.
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     symbols = tools.search_functions_by_name(query, offset, limit)
     return SymbolSearchResults(symbols=symbols)
 
@@ -147,11 +161,17 @@ def search_functions_by_name(
 @mcp_error_handler
 def search_code(
     binary_name: str,
-    query: str,
+    query: Annotated[
+        str,
+        Field(description="Code snippet or exact text."),
+    ],
     ctx: Context,
     limit: int = 5,
     offset: int = 0,
-    search_mode: SearchMode = SearchMode.SEMANTIC,
+    search_mode: Annotated[
+        SearchMode,
+        Field(description="semantic or literal."),
+    ] = SearchMode.SEMANTIC,
     include_full_code: bool = True,
     preview_length: int = 500,
     similarity_threshold: float = 0.0,
@@ -180,9 +200,7 @@ def search_code(
         similarity_threshold: Minimum similarity score (0.0-1.0) for semantic results
             (default: 0.0).
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     return tools.search_code(
         query=query,
         limit=limit,
@@ -228,7 +246,10 @@ def list_project_binaries(ctx: Context) -> ProgramInfos:
 
 
 @mcp_error_handler
-def list_project_binary_metadata(binary_name: str, ctx: Context) -> dict:
+def list_project_binary_metadata(
+    binary_name: Annotated[str, Field(description="Project binary name.")],
+    ctx: Context,
+) -> BinaryMetadata:
     """
     Retrieve detailed metadata for a specified binary.
 
@@ -238,9 +259,8 @@ def list_project_binary_metadata(binary_name: str, ctx: Context) -> dict:
     Args:
         binary_name: The name of the binary to retrieve metadata for.
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    return program_info.metadata
+    program_info = _get_program_info(ctx, binary_name)
+    return BinaryMetadata(program_info.metadata)
 
 
 @mcp_error_handler
@@ -250,7 +270,7 @@ async def delete_project_binary(binary_name: str, ctx: Context) -> str:
     Args:
         binary_name: The name of the binary to delete.
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+    pyghidra_context = _get_pyghidra_context(ctx)
     if pyghidra_context.delete_program(binary_name):
         return f"Successfully deleted binary: {binary_name}"
     else:
@@ -266,7 +286,10 @@ async def delete_project_binary(binary_name: str, ctx: Context) -> str:
 def list_exports(
     binary_name: str,
     ctx: Context,
-    query: str = ".*",
+    query: Annotated[
+        str,
+        Field(description="Regex filter."),
+    ] = ".*",
     offset: int = 0,
     limit: int = 25,
 ) -> ExportInfos:
@@ -287,9 +310,7 @@ def list_exports(
         offset: Number of matching results to skip (for pagination).
         limit: Maximum number of results to return.
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     exports = tools.list_exports(query=query, offset=offset, limit=limit)
     return ExportInfos(exports=exports)
 
@@ -298,7 +319,10 @@ def list_exports(
 def list_imports(
     binary_name: str,
     ctx: Context,
-    query: str = ".*",
+    query: Annotated[
+        str,
+        Field(description="Regex filter."),
+    ] = ".*",
     offset: int = 0,
     limit: int = 25,
 ) -> ImportInfos:
@@ -319,9 +343,7 @@ def list_imports(
         offset: Number of matching results to skip (for pagination).
         limit: Maximum number of results to return.
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     imports = tools.list_imports(query=query, offset=offset, limit=limit)
     return ImportInfos(imports=imports)
 
@@ -340,9 +362,7 @@ def list_cross_references(
         name_or_address: The name of the function, symbol, or a specific address (e.g., '0x1004010')
         to find cross-references to.
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     cross_references = tools.list_cross_references(name_or_address)
     return CrossReferenceInfos(cross_references=cross_references)
 
@@ -362,9 +382,7 @@ def search_strings(
         query: A query to filter strings by.
         limit: The maximum number of results to return.
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     strings = tools.search_strings(query=query, limit=limit)
     return StringSearchResults(strings=strings)
 
@@ -378,9 +396,7 @@ def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> 
         address: The memory address to read from (supports hex format with or without 0x prefix).
         size: The number of bytes to read (default: 32, max: 8192).
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     return tools.read_bytes(address=address, size=size)
 
 
@@ -413,9 +429,7 @@ def gen_callgraph(
         bottom_layers: Number of bottom layers to show in a condensed graph.
         max_run_time: Maximum run time in seconds (default: 120).
     """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
+    tools = _get_program_tools(ctx, binary_name)
     return tools.gen_callgraph(
         function_name_or_address=function_name,
         cg_direction=direction,
@@ -430,7 +444,13 @@ def gen_callgraph(
 
 
 @mcp_error_handler
-def import_binary(binary_path: str, ctx: Context) -> str:
+def import_binary(
+    binary_path: Annotated[
+        str,
+        Field(description="Binary file or directory path."),
+    ],
+    ctx: Context,
+) -> str:
     """Imports a binary from a designated path into the current Ghidra project.
 
     Args:
@@ -438,9 +458,9 @@ def import_binary(binary_path: str, ctx: Context) -> str:
     """
     # We would like to do context progress updates, but until that is more
     # widely supported by clients, we will resort to this
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
+    pyghidra_context = _get_pyghidra_context(ctx)
     pyghidra_context.import_binary_backgrounded(binary_path)
     return (
-        f"Importing {binary_path} in the background."
-        "When ready, it will appear analyzed in binary list."
+        f"Importing {binary_path} in the background. "
+        "When ready, it will appear as analyzed in list_project_binaries()."
     )

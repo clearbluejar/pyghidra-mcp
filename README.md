@@ -318,57 +318,56 @@ Enable LLMs to perform actions, make deterministic computations, and interact wi
 
 #### Code Search
 
-- `search_code(binary_name: str, query: str, limit: int = 5)`: Search for code within a binary by similarity using vector embeddings.
+- `search_code(binary_name: str, query: str, limit: int = 5, offset: int = 0, search_mode: str = "semantic", include_full_code: bool = True, preview_length: int = 500, similarity_threshold: float = 0.0)`: Search decompiled functions semantically or by exact literal text. Responses include `literal_total`, `semantic_total`, and `total_functions` to show how many functions matched each mode.
 
 #### Cross-References
 
-- `list_cross_references(binary_name: str, name_or_address: str)`: Finds and lists all cross-references (x-refs) to a given function or address.
+- `list_cross_references(binary_name: str, name_or_address: str)`: List cross-references to one exact symbol, function, or address.
 
 #### Generate Call Graph
 
-- `gen_callgraph(binary_name: str, function_name_or_address: str, direction: str = "calling", display_type: str = "flow", include_refs: bool = True, max_depth: int | None = None, max_run_time: int = 60, condense_threshold: int = 50, top_layers: int = 5, bottom_layers: int = 5)`: Generates a MermaidJS call graph for a specified function. Supports both "calling" (functions called by the target) and "called" (functions that call the target) directions with multiple visualization types.
+- `gen_callgraph(binary_name: str, function_name: str, direction: str = "calling", display_type: str = "flow", condense_threshold: int = 50, top_layers: int = 3, bottom_layers: int = 3, max_run_time: int = 120)`: Generate a MermaidJS call graph for one exact function.
 
 #### Decompile Function
 
-- `decompile_function(binary_name: str, name: str)`: Decompile a function from a given binary.
+- `decompile_function(binary_name: str, name_or_address: str)`: Decompile one exact function or hex address from a binary.
 
 #### Import Binary
 
-- `import_binary(binary_path: str)`: Imports a binary from a designated path into the current Ghidra project. If the path is a directory, it will recursively scan and import all supported binary files, preserving the directory structure within the Ghidra project.
+- `import_binary(binary_path: str)`: Import a binary file or recursively import every supported binary inside a directory. The import runs in the background and the binary becomes usable when `list_project_binaries()` reports it as analyzed and indexed.
 
 #### List Exports
 
-- `list_exports(binary_name: str, query: str = ".*", offset: int = 0, limit: int = 25)`: Lists all exported functions and symbols from a specified binary (regex supported for query).
+- `list_exports(binary_name: str, query: str = ".*", offset: int = 0, limit: int = 25)`: List exported symbols from a binary. Use `query` to narrow large binaries before raising `limit`.
 
 #### List Imports
 
-- `list_imports(binary_name: str, query: str = ".*", offset: int = 0, limit: int = 25)`: Lists all imported functions and symbols for a specified binary (regex supported for query).
+- `list_imports(binary_name: str, query: str = ".*", offset: int = 0, limit: int = 25)`: List imported symbols from a binary. Use `query` to narrow large binaries before raising `limit`.
 
 #### List Project Binaries
 
-- `list_project_binaries()`: Lists the names of all binaries currently loaded in the Ghidra project.
+- `list_project_binaries()`: List project binaries together with `analysis_complete`, `code_collection`, and `strings_collection` readiness so clients can tell when a binary is ready for decompilation, code search, or string search.
 
 #### List Project Binary Metadata
 
-- `list_project_binary_metadata(binary_name: str)`: Retrieves detailed metadata for a specific binary, including architecture, compiler, executable format, analysis metrics, and file hashes.
+- `list_project_binary_metadata(binary_name: str)`: Retrieve metadata for one binary, including architecture, compiler, executable format, and loader properties.
 
 #### Delete Project Binary
 
-- `delete_project_binary(binary_name: str)`: Deletes a binary (program) from the Ghidra project.
+- `delete_project_binary(binary_name: str)`: Delete a binary (program) from the Ghidra project.
 
 #### Read Bytes
 
-- `read_bytes(binary_name: str, address: str, size: int = 32)`: Reads raw bytes from memory at a specified address. Returns raw hex data. Useful for inspecting memory contents, data structures, or confirming analysis findings.
-
-
+- `read_bytes(binary_name: str, address: str, size: int = 32)`: Read raw bytes from one mapped address. Returns normalized address, byte count, and hex data.
 
 #### Search Strings
 
-- `search_strings(binary_name: str, query: str, limit: int = 100)`: Searches for strings within a binary by name.
+- `search_strings(binary_name: str, query: str, limit: int = 100)`: Search extracted strings by text and return the best literal and semantic matches.
 
 #### Search Symbols
 
-- `search_symbols_by_name(binary_name: str, query: str, offset: int = 0, limit: int = 25)`: Search for symbols within a binary by name (case-insensitive substring).
+- `search_symbols_by_name(binary_name: str, query: str, offset: int = 0, limit: int = 25)`: Search symbols by case-insensitive substring.
+- `search_functions_by_name(binary_name: str, query: str, offset: int = 0, limit: int = 25)`: Search only functions by case-insensitive substring before switching to exact-match tools such as `decompile_function`, `list_cross_references`, or `gen_callgraph`.
 
 ### Prompts
 
