@@ -122,13 +122,26 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args):
     proc.wait()
 
 
-async def invoke_tool_concurrently(server_binary_path):
+async def discover_mapped_string_address(server_binary_path: str) -> str:
+    async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))
+            response = await session.call_tool(
+                "search_strings",
+                {"binary_name": binary_name, "query": "Hello, World!", "limit": 1},
+            )
+            string_results = StringSearchResults.model_validate_json(response.content[0].text)
+            assert len(string_results.strings) == 1
+            return string_results.strings[0].address
+
+
+async def invoke_tool_concurrently(server_binary_path, read_addr):
     async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))
 
-            read_addr = "100000000" if platform.system() == "Darwin" else "100000"
             decomp_name = "entry" if platform.system() == "Darwin" else "main"
             name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
             tasks = [
@@ -157,7 +170,8 @@ async def invoke_tool_concurrently(server_binary_path):
                     "search_strings", {"binary_name": binary_name, "query": "hello", "limit": 1}
                 ),
                 session.call_tool(
-                    "read_bytes", {"binary_name": binary_name, "address": read_addr, "size": 4}
+                    "read_bytes",
+                    {"binary_name": binary_name, "address": read_addr, "size": len("Hello")},
                 ),
                 session.call_tool(
                     "gen_callgraph", {"binary_name": binary_name, "function_name": decomp_name}
@@ -178,7 +192,8 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     expected_main = "entry" if platform.system() == "Darwin" else "main"
     name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
     name_two = "_function_two" if platform.system() == "Darwin" else "function_two"
-    tasks = [invoke_tool_concurrently(streamable_server) for _ in range(num_clients)]
+    read_addr = await discover_mapped_string_address(streamable_server)
+    tasks = [invoke_tool_concurrently(streamable_server, read_addr) for _ in range(num_clients)]
     results = await asyncio.gather(*tasks)
 
     assert len(results) == num_clients
@@ -267,13 +282,8 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         # Read bytes
         read_bytes_result = json.loads(client_responses[10].content[0].text)
         bytes_result = BytesReadResult(**read_bytes_result)
-        assert bytes_result.size == 4
-        if platform.system() == "Darwin":
-            assert bytes_result.data.lower() == "cffaedfe"  # Mach-O 64-bit magic (little-endian)
-            assert bytes_result.address == "100000000"
-        else:
-            assert bytes_result.data == "7f454c46"  # ELF magic
-            assert bytes_result.address == "00100000"
+        assert bytes_result.size == len("Hello")
+        assert bytes_result.data == "48656c6c6f"
 
         # Call graph
         call_graph_result = json.loads(client_responses[11].content[0].text)

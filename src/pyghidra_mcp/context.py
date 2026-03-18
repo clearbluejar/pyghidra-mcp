@@ -398,8 +398,7 @@ class PyGhidraContext:
                 # continue importing remaining files
 
     def _is_binary_file(self, path: Path) -> bool:
-        # return self._detect_binary_format(path) is not None
-        return True
+        return self._detect_binary_format(path) is not None
 
     def _detect_binary_format(self, path: Path) -> str | None:
         # loader = pyghidra.program_loader()

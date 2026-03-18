@@ -317,7 +317,10 @@ class GhidraTools:
             func: Function
             if not include_externals and func.isExternal():
                 continue
-            if not include_externals and func.thunk:
+            is_thunk = (
+                func.isThunk() if hasattr(func, "isThunk") else bool(getattr(func, "thunk", False))
+            )
+            if not include_externals and is_thunk:
                 continue
             key = func.getEntryPoint()
             if key in seen:

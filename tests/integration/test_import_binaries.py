@@ -1,5 +1,6 @@
 import asyncio
-import os
+import platform
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -8,6 +9,13 @@ from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
 from pyghidra_mcp.context import PyGhidraContext
+
+
+def _run_compile_command(compile_cmd: list[str]) -> None:
+    result = subprocess.run(compile_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        cmd_text = " ".join(compile_cmd)
+        raise RuntimeError(f"Compilation failed: {cmd_text}\nSTDERR:\n{result.stderr}")
 
 
 @pytest.fixture()
@@ -33,7 +41,7 @@ int main() {
 """
         )
         bin_file_1 = bin_dir / "program1"
-        os.system(f"gcc -o {bin_file_1} {c_file_1}")
+        _run_compile_command(["gcc", "-o", str(bin_file_1), str(c_file_1)])
 
         # Create second binary in lib/
         c_file_2 = lib_dir / "program2.c"
@@ -46,8 +54,14 @@ void hello() {
 }
 """
         )
-        bin_file_2 = lib_dir / "program2.so"
-        os.system(f"gcc -shared -o {bin_file_2} {c_file_2}")
+        shared_ext = ".dylib" if platform.system() == "Darwin" else ".so"
+        bin_file_2 = lib_dir / f"program2{shared_ext}"
+        compile_cmd = (
+            ["gcc", "-dynamiclib", "-o", str(bin_file_2), str(c_file_2)]
+            if platform.system() == "Darwin"
+            else ["gcc", "-fPIC", "-shared", "-o", str(bin_file_2), str(c_file_2)]
+        )
+        _run_compile_command(compile_cmd)
 
         # Create a non-binary file (should be skipped)
         readme = root / "README.txt"
