@@ -209,6 +209,10 @@ __marimo__/
 
 pyghidra_mcp_projects/** 
 tests/pyghidra_mcp_projects/**
+*.gzf
+*.gpr
+**/chromadb/**
+**/*.rep/**
 
 # Personal
 ghidra
