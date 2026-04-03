@@ -44,6 +44,24 @@ class ProgramInfo:
         return self.ghidra_analysis_complete
 
 
+def _decompile_worker(args):
+    """Worker for parallel decompilation. Each thread gets its own decompiler."""
+    func, decompiler = args
+    try:
+        result = decompiler.decompileFunction(func, 60, None)
+        if result and result.decompileCompleted():
+            decomp_func = result.getDecompiledFunction()
+            if decomp_func:
+                code = decomp_func.getC()
+                if code:
+                    name = func.getSymbol().getName(True)
+                    return (name, str(func.getEntryPoint()), code)
+        name = func.getSymbol().getName(True)
+        return (name, str(func.getEntryPoint()), f"// Failed to decompile {name}")
+    except Exception:
+        return None
+
+
 class PyGhidraContext:
     """
     Manages a Ghidra project, including its creation, program imports, and cleanup.
@@ -519,27 +537,7 @@ class PyGhidraContext:
 
         return "-".join((path.name, _sha1_file(path.absolute())[:6]))
 
-
-def _decompile_worker(args):
-    """Worker for parallel decompilation. Each thread gets its own decompiler."""
-    func, decompiler = args
-    try:
-        result = decompiler.decompileFunction(func, 60, None)
-        if result and result.decompileCompleted():
-            decomp_func = result.getDecompiledFunction()
-            if decomp_func:
-                code = decomp_func.getC()
-                if code:
-                    name = func.getSymbol().getName(True)
-                    return (name, str(func.getEntryPoint()), code)
-        name = func.getSymbol().getName(True)
-        return (name, str(func.getEntryPoint()), f"// Failed to decompile {name}")
-    except Exception:
-        return None
-
-
-
-
+    def _init_code_collection(self, program_info: ProgramInfo):
         """Index all decompiled function code into SQLite FTS5 for BM25 search."""
         logger.info(f"FTS5: Indexing code for {program_info.name}")
         db_path = self.fts5_dir / f"{program_info.name}.db"
