@@ -38,9 +38,9 @@ class ProgramInfo(BaseModel):
         ..., description="Indicates if Ghidra's analysis of the program has completed."
     )
     metadata: dict = Field(..., description="A dictionary of metadata associated with the program.")
-    code_collection: bool = Field(..., description="True if the chromadb code collection is ready")
+    code_collection: bool = Field(..., description="True if the code search index is ready")
     strings_collection: bool = Field(
-        ..., description="True if the chromadb strings collection is ready"
+        ..., description="True if the strings search index is ready"
     )
 
 

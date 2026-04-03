@@ -371,133 +371,6 @@ class GhidraTools:
             )
         return cross_references
 
-    def _search_code_literal(
-        self,
-        literal_results: typing.Any,
-        limit: int,
-        offset: int,
-        include_full_code: bool,
-        preview_length: int,
-    ) -> list[CodeSearchResult]:
-        search_results: list[CodeSearchResult] = []
-        if literal_results and literal_results.get("documents"):
-            # Apply offset and limit
-            docs = literal_results["documents"] or []
-            metadatas = literal_results["metadatas"] or []
-
-            # Paginate
-            start_idx = offset
-            end_idx = offset + limit
-            paginated_docs = docs[start_idx:end_idx]
-            paginated_meta = metadatas[start_idx:end_idx] if metadatas else []
-
-            for i, doc in enumerate(paginated_docs):
-                metadata = paginated_meta[i] if i < len(paginated_meta) else {}
-                code = doc
-                preview = None
-
-                if not include_full_code:
-                    preview = code[:preview_length] + "..." if len(code) > preview_length else code
-                    code = preview
-
-                search_results.append(
-                    CodeSearchResult(
-                        function_name=str(
-                            metadata.get("function_name", "unknown")
-                            if isinstance(metadata, dict)
-                            else "unknown"
-                        ),
-                        code=code,
-                        similarity=1.0,  # Exact match
-                        search_mode=SearchMode.LITERAL,
-                        preview=preview,
-                    )
-                )
-        return search_results
-
-    def _search_code_semantic(
-        self,
-        query: str,
-        limit: int,
-        offset: int,
-        similarity_threshold: float,
-        include_full_code: bool,
-        preview_length: int,
-        total_functions: int,  # Added total_functions to correctly calculate semantic_total
-    ) -> tuple[list[CodeSearchResult], int]:  # Changed return type to int for semantic_total
-        assert self.program_info.code_collection is not None
-        search_results: list[CodeSearchResult] = []
-        # Semantic search
-        results = self.program_info.code_collection.query(
-            query_texts=[query],
-            n_results=limit + offset,
-        )
-
-        docs_list = results.get("documents") if results else None
-        semantic_total = total_functions  # Initialize semantic_total here
-
-        if results and docs_list and len(docs_list) > 0 and docs_list[0]:
-            # Apply offset
-            docs = docs_list[0][offset:]
-            metadatas_list = results.get("metadatas")
-            distances_list = results.get("distances")
-            metadatas = (
-                metadatas_list[0][offset:] if metadatas_list and len(metadatas_list) > 0 else []
-            )
-            distances = (
-                distances_list[0][offset:] if distances_list and len(distances_list) > 0 else []
-            )
-
-            for i, doc in enumerate(docs):
-                metadata = metadatas[i] if i < len(metadatas) else {}
-                distance = distances[i] if i < len(distances) else 0
-                # ChromaDB uses L2 distance by default (0 = identical, can be > 1)
-                # Normalize to 0-1 range where 1 = identical
-                similarity = 1 / (1 + distance)
-
-                # Skip results below similarity threshold
-                if similarity < similarity_threshold:
-                    continue
-
-                code = doc
-                preview = None
-
-                if not include_full_code:
-                    preview = code[:preview_length] + "..." if len(code) > preview_length else code
-                    code = preview
-
-                search_results.append(
-                    CodeSearchResult(
-                        function_name=str(
-                            metadata.get("function_name", "unknown")
-                            if isinstance(metadata, dict)
-                            else "unknown"
-                        ),
-                        code=code,
-                        similarity=similarity,
-                        search_mode=SearchMode.SEMANTIC,
-                        preview=preview,
-                    )
-                )
-
-            # Refine semantic_total
-            # If we got fewer results than requested limit (after filtering),
-            # providing we fetched enough (n_results was limit+offset)
-            # and we processed strictly what we asked for.
-            # Actually, if the RAW result count was less than n_results, we know we exhausted
-            # the DB.
-            # If valid_results_count < limit, we *might* have exhausted matches above threshold
-            # in this batch.
-            # A better heuristic: if result count < limit, we found everything.
-            if len(search_results) < limit:
-                # This is only accurate if we assume we found "the end".
-                # However, since we queried limit + offset, if we got less than limit (and we
-                # started at offset),
-                # it implies we are at the tail.
-                semantic_total = offset + len(search_results)
-
-        return search_results, semantic_total
-
     @handle_exceptions
     def search_code(
         self,
@@ -510,102 +383,88 @@ class GhidraTools:
         similarity_threshold: float = 0.0,
     ) -> CodeSearchResults:
         """
-        Searches the code in the binary for a given query.
+        Searches decompiled code using SQLite FTS5 with BM25 ranking.
 
-        Supports semantic (vector similarity) and literal (exact match) modes.
-        Always returns dual-mode counts to help LLM decide on mode switching.
-
-        Args:
-            similarity_threshold: Minimum similarity score (0.0-1.0) for semantic results.
-                                  Results below this threshold are filtered out.
+        Supports two modes:
+        - LITERAL: substring match (LIKE %query%)
+        - SEMANTIC: BM25-ranked full-text search (replaces ChromaDB embeddings)
         """
-        if not self.program_info.code_collection:
+        db = self.program_info.code_collection
+        if not db:
             raise ValueError(
                 "Code indexing is not complete for this binary. Please try again later."
             )
 
-        # ALWAYS get literal count (reuse for literal mode search)
-        literal_results = self.program_info.code_collection.get(where_document={"$contains": query})
-        literal_total = (
-            len(literal_results["ids"]) if literal_results and literal_results.get("ids") else 0
-        )
-
-        # Total functions in collection (absolute total)
-        total_functions = self.program_info.code_collection.count()
-
-        # Default semantic total to "available" (filtered by limit)
-        # If we filter and get FEWER than requested, we effectively found "all" above threshold
-        # in this range.
-        # But we don't know beyond the limit.
-        # So we default to total_functions as "estimated matches" if we hit the limit.
-        semantic_total = total_functions
-
+        literal_total = db.count_code_literal(query)
+        total_functions = db.count_code()
         search_results: list[CodeSearchResult] = []
 
         if search_mode == SearchMode.LITERAL:
-            search_results = self._search_code_literal(
-                literal_results, limit, offset, include_full_code, preview_length
-            )
+            rows = db.search_code_literal(query, limit, offset)
+            for name, _ep, code in rows:
+                preview = None
+                if not include_full_code:
+                    preview = code[:preview_length] + "..." if len(code) > preview_length else code
+                    code = preview
+                search_results.append(CodeSearchResult(
+                    function_name=name, code=code, similarity=1.0,
+                    search_mode=SearchMode.LITERAL, preview=preview,
+                ))
+            semantic_total = total_functions
         else:
-            search_results, estimated_total = self._search_code_semantic(
-                query,
-                limit,
-                offset,
-                similarity_threshold,
-                include_full_code,
-                preview_length,
-                total_functions,
-            )
-            if estimated_total is not None:
-                semantic_total = estimated_total
+            rows = db.search_code_bm25(query, limit, offset)
+            for name, _ep, code, rank in rows:
+                similarity = 1.0 / (1.0 + abs(rank))
+                if similarity < similarity_threshold:
+                    continue
+                preview = None
+                if not include_full_code:
+                    preview = code[:preview_length] + "..." if len(code) > preview_length else code
+                    code = preview
+                search_results.append(CodeSearchResult(
+                    function_name=name, code=code, similarity=similarity,
+                    search_mode=SearchMode.SEMANTIC, preview=preview,
+                ))
+            semantic_total = (offset + len(search_results)
+                              if len(search_results) < limit else total_functions)
 
         return CodeSearchResults(
-            results=search_results,
-            query=query,
-            search_mode=search_mode,
-            returned_count=len(search_results),
-            offset=offset,
-            limit=limit,
-            literal_total=literal_total,
-            semantic_total=semantic_total,
+            results=search_results, query=query, search_mode=search_mode,
+            returned_count=len(search_results), offset=offset, limit=limit,
+            literal_total=literal_total, semantic_total=semantic_total,
             total_functions=total_functions,
         )
 
     @handle_exceptions
     def search_strings(self, query: str, limit: int = 100) -> list[StringSearchResult]:
-        """Searches for strings within a binary."""
-
-        if not self.program_info.strings_collection:
+        """Searches for strings using SQLite FTS5 with BM25 ranking."""
+        db = self.program_info.strings_collection
+        if not db:
             raise ValueError(
                 "String indexing is not complete for this binary. Please try again later."
             )
 
         search_results = []
-        results = self.program_info.strings_collection.get(
-            where_document={"$contains": query}, limit=limit
-        )
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"]):
-                metadata = results["metadatas"][i]  # type: ignore
-                search_results.append(
-                    StringSearchResult(
-                        value=doc,
-                        address=str(metadata["address"]),
-                        similarity=1,
-                    )
-                )
-            limit -= len(results["documents"])
+        seen_addresses: set[str] = set()
 
-        results = self.program_info.strings_collection.query(query_texts=[query], n_results=limit)
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i]  # type: ignore
-                distance = results["distances"][0][i]  # type: ignore
+        # Literal substring matches first (exact hits)
+        for value, address in db.search_strings_literal(query, limit):
+            seen_addresses.add(address)
+            search_results.append(
+                StringSearchResult(value=value, address=address, similarity=1.0)
+            )
+
+        # Fill remaining with BM25-ranked results
+        remaining = limit - len(search_results)
+        if remaining > 0:
+            for value, address, rank in db.search_strings_bm25(query, remaining):
+                if address in seen_addresses:
+                    continue
+                seen_addresses.add(address)
                 search_results.append(
                     StringSearchResult(
-                        value=doc,
-                        address=str(metadata["address"]),
-                        similarity=1 - distance,
+                        value=value, address=address,
+                        similarity=1.0 / (1.0 + abs(rank)),
                     )
                 )
 

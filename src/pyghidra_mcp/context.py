@@ -8,9 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
-import chromadb
-from chromadb.config import Settings
-
+from pyghidra_mcp.fts_search import FTS5Database
 from pyghidra_mcp.tools import GhidraTools
 
 if TYPE_CHECKING:
@@ -37,8 +35,8 @@ class ProgramInfo:
     ghidra_analysis_complete: bool
     file_path: Path | None = None
     load_time: float | None = None
-    code_collection: chromadb.Collection | None = None
-    strings_collection: chromadb.Collection | None = None
+    code_collection: FTS5Database | None = None
+    strings_collection: FTS5Database | None = None
 
     @property
     def analysis_complete(self) -> bool:
@@ -102,11 +100,8 @@ class PyGhidraContext:
             # Default: create pyghidra-mcp directory alongside project
             self.pyghidra_mcp_dir = self.project_path / "pyghidra-mcp"
 
-        chromadb_path = self.pyghidra_mcp_dir / "chromadb"
-        chromadb_path.mkdir(parents=True, exist_ok=True)
-        self.chroma_client = chromadb.PersistentClient(
-            path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
-        )
+        self.fts5_dir = self.pyghidra_mcp_dir / "fts5"
+        self.fts5_dir.mkdir(parents=True, exist_ok=True)
 
         # From GhidraDiffEngine
         self.force_analysis = force_analysis
@@ -312,7 +307,7 @@ class PyGhidraContext:
 
         if analyze:
             self.analyze_program(program_info.program)
-            self._init_chroma_collections_for_program(program_info)
+            self._init_collections_for_program(program_info)
 
         logger.info(f"Program {program_name} is ready for use.")
 
@@ -524,114 +519,134 @@ class PyGhidraContext:
 
         return "-".join((path.name, _sha1_file(path.absolute())[:6]))
 
-    def _init_chroma_code_collection_for_program(self, program_info: ProgramInfo):
-        """
-        Initialize Chroma code collection for a single program.
-        """
-        from ghidra.program.model.listing import Function
 
-        logger.info(f"Initializing Chroma code collection for {program_info.name}")
-        try:
-            collection = self.chroma_client.get_collection(name=program_info.name)
-            logger.info(f"Collection '{program_info.name}' exists; skipping code ingest.")
-            program_info.code_collection = collection
-        except Exception:
-            logger.info(f"Creating new code collection '{program_info.name}'")
-            tools = GhidraTools(program_info)
-            functions = tools.get_all_functions()
-            decompiles = []
-            ids = []
-            metadatas = []
+def _decompile_worker(args):
+    """Worker for parallel decompilation. Each thread gets its own decompiler."""
+    func, decompiler = args
+    try:
+        result = decompiler.decompileFunction(func, 60, None)
+        if result and result.decompileCompleted():
+            decomp_func = result.getDecompiledFunction()
+            if decomp_func:
+                code = decomp_func.getC()
+                if code:
+                    name = func.getSymbol().getName(True)
+                    return (name, str(func.getEntryPoint()), code)
+        name = func.getSymbol().getName(True)
+        return (name, str(func.getEntryPoint()), f"// Failed to decompile {name}")
+    except Exception:
+        return None
 
+
+
+
+        """Index all decompiled function code into SQLite FTS5 for BM25 search."""
+        logger.info(f"FTS5: Indexing code for {program_info.name}")
+        db_path = self.fts5_dir / f"{program_info.name}.db"
+        db = FTS5Database(db_path)
+        db.create_code_table()
+
+        if db.count_code() > 0:
+            logger.info(f"FTS5: Reusing existing code index for {program_info.name} "
+                        f"({db.count_code()} functions)")
+            program_info.code_collection = db
+            return
+
+        tools = GhidraTools(program_info)
+        functions = tools.get_all_functions()
+        num_funcs = len(functions)
+        t0 = time.time()
+        num_workers = self.max_workers or 1
+        use_threads = num_workers > 1 and num_funcs > 500
+
+        if use_threads:
+            logger.info(f"FTS5: Parallel decompile {num_funcs} functions "
+                        f"with {num_workers} workers for {program_info.name}")
+            decompilers = [program_info.decompiler]
+            for _ in range(num_workers - 1):
+                decompilers.append(self.setup_decompiler(program_info.program))
+
+            work = [
+                (func, decompilers[i % num_workers])
+                for i, func in enumerate(functions)
+            ]
+            records = []
+            completed = 0
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as pool:
+                for result in pool.map(_decompile_worker, work):
+                    if result:
+                        records.append(result)
+                    completed += 1
+                    if completed % 1000 == 0:
+                        logger.info(f"FTS5: Decompiled {completed}/{num_funcs} "
+                                    f"functions for {program_info.name}")
+        else:
+            records = []
             for i, func in enumerate(functions):
-                func: Function
                 try:
-                    if i % 10 == 0:
-                        logger.debug(f"Decompiling {i}/{len(functions)}")
+                    if i % 100 == 0 and i > 0:
+                        logger.info(f"FTS5: Decompiled {i}/{num_funcs} "
+                                    f"functions for {program_info.name}")
                     decompiled = tools.decompile_function(func)
-                    decompiles.append(decompiled.code)
-                    ids.append(decompiled.name)
-                    metadatas.append(
-                        {
-                            "function_name": decompiled.name,
-                            "entry_point": str(func.getEntryPoint()),
-                        }
-                    )
+                    records.append((
+                        decompiled.name,
+                        str(func.getEntryPoint()),
+                        decompiled.code,
+                    ))
                 except Exception as e:
-                    logger.error(f"Failed to decompile {func.getSymbol().getName(True)}: {e}")
+                    logger.error(f"Failed to decompile "
+                                 f"{func.getSymbol().getName(True)}: {e}")
 
-            collection = self.chroma_client.create_collection(name=program_info.name)
-            try:
-                collection.add(
-                    documents=decompiles,
-                    metadatas=metadatas,
-                    ids=ids,
-                )
-            except Exception as e:
-                logger.error(f"Failed add decompiles to collection: {e}")
+        if records:
+            db.add_codes_batch(records)
 
-            logger.info(f"Code analysis complete for collection '{program_info.name}'")
-            program_info.code_collection = collection
+        elapsed = time.time() - t0
+        logger.info(f"FTS5: Code indexing complete for {program_info.name} "
+                     f"— {len(records)} functions in {elapsed:.1f}s")
+        program_info.code_collection = db
 
-    def _init_chroma_strings_collection_for_program(self, program_info: ProgramInfo):
-        """
-        Initialize Chroma strings collection for a single program.
-        """
-        collection_name = f"{program_info.name}_strings"
-        logger.info(f"Initializing Chroma strings collection for {program_info.name}")
-        try:
-            strings_collection = self.chroma_client.get_collection(name=collection_name)
-            logger.info(f"Collection '{collection_name}' exists; skipping strings ingest.")
-            program_info.strings_collection = strings_collection
-        except Exception:
-            logger.info(f"Creating new strings collection '{collection_name}'")
-            tools = GhidraTools(program_info)
+    def _init_strings_collection(self, program_info: ProgramInfo):
+        """Index all strings into SQLite FTS5."""
+        logger.info(f"FTS5: Indexing strings for {program_info.name}")
+        db_path = self.fts5_dir / f"{program_info.name}_strings.db"
+        db = FTS5Database(db_path)
+        db.create_strings_table()
 
-            ids = []
-            strings = tools.get_all_strings()
-            metadatas = [{"address": str(s.address)} for s in strings]
-            ids = [str(s.address) for s in strings]
-            strings = [s.value for s in strings]
+        existing = db.conn.execute("SELECT COUNT(*) FROM strings_fts").fetchone()[0]
+        if existing > 0:
+            logger.info(f"FTS5: Reusing existing strings index for {program_info.name} "
+                        f"({existing} strings)")
+            program_info.strings_collection = db
+            return
 
-            strings_collection = self.chroma_client.create_collection(name=collection_name)
-            try:
-                strings_collection.add(
-                    documents=strings,
-                    metadatas=metadatas,  # type: ignore
-                    ids=ids,
-                )
-            except Exception as e:
-                logger.error(f"Failed to add strings to collection: {e}")
+        tools = GhidraTools(program_info)
+        strings = tools.get_all_strings()
+        records = [(s.value, str(s.address)) for s in strings]
+        if records:
+            db.add_strings_batch(records)
 
-            logger.info(f"Strings analysis complete for collection '{collection_name}'")
-            program_info.strings_collection = strings_collection
+        logger.info(f"FTS5: Strings indexing complete for {program_info.name} "
+                     f"— {len(records)} strings")
+        program_info.strings_collection = db
 
-    def _init_chroma_collections_for_program(self, program_info: ProgramInfo):
-        """
-        Initializes all Chroma collections (code and strings) for a single program.
-        """
-        self._init_chroma_code_collection_for_program(program_info)
-        self._init_chroma_strings_collection_for_program(program_info)
+    def _init_collections_for_program(self, program_info: ProgramInfo):
+        """Initialize both FTS5 collections for a program."""
+        self._init_code_collection(program_info)
+        self._init_strings_collection(program_info)
 
-    def _init_all_chroma_collections(self):
-        """
-        Initializes Chroma collections for all programs in the project.
-        If an executor is available, tasks are submitted asynchronously.
-        Otherwise, initialization runs in the main thread.
-        """
+    def _init_all_collections(self):
+        """Initialize FTS5 search indexes for all programs."""
         programs = list(self.programs.values())
         mode = "background" if self.executor else "main thread"
-        logger.info("Initializing Chroma DB collections in %s...", mode)
-
-        # ensure analysis complete before init
+        logger.info(f"FTS5: Initializing search indexes for "
+                     f"{len(programs)} programs in {mode}...")
         assert all(prog.analysis_complete for prog in programs)
 
         if self.executor:
-            # executor.map submits all tasks at once, returns an iterator of futures
-            self.executor.map(self._init_chroma_collections_for_program, programs)
+            self.executor.map(self._init_collections_for_program, programs)
         else:
             for program_info in programs:
-                self._init_chroma_collections_for_program(program_info)
+                self._init_collections_for_program(program_info)
 
     # Callback function that runs when the future is done to catch any exceptions
     def _analysis_done_callback(self, future: concurrent.futures.Future):
@@ -714,7 +729,7 @@ class PyGhidraContext:
         logger.info("All programs analyzed.")
         # The chroma collections need to be initialized after analysis is complete
         # At this point, threaded or not, all analysis is done
-        self._init_all_chroma_collections()  # DO NOT MOVE
+        self._init_all_collections()  # DO NOT MOVE
 
     def analyze_program(  # noqa C901
         self,
