@@ -13,8 +13,7 @@ from click_option_group import optgroup
 from mcp.server import Server
 from mcp.server.fastmcp import FastMCP
 
-from pyghidra_mcp import mcp_tools
-from pyghidra_mcp.__init__ import __version__
+from pyghidra_mcp import __version__, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
 
 logging.basicConfig(
@@ -168,7 +167,7 @@ def init_pyghidra_context(
     default="stdio",
     envvar="MCP_TRANSPORT",
     show_default=True,
-    help="Transport protocol to use.",
+    help="Transport protocol to use. Note: SSE is deprecated, use streamable-http instead.",
 )
 @optgroup.option(
     "-p",
@@ -359,6 +358,14 @@ def main(
         elif transport in ["streamable-http", "http"]:
             mcp.run(transport="streamable-http")
         elif transport == "sse":
+            import warnings
+
+            warnings.warn(
+                "SSE transport is deprecated per the MCP spec (June 2025). "
+                "Use --transport streamable-http instead.",
+                DeprecationWarning,
+                stacklevel=1,
+            )
             mcp.run(transport="sse")
         else:
             raise ValueError(f"Invalid transport: {transport}")
