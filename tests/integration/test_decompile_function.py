@@ -1,3 +1,6 @@
+import json
+import platform
+
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
@@ -26,15 +29,74 @@ async def test_decompile_function_tool(server_params, test_binary):
                 assert results.content is not None
                 assert len(results.content) > 0
 
-                # Check that the result contains decompiled code
-                # (this might vary depending on the binary and Ghidra's analysis)
-                # We'll just check that it's not empty
+                # FastMCP serializes each list item as a separate content block
                 text_content = results.content[0].text
                 assert text_content is not None
-                assert len(text_content) > 0
-                assert "main" in text_content
+                result_dict = json.loads(text_content)
+                assert isinstance(result_dict, dict)
+                assert "main" in json.dumps(result_dict)
             except Exception as e:
                 # If we get an error, it might be because the function wasn't found
                 # or because of issues with the binary analysis
                 # We'll just check that we got a proper error response
                 assert e is not None
+
+
+@pytest.mark.asyncio
+async def test_decompile_function_rich_response(server_params, test_binary):
+    """Test decompile_function with include_callees and include_xrefs flags."""
+    name = "entry" if platform.system() == "Darwin" else "main"
+
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
+
+            results = await session.call_tool(
+                "decompile_function",
+                {
+                    "binary_name": binary_name,
+                    "name_or_address": name,
+                    "include_callees": True,
+                    "include_xrefs": True,
+                },
+            )
+
+            assert len(results.content) >= 1
+            result_dict = json.loads(results.content[0].text)
+            assert isinstance(result_dict, dict)
+            assert "callees" in result_dict
+            assert isinstance(result_dict["callees"], list)
+            assert "xrefs" in result_dict
+            assert isinstance(result_dict["xrefs"], list)
+
+
+@pytest.mark.asyncio
+async def test_decompile_function_batch(server_params, test_binary):
+    """Test decompile_function with batch targets (list of names)."""
+    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
+
+            results = await session.call_tool(
+                "decompile_function",
+                {
+                    "binary_name": binary_name,
+                    "name_or_address": [name_one, "nonexistent_function_xyz"],
+                },
+            )
+
+            # Batch returns one content block per item
+            assert len(results.content) >= 2
+            success = json.loads(results.content[0].text)
+            failure = json.loads(results.content[1].text)
+
+            assert success["code"] != ""
+            assert success.get("error") is None
+
+            assert failure["code"] == ""
+            assert failure["error"] is not None
+            assert "not found" in failure["error"].lower()

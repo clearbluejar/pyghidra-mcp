@@ -38,9 +38,7 @@ def test_init_project_programs_uses_domain_file_paths(monkeypatch):
     nested_domain_file.getName.return_value = "libfoo-cc22dd"
     nested_domain_file.getParent.return_value = nested_parent
 
-    context.list_binary_domain_files = Mock(
-        return_value=[root_domain_file, nested_domain_file]
-    )
+    context.list_binary_domain_files = Mock(return_value=[root_domain_file, nested_domain_file])
     context.project.openProgram.side_effect = ["root-program", "nested-program"]
     context._init_program_info = Mock(side_effect=["root-info", "nested-info"])
 

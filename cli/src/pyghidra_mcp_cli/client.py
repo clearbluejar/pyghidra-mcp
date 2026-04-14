@@ -287,13 +287,13 @@ class PyGhidraMcpClient:
         )
         return self._extract_result(result)
 
-    async def list_cross_references(self, binary_name: str, name_or_address: str) -> dict[str, Any]:
+    async def list_xrefs(self, binary_name: str, name_or_address: str) -> dict[str, Any]:
         """List cross-references to a symbol or address."""
         if not self._connected:
             raise ClientError("Not connected")
 
         result = await self._session.call_tool(
-            "list_cross_references",
+            "list_xrefs",
             {"binary_name": binary_name, "name_or_address": name_or_address},
         )
         return self._extract_result(result)

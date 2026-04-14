@@ -251,11 +251,11 @@ async def test_list_exports(client, binary_name):
 
 
 @pytest.mark.asyncio
-async def test_list_cross_references(client, binary_name):
+async def test_list_xrefs(client, binary_name):
     """Test listing cross-references."""
     name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
     async with client:
-        result = await client.list_cross_references(binary_name, name_one)
+        result = await client.list_xrefs(binary_name, name_one)
         assert "cross_references" in result
         assert len(result["cross_references"]) > 0
 
