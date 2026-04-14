@@ -221,7 +221,7 @@ def list_project_binaries(ctx: Context) -> ProgramInfos:
                 analysis_complete=pi.analysis_complete,
                 metadata={},
                 code_collection=pi.code_collection is not None,
-                strings_collection=pi.strings_collection is not None,
+                strings_collection=pi.strings is not None,
             )
         )
     return ProgramInfos(programs=program_infos)
