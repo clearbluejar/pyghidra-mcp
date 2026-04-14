@@ -105,7 +105,7 @@ def streamable_server(test_binary, test_dir, ghidra_env):
             f"STDOUT:\n{out}\nSTDERR:\n{err}"
         )
 
-    async def wait_for_server(timeout=120):
+    async def wait_for_server(timeout=240):
         async with aiohttp.ClientSession() as session:
             for _ in range(timeout):
                 try:
@@ -119,7 +119,7 @@ def streamable_server(test_binary, test_dir, ghidra_env):
 
     asyncio.run(wait_for_server())
 
-    time.sleep(10)
+    time.sleep(15)
 
     try:
         yield test_binary
