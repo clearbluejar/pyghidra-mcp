@@ -4,115 +4,75 @@ from pydantic import BaseModel, Field
 
 
 class DecompiledFunction(BaseModel):
-    """Represents a single function decompiled by Ghidra."""
-
-    name: str = Field(..., description="The name of the function.")
-    code: str = Field(..., description="The decompiled pseudo-C code of the function.")
-    signature: str | None = Field(None, description="The signature of the function.")
+    name: str
+    code: str
+    signature: str | None = None
 
 
 class ProgramBasicInfo(BaseModel):
-    """Basic information about a program: name and analysis status"""
-
-    name: str = Field(..., description="The name of the program.")
-    analysis_complete: bool = Field(..., description="Indicates if program is ready to be used.")
+    name: str
+    analysis_complete: bool
 
 
 class ProgramBasicInfos(BaseModel):
-    """A container for a list of basic program information objects."""
-
-    programs: list[ProgramBasicInfo] = Field(
-        ..., description="A list of basic program information."
-    )
+    programs: list[ProgramBasicInfo]
 
 
 class ProgramInfo(BaseModel):
-    """Detailed information about a program (binary) loaded in Ghidra."""
-
-    name: str = Field(..., description="The name of the program in Ghidra.")
-    file_path: str | None = Field(None, description="The file path of the program on disk.")
-    load_time: float | None = Field(
-        None, description="The time it took to load the program in seconds."
-    )
-    analysis_complete: bool = Field(
-        ..., description="Indicates if Ghidra's analysis of the program has completed."
-    )
-    metadata: dict = Field(..., description="A dictionary of metadata associated with the program.")
-    code_collection: bool = Field(..., description="True if the chromadb code collection is ready")
-    strings_collection: bool = Field(..., description="True if strings have been indexed")
+    name: str
+    file_path: str | None = None
+    load_time: float | None = None
+    analysis_complete: bool
+    metadata: dict
+    code_collection: bool
+    strings_collection: bool
 
 
 class ProgramInfos(BaseModel):
-    """A container for a list of program information objects."""
-
-    programs: list[ProgramInfo] = Field(..., description="A list of program information objects.")
+    programs: list[ProgramInfo]
 
 
 class ExportInfo(BaseModel):
-    """Represents a single exported function or symbol from a binary."""
-
-    name: str = Field(..., description="The name of the export.")
-    address: str = Field(..., description="The address of the export.")
+    name: str
+    address: str
 
 
 class ExportInfos(BaseModel):
-    """A container for a list of exports from a binary."""
-
-    exports: list[ExportInfo] = Field(..., description="A list of exports.")
+    exports: list[ExportInfo]
 
 
 class ImportInfo(BaseModel):
-    """Represents a single imported function or symbol."""
-
-    name: str = Field(..., description="The name of the import.")
-    library: str = Field(
-        ..., description="The name of the library from which the symbol is imported."
-    )
+    name: str
+    library: str
 
 
 class ImportInfos(BaseModel):
-    """A container for a list of imports."""
-
-    imports: list[ImportInfo] = Field(..., description="A list of imports.")
+    imports: list[ImportInfo]
 
 
 class CrossReferenceInfo(BaseModel):
-    """Represents a cross-reference to a specific address in the binary."""
-
-    function_name: str | None = Field(
-        None, description="The name of the function containing the cross-reference."
-    )
-    from_address: str = Field(..., description="The address where the cross-reference originates.")
-    to_address: str = Field(..., description="The address that is being referenced.")
-    type: str = Field(..., description="The type of the cross-reference.")
+    function_name: str | None = None
+    from_address: str
+    to_address: str
+    type: str
 
 
 class CrossReferenceInfos(BaseModel):
-    """A container for a list of cross-references."""
-
-    cross_references: list[CrossReferenceInfo] = Field(
-        ..., description="A list of cross-references."
-    )
+    cross_references: list[CrossReferenceInfo]
 
 
 class SymbolInfo(BaseModel):
-    """Represents a symbol within the binary."""
-
-    name: str = Field(..., description="The name of the symbol.")
-    address: str = Field(..., description="The address of the symbol.")
-    type: str = Field(..., description="The type of the symbol.")
-    namespace: str = Field(..., description="The namespace of the symbol.")
-    source: str = Field(..., description="The source of the symbol.")
-    refcount: int = Field(..., description="The reference count of the symbol.")
-    external: bool = Field(..., description="Is symbol external.")
+    name: str
+    address: str
+    type: str
+    namespace: str
+    source: str
+    refcount: int
+    external: bool
 
 
 class SymbolSearchResults(BaseModel):
-    """A container for a list of symbols found during a search."""
-
-    symbols: list[SymbolInfo] = Field(
-        ..., description="A list of symbols that match the search criteria."
-    )
+    symbols: list[SymbolInfo]
 
 
 class SearchMode(str, Enum):
@@ -123,60 +83,42 @@ class SearchMode(str, Enum):
 
 
 class CodeSearchResult(BaseModel):
-    """Represents a single search result from the codebase."""
-
-    function_name: str = Field(
-        ..., description="The name of the function where the code was found."
-    )
-    code: str = Field(..., description="The psuedo-c code snippet")
-    similarity: float = Field(..., description="The similarity score of the search result.")
-    search_mode: SearchMode = Field(..., description="The search mode used for this result.")
-    preview: str | None = Field(None, description="Truncated preview when include_full_code=False.")
+    function_name: str
+    code: str
+    similarity: float
+    search_mode: SearchMode
+    preview: str | None = None
 
 
 class CodeSearchResults(BaseModel):
-    """A container for a list of code search results"""
-
-    results: list[CodeSearchResult] = Field(..., description="A list of code search results.")
-    query: str = Field(..., description="The query used for the search.")
-    search_mode: SearchMode = Field(..., description="The search mode used.")
-    # Pagination
-    returned_count: int = Field(..., description="Number of results returned in this response.")
-    offset: int = Field(..., description="Offset used for pagination.")
-    limit: int = Field(..., description="Limit used for pagination.")
-    # Dual-mode counts - ALWAYS populated to help LLM decide on mode switching
-    literal_total: int = Field(
-        ..., description="Total functions containing literal match. 0 if none found."
-    )
-    semantic_total: int = Field(..., description="Estimated total for semantic search.")
-    total_functions: int = Field(..., description="Total number of functions in the binary.")
+    results: list[CodeSearchResult]
+    query: str
+    search_mode: SearchMode
+    returned_count: int
+    offset: int
+    limit: int
+    literal_total: int = Field(..., description="total literal matches")
+    semantic_total: int = Field(..., description="estimated semantic matches")
+    total_functions: int
 
 
 class StringInfo(BaseModel):
-    """Represents a string found within the binary."""
-
-    value: str = Field(..., description="The value of the string.")
-    address: str = Field(..., description="The address of the string.")
+    value: str
+    address: str
 
 
 class StringSearchResult(StringInfo):
-    """Represents a string search result found within the binary."""
-
-    similarity: float = Field(..., description="The similarity score of the search result.")
+    similarity: float
 
 
 class StringSearchResults(BaseModel):
-    """A container for a list of string search results."""
-
-    strings: list[StringSearchResult] = Field(..., description="A list of string search results.")
+    strings: list[StringSearchResult]
 
 
 class BytesReadResult(BaseModel):
-    """Represents the result of reading raw bytes from memory."""
-
-    address: str = Field(..., description="The normalized address where bytes were read from.")
-    size: int = Field(..., description="The actual number of bytes read.")
-    data: str = Field(..., description="The raw bytes as a hexadecimal string.")
+    address: str
+    size: int
+    data: str = Field(..., description="hex string")
 
 
 class CallGraphDirection(str, Enum):
@@ -195,16 +137,8 @@ class CallGraphDisplayType(str, Enum):
 
 
 class CallGraphResult(BaseModel):
-    """Represents the result of a mermaidjs call graph generation."""
-
-    function_name: str = Field(
-        ..., description="The name of the function for which the call graph was generated."
-    )
-    direction: CallGraphDirection = Field(
-        ..., description="The direction of the call graph (calling or called)."
-    )
-    display_type: CallGraphDisplayType = Field(
-        ..., description="The type of the call graph visualization."
-    )
-    graph: str = Field(..., description="The MermaidJS markdown string for the call graph.")
-    mermaid_url: str = Field(..., description="The MermaidJS image url")
+    function_name: str
+    direction: CallGraphDirection
+    display_type: CallGraphDisplayType
+    graph: str = Field(..., description="MermaidJS graph string")
+    mermaid_url: str
