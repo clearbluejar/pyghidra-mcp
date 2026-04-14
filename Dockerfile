@@ -35,7 +35,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
 EXPOSE 8000
 
 # expose the server to the outside world otherwise it will only be accessible from inside the container
-ENV FASTMCP_HOST=0.0.0.0
+ENV MCP_HOST=0.0.0.0
 
 ENV GHIDRA_INSTALL_DIR="/ghidra"
 

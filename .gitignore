@@ -214,3 +214,6 @@ tests/pyghidra_mcp_projects/**
 ghidra
 notes-*.txt
 *.code-workspace
+
+# macOS
+.DS_Store
