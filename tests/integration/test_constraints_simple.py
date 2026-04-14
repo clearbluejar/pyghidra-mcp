@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 
-def test_gpr_constraint_validation():
+def test_gpr_constraint_validation(ghidra_env):
     """Test that .gpr file + custom --project-name raises BadParameter"""
     # Create a test .gpr file
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -27,7 +27,7 @@ def test_gpr_constraint_validation():
             capture_output=True,
             text=True,
             timeout=10,
-            env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+            env=ghidra_env,
         )
 
         # The command should fail due to constraint validation
