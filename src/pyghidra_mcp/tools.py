@@ -634,43 +634,19 @@ class GhidraTools:
 
     @handle_exceptions
     def search_strings(self, query: str, limit: int = 100) -> list[StringSearchResult]:
-        """Searches for strings within a binary."""
+        """Searches for strings within a binary using substring matching."""
 
-        if not self.program_info.strings_collection:
+        if self.program_info.strings is None:
             raise ValueError(
                 "String indexing is not complete for this binary. Please try again later."
             )
 
-        search_results = []
-        results = self.program_info.strings_collection.get(
-            where_document={"$contains": query}, limit=limit
-        )
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"]):
-                metadata = results["metadatas"][i]  # type: ignore
-                search_results.append(
-                    StringSearchResult(
-                        value=doc,
-                        address=str(metadata["address"]),
-                        similarity=1,
-                    )
-                )
-            limit -= len(results["documents"])
-
-        results = self.program_info.strings_collection.query(query_texts=[query], n_results=limit)
-        if results and results["documents"]:
-            for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i]  # type: ignore
-                distance = results["distances"][0][i]  # type: ignore
-                search_results.append(
-                    StringSearchResult(
-                        value=doc,
-                        address=str(metadata["address"]),
-                        similarity=1 - distance,
-                    )
-                )
-
-        return search_results
+        query_lower = query.lower()
+        return [
+            StringSearchResult(value=s.value, address=s.address, similarity=1.0)
+            for s in self.program_info.strings
+            if query_lower in s.value.lower()
+        ][:limit]
 
     @handle_exceptions
     def read_bytes(self, address: str, size: int = 32) -> BytesReadResult:

@@ -38,7 +38,7 @@ class ProgramInfo:
     file_path: Path | None = None
     load_time: float | None = None
     code_collection: chromadb.Collection | None = None
-    strings_collection: chromadb.Collection | None = None
+    strings: list | None = None
 
     @property
     def analysis_complete(self) -> bool:
@@ -474,7 +474,7 @@ class PyGhidraContext:
                         "binary_name": binary_name,
                         "ghidra_analysis_complete": program_info.ghidra_analysis_complete,
                         "code_collection": program_info.code_collection is not None,
-                        "strings_collection": program_info.strings_collection is not None,
+                        "strings_indexed": program_info.strings is not None,
                         "suggestion": "Wait and try tool call again.",
                     }
                 )
@@ -498,7 +498,7 @@ class PyGhidraContext:
             file_path=metadata["Executable Location"],
             load_time=time.time(),
             code_collection=None,
-            strings_collection=None,
+            strings=None,
         )
 
         return program_info
@@ -560,56 +560,35 @@ class PyGhidraContext:
 
             collection = self.chroma_client.create_collection(name=program_info.name)
             try:
-                collection.add(
-                    documents=decompiles,
-                    metadatas=metadatas,
-                    ids=ids,
-                )
+                batch_size = 5000
+                for i in range(0, len(decompiles), batch_size):
+                    end = min(i + batch_size, len(decompiles))
+                    collection.add(
+                        documents=decompiles[i:end],
+                        metadatas=metadatas[i:end],
+                        ids=ids[i:end],
+                    )
             except Exception as e:
                 logger.error(f"Failed add decompiles to collection: {e}")
 
             logger.info(f"Code analysis complete for collection '{program_info.name}'")
             program_info.code_collection = collection
 
-    def _init_chroma_strings_collection_for_program(self, program_info: ProgramInfo):
+    def _init_strings_for_program(self, program_info: ProgramInfo):
         """
-        Initialize Chroma strings collection for a single program.
+        Load all strings from the binary into memory for substring search.
         """
-        collection_name = f"{program_info.name}_strings"
-        logger.info(f"Initializing Chroma strings collection for {program_info.name}")
-        try:
-            strings_collection = self.chroma_client.get_collection(name=collection_name)
-            logger.info(f"Collection '{collection_name}' exists; skipping strings ingest.")
-            program_info.strings_collection = strings_collection
-        except Exception:
-            logger.info(f"Creating new strings collection '{collection_name}'")
-            tools = GhidraTools(program_info)
-
-            ids = []
-            strings = tools.get_all_strings()
-            metadatas = [{"address": str(s.address)} for s in strings]
-            ids = [str(s.address) for s in strings]
-            strings = [s.value for s in strings]
-
-            strings_collection = self.chroma_client.create_collection(name=collection_name)
-            try:
-                strings_collection.add(
-                    documents=strings,
-                    metadatas=metadatas,  # type: ignore
-                    ids=ids,
-                )
-            except Exception as e:
-                logger.error(f"Failed to add strings to collection: {e}")
-
-            logger.info(f"Strings analysis complete for collection '{collection_name}'")
-            program_info.strings_collection = strings_collection
+        logger.info(f"Loading strings for {program_info.name}")
+        tools = GhidraTools(program_info)
+        program_info.strings = tools.get_all_strings()
+        logger.info(f"Loaded {len(program_info.strings)} strings for {program_info.name}")
 
     def _init_chroma_collections_for_program(self, program_info: ProgramInfo):
         """
         Initializes all Chroma collections (code and strings) for a single program.
         """
         self._init_chroma_code_collection_for_program(program_info)
-        self._init_chroma_strings_collection_for_program(program_info)
+        self._init_strings_for_program(program_info)
 
     def _init_all_chroma_collections(self):
         """

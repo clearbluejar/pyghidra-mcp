@@ -39,9 +39,7 @@ class ProgramInfo(BaseModel):
     )
     metadata: dict = Field(..., description="A dictionary of metadata associated with the program.")
     code_collection: bool = Field(..., description="True if the chromadb code collection is ready")
-    strings_collection: bool = Field(
-        ..., description="True if the chromadb strings collection is ready"
-    )
+    strings_collection: bool = Field(..., description="True if strings have been indexed")
 
 
 class ProgramInfos(BaseModel):
