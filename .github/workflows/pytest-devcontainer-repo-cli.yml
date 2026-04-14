@@ -61,11 +61,11 @@ jobs:
             uv add "pyghidra==2.2.1"
           fi
 
-          # Install pyghidra-mcp main package first (required for integration tests)
-          # uv pip install pyghidra-mcp
-
           # Install CLI dependencies with uv
           uv sync --extra dev
+
+          # Override PyPI pyghidra-mcp with the local repo version
+          uv pip install --reinstall --no-deps -e /workspaces/pyghidra-mcp
 
           # Run CLI tests using the CLI's test approach
           uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
@@ -237,6 +237,9 @@ jobs:
       working-directory: cli
       run: |
         uv sync --extra dev
+
+        # Override PyPI pyghidra-mcp with the local repo version
+        uv pip install --reinstall --no-deps -e ..
 
         if [[ "${{ matrix.ghidra_version }}" == 11.* ]]; then
           uv run pip install "pyghidra==2.2.1"
