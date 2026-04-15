@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-import platform
 import shutil
 import subprocess
 import tempfile
@@ -88,7 +87,6 @@ def streamable_server(test_binary, test_dir, ghidra_env):
             "pyghidra-mcp",
             "--transport",
             "streamable-http",
-            "--wait-for-analysis",
             "--project-path",
             project_dir,
             test_binary,
@@ -117,9 +115,24 @@ def streamable_server(test_binary, test_dir, ghidra_env):
                 await asyncio.sleep(1)
         raise RuntimeError("Server did not start in time")
 
-    asyncio.run(wait_for_server())
+    async def wait_for_analysis(timeout=240):
+        from pyghidra_mcp_cli.client import PyGhidraMcpClient
 
-    time.sleep(15)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                async with PyGhidraMcpClient(host="127.0.0.1", port=8000) as client:
+                    result = await client.list_project_binaries()
+                    programs = result.get("programs", [])
+                    if programs and all(p.get("analysis_complete", False) for p in programs):
+                        return
+            except Exception:
+                pass
+            await asyncio.sleep(2)
+        raise RuntimeError(f"Analysis not complete after {timeout}s")
+
+    asyncio.run(wait_for_server())
+    asyncio.run(wait_for_analysis())
 
     try:
         yield test_binary
@@ -174,22 +187,32 @@ async def test_list_binaries(client, streamable_server):
 
 
 @pytest.mark.asyncio
-async def test_decompile_function(client, binary_name):
+async def test_decompile_function(client, binary_name, main_func_name):
     """Test decompiling a function."""
     async with client:
-        name = "entry" if platform.system() == "Darwin" else "main"
-        result = await client.decompile_function(binary_name, name)
+        result = await client.decompile_function(binary_name, main_func_name)
         assert "code" in result
-        assert name in result["code"]
+        assert main_func_name in result["code"]
 
 
 @pytest.mark.asyncio
-async def test_search_symbols(client, binary_name):
+async def test_decompile_function_with_callees(client, binary_name, main_func_name):
+    """Test decompile_function with include_callees flag."""
+    async with client:
+        result = await client.decompile_function(binary_name, main_func_name, include_callees=True)
+        assert "code" in result
+        assert main_func_name in result["code"]
+        assert "callees" in result
+        assert isinstance(result["callees"], list)
+
+
+@pytest.mark.asyncio
+async def test_search_symbols(client, binary_name, func_prefix):
     """Test searching for symbols."""
     async with client:
         result = await client.search_symbols(binary_name, "function", offset=0, limit=10)
-        name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
-        name_two = "_function_two" if platform.system() == "Darwin" else "function_two"
+        name_one = f"{func_prefix}function_one"
+        name_two = f"{func_prefix}function_two"
         assert "symbols" in result
         assert len(result["symbols"]) >= 2
         assert any(name_one in s["name"] for s in result["symbols"])
@@ -197,9 +220,9 @@ async def test_search_symbols(client, binary_name):
 
 
 @pytest.mark.asyncio
-async def test_search_code(client, binary_name):
+async def test_search_code(client, binary_name, func_prefix):
     """Test searching code."""
-    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+    name_one = f"{func_prefix}function_one"
     async with client:
         result = await client.search_code(
             binary_name,
@@ -240,9 +263,9 @@ async def test_list_imports(client, binary_name):
 
 
 @pytest.mark.asyncio
-async def test_list_exports(client, binary_name):
+async def test_list_exports(client, binary_name, func_prefix):
     """Test listing exports."""
-    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+    name_one = f"{func_prefix}function_one"
     async with client:
         result = await client.list_exports(binary_name, query=".*function.*", offset=0, limit=10)
         assert "exports" in result
@@ -251,9 +274,9 @@ async def test_list_exports(client, binary_name):
 
 
 @pytest.mark.asyncio
-async def test_list_xrefs(client, binary_name):
+async def test_list_xrefs(client, binary_name, func_prefix):
     """Test listing cross-references."""
-    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+    name_one = f"{func_prefix}function_one"
     async with client:
         result = await client.list_xrefs(binary_name, name_one)
         assert "cross_references" in result
@@ -261,24 +284,22 @@ async def test_list_xrefs(client, binary_name):
 
 
 @pytest.mark.asyncio
-async def test_read_bytes(client, binary_name):
+async def test_read_bytes(client, binary_name, base_address):
     """Test reading bytes from memory."""
-    address = "100000000" if platform.system() == "Darwin" else "100000"
     async with client:
-        result = await client.read_bytes(binary_name, address=address, size=32)
+        result = await client.read_bytes(binary_name, address=base_address, size=32)
         assert "data" in result
         assert "address" in result
         assert result["size"] == 32
 
 
 @pytest.mark.asyncio
-async def test_gen_callgraph(client, binary_name):
+async def test_gen_callgraph(client, binary_name, main_func_name):
     """Test generating a call graph."""
     async with client:
-        name = "entry" if platform.system() == "Darwin" else "main"
         result = await client.gen_callgraph(
             binary_name,
-            function_name=name,
+            function_name=main_func_name,
             direction="calling",
             display_type="flow",
             condense_threshold=50,
@@ -288,7 +309,7 @@ async def test_gen_callgraph(client, binary_name):
         )
         assert "graph" in result
         assert "function_name" in result
-        assert name in result["function_name"]
+        assert main_func_name in result["function_name"]
 
 
 @pytest.mark.asyncio

@@ -68,8 +68,8 @@ jobs:
           uv pip install --reinstall --no-deps -e /workspaces/pyghidra-mcp
 
           # Run CLI tests using the CLI's test approach
-          uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
-          uv run pytest tests/integration/ -v --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
+          UV_NO_SYNC=1 uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
+          UV_NO_SYNC=1 uv run pytest tests/integration/ -v --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
 
     - name: Upload unit test results
       if: ${{ always() }}
@@ -249,13 +249,13 @@ jobs:
       working-directory: cli
       run: |
         mkdir -p junit
-        uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
+        UV_NO_SYNC=1 uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
 
     - name: Run CLI integration tests on macOS
       working-directory: cli
       run: |
         mkdir -p junit
-        uv run pytest tests/integration/ -v --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
+        UV_NO_SYNC=1 uv run pytest tests/integration/ -v --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
 
     - name: Upload CLI unit test results (macOS)
       if: ${{ always() }}

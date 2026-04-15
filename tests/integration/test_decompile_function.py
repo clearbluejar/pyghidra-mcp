@@ -1,5 +1,4 @@
 import json
-import platform
 
 import pytest
 from mcp import ClientSession
@@ -43,9 +42,8 @@ async def test_decompile_function_tool(server_params, test_binary):
 
 
 @pytest.mark.asyncio
-async def test_decompile_function_rich_response(server_params, test_binary):
+async def test_decompile_function_rich_response(server_params, test_binary, main_func_name):
     """Test decompile_function with include_callees and include_xrefs flags."""
-    name = "entry" if platform.system() == "Darwin" else "main"
 
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -56,7 +54,7 @@ async def test_decompile_function_rich_response(server_params, test_binary):
                 "decompile_function",
                 {
                     "binary_name": binary_name,
-                    "name_or_address": name,
+                    "name_or_address": main_func_name,
                     "include_callees": True,
                     "include_xrefs": True,
                 },
@@ -72,9 +70,9 @@ async def test_decompile_function_rich_response(server_params, test_binary):
 
 
 @pytest.mark.asyncio
-async def test_decompile_function_batch(server_params, test_binary):
+async def test_decompile_function_batch(server_params, test_binary, func_prefix):
     """Test decompile_function with batch targets (list of names)."""
-    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+    name_one = f"{func_prefix}function_one"
 
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:

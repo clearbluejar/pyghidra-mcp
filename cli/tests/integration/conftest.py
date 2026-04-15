@@ -1,10 +1,31 @@
 """Test fixtures for integration tests."""
 
+import platform
 import subprocess
 import time
 from pathlib import Path
 
 import pytest
+
+_IS_MACOS = platform.system() == "Darwin"
+
+
+@pytest.fixture(scope="session")
+def func_prefix():
+    """Return '_' on macOS (Mach-O prepends underscore), '' on Linux."""
+    return "_" if _IS_MACOS else ""
+
+
+@pytest.fixture(scope="session")
+def main_func_name():
+    """Return 'entry' on macOS, 'main' on Linux."""
+    return "entry" if _IS_MACOS else "main"
+
+
+@pytest.fixture(scope="session")
+def base_address():
+    """Return default base address for platform test binaries."""
+    return "100000000" if _IS_MACOS else "100000"
 
 
 @pytest.fixture(scope="module")

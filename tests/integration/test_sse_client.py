@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import platform
 import subprocess
 import time
 
@@ -69,7 +68,7 @@ def sse_server(test_binary, ghidra_env, sse_project_args):
 
 
 @pytest.mark.asyncio
-async def test_sse_client_smoke(sse_server):
+async def test_sse_client_smoke(sse_server, main_func_name):
     async with sse_client(f"{base_url}/sse") as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             # Initializing session...
@@ -79,7 +78,7 @@ async def test_sse_client_smoke(sse_server):
             binary_name = PyGhidraContext._gen_unique_bin_name(sse_server)
 
             # Decompile a function
-            name = "entry" if platform.system() == "Darwin" else "main"
+            name = main_func_name
             results = await session.call_tool(
                 "decompile_function",
                 {"binary_name": binary_name, "name_or_address": name},

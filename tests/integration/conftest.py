@@ -8,6 +8,32 @@ from pathlib import Path
 import pytest
 from mcp import StdioServerParameters
 
+_IS_MACOS = platform.system() == "Darwin"
+
+
+@pytest.fixture(scope="session")
+def func_prefix():
+    """Return '_' on macOS (Mach-O prepends underscore), '' on Linux."""
+    return "_" if _IS_MACOS else ""
+
+
+@pytest.fixture(scope="session")
+def main_func_name():
+    """Return 'entry' on macOS, 'main' on Linux."""
+    return "entry" if _IS_MACOS else "main"
+
+
+@pytest.fixture(scope="session")
+def base_address():
+    """Return default base address for platform test binaries."""
+    return "100000000" if _IS_MACOS else "100000"
+
+
+@pytest.fixture(scope="session")
+def is_macos():
+    """Return True on macOS, False otherwise."""
+    return _IS_MACOS
+
 
 @pytest.fixture(scope="session")
 def ghidra_env():
@@ -99,12 +125,11 @@ void shared_func_two() {
         c_file = f.name
 
     # 2. Compile as a shared object (Mach-O on macOS, ELF shared object on Linux)
-    is_macos = platform.system() == "Darwin"
-    shared_ext = ".dylib" if is_macos else ".so"
+    shared_ext = ".dylib" if _IS_MACOS else ".so"
     shared_file = c_file.replace(".c", shared_ext)
     compile_cmd = (
         ["gcc", "-dynamiclib", "-o", shared_file, c_file]
-        if is_macos
+        if _IS_MACOS
         else ["gcc", "-fPIC", "-shared", "-o", shared_file, c_file]
     )
     result = subprocess.run(compile_cmd, capture_output=True, text=True)
