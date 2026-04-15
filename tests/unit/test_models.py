@@ -63,16 +63,16 @@ def test_program_info_model():
         load_time=1.23,
         analysis_complete=True,
         metadata={"key": "value"},
-        code_collection=True,
-        strings_collection=False,
+        code_indexed=True,
+        strings_indexed=False,
     )
     assert info.name == "test_program"
     assert info.file_path == "/path/to/program"
     assert info.load_time == 1.23
     assert info.analysis_complete is True
     assert info.metadata == {"key": "value"}
-    assert info.code_collection is True
-    assert info.strings_collection is False
+    assert info.code_indexed is True
+    assert info.strings_indexed is False
 
 
 def test_program_infos_model():
@@ -85,8 +85,8 @@ def test_program_infos_model():
                 load_time=1.23,
                 analysis_complete=True,
                 metadata={"key": "value"},
-                code_collection=True,
-                strings_collection=False,
+                code_indexed=True,
+                strings_indexed=False,
             ),
             ProgramInfo(
                 name="test_program2",
@@ -94,8 +94,8 @@ def test_program_infos_model():
                 load_time=4.56,
                 analysis_complete=False,
                 metadata={},
-                code_collection=False,
-                strings_collection=True,
+                code_indexed=False,
+                strings_indexed=True,
             ),
         ]
     )

@@ -126,8 +126,8 @@ def streamable_server(test_binary, test_dir, ghidra_env):
                     programs = result.get("programs", [])
                     if programs and all(
                         p.get("analysis_complete", False)
-                        and p.get("code_collection", False)
-                        and p.get("strings_collection", False)
+                        and p.get("code_indexed", False)
+                        and p.get("strings_indexed", False)
                         for p in programs
                     ):
                         return
