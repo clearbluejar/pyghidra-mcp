@@ -1,5 +1,3 @@
-import platform
-
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
@@ -9,10 +7,10 @@ from pyghidra_mcp.models import SymbolSearchResults
 
 
 @pytest.mark.asyncio
-async def test_search_functions_by_name(server_params):
+async def test_search_functions_by_name(server_params, func_prefix):
     """Tests searching for functions by name."""
-    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
-    name_two = "_function_two" if platform.system() == "Darwin" else "function_two"
+    name_one = f"{func_prefix}function_one"
+    name_two = f"{func_prefix}function_two"
 
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:

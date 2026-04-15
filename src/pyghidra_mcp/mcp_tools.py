@@ -121,9 +121,11 @@ async def decompile_function(
 def search_symbols_by_name(
     binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
 ) -> SymbolSearchResults:
-    """Search symbols by case-insensitive substring.
+    """Search symbols by regex pattern (case-insensitive).
 
-    Includes functions, labels, classes, namespaces, and variables.
+    Supports full regex (e.g. ``^main$``, ``func.*init``). Plain substrings
+    still work since they are valid regex. Includes functions, labels,
+    classes, namespaces, and variables.
     """
     pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
@@ -136,7 +138,11 @@ def search_symbols_by_name(
 def search_functions_by_name(
     binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
 ) -> SymbolSearchResults:
-    """Search functions only by case-insensitive substring (no labels/variables)."""
+    """Search functions only by regex pattern, case-insensitive (no labels/variables).
+
+    Supports full regex (e.g. ``^main$``, ``func.*init``). Plain substrings
+    still work since they are valid regex.
+    """
     pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)

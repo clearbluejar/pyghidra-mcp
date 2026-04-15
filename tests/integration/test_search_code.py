@@ -1,5 +1,4 @@
 import os
-import platform
 import tempfile
 
 import pytest
@@ -58,11 +57,11 @@ def server_params(test_binary, ghidra_env, search_code_project_args):
 
 
 @pytest.mark.asyncio
-async def test_search_code(server_params):
+async def test_search_code(server_params, func_prefix):
     """
     Tests searching for code using similarity search.
     """
-    name = "_function_to_find" if platform.system() == "Darwin" else "function_to_find"
+    name = f"{func_prefix}function_to_find"
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the connection

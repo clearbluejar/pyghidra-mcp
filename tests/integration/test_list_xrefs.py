@@ -1,5 +1,4 @@
 import json
-import platform
 
 import pytest
 from mcp import ClientSession
@@ -10,12 +9,12 @@ from pyghidra_mcp.models import CrossReferenceInfos
 
 
 @pytest.mark.asyncio
-async def test_list_xrefs(server_params):
+async def test_list_xrefs(server_params, func_prefix, main_func_name):
     """
     Tests the list_xrefs tool to ensure it returns
     a list of cross-references from the binary.
     """
-    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+    name_one = f"{func_prefix}function_one"
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -33,14 +32,16 @@ async def test_list_xrefs(server_params):
 
             assert cross_reference_infos.target == name_one
             assert len(cross_reference_infos.cross_references) > 0
-            name = "entry" if platform.system() == "Darwin" else "main"
-            assert any(ref.function_name == name for ref in cross_reference_infos.cross_references)
+            assert any(
+                ref.function_name == main_func_name
+                for ref in cross_reference_infos.cross_references
+            )
 
 
 @pytest.mark.asyncio
-async def test_list_xrefs_batch(server_params):
+async def test_list_xrefs_batch(server_params, func_prefix):
     """Test list_xrefs with batch targets (one valid, one invalid)."""
-    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+    name_one = f"{func_prefix}function_one"
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

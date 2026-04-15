@@ -22,8 +22,18 @@ def binary_option(func):
 @click.command()
 @binary_option
 @click.argument("function_name_or_address")
+@click.option("--callees", is_flag=True, help="Include callee function names in the response.")
+@click.option("--strings", is_flag=True, help="Include referenced string literals in the response.")
+@click.option("--xrefs", is_flag=True, help="Include cross-references to this function.")
 @click.pass_context
-def decompile(ctx: click.Context, binary_name: str, function_name_or_address: str) -> None:
+def decompile(
+    ctx: click.Context,
+    binary_name: str,
+    function_name_or_address: str,
+    callees: bool,
+    strings: bool,
+    xrefs: bool,
+) -> None:
     """Decompile a function in a binary."""
 
     client = PyGhidraMcpClient(
@@ -33,7 +43,13 @@ def decompile(ctx: click.Context, binary_name: str, function_name_or_address: st
 
     async def run():
         async with client:
-            result = await client.decompile_function(binary_name, function_name_or_address)
+            result = await client.decompile_function(
+                binary_name,
+                function_name_or_address,
+                include_callees=callees,
+                include_strings=strings,
+                include_xrefs=xrefs,
+            )
             format_output(result, ctx.obj["OUTPUT_FORMAT"], ctx.obj["VERBOSE"])
 
     try:

@@ -1,5 +1,3 @@
-import platform
-
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
@@ -9,10 +7,10 @@ from pyghidra_mcp.models import CallGraphResult
 
 
 @pytest.mark.asyncio
-async def test_gen_callgraph_tool(server_params, test_binary):
+async def test_gen_callgraph_tool(server_params, test_binary, func_prefix):
     """Test the gen_callgraph tool."""
 
-    name_two = "_function_two" if platform.system() == "Darwin" else "function_two"
+    name_two = f"{func_prefix}function_two"
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the connection

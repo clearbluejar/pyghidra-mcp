@@ -27,6 +27,8 @@ from pyghidra_mcp.models import (
     SymbolInfo,
 )
 
+_REGEX_META = re.compile(r"[\\^$.|?*+(){}\[\]]")
+
 if typing.TYPE_CHECKING:
     from ghidra.app.decompiler import DecompileResults
     from ghidra.program.model.listing import Function
@@ -319,61 +321,75 @@ class GhidraTools:
     def search_symbols_by_name(
         self, query: str, offset: int = 0, limit: int = 100
     ) -> list[SymbolInfo]:
-        """Searches for symbols within a binary by name."""
+        """Searches for symbols within a binary by name (supports regex)."""
 
         if not query:
             raise ValueError("Query string is required")
 
         symbols_info = []
-        symbols = self.find_symbols(query)
+        if _REGEX_META.search(query):
+            symbols = self.get_all_symbols(include_externals=True)
+        else:
+            symbols = self.find_symbols(query)
         rm = self.program.getReferenceManager()
 
-        # Search for symbols containing the query string
         for symbol in symbols:
-            if query.lower() in symbol.getName(True).lower():
-                ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
-                symbols_info.append(
-                    SymbolInfo(
-                        name=symbol.name,
-                        address=str(symbol.getAddress()),
-                        type=str(symbol.getSymbolType()),
-                        namespace=str(symbol.getParentNamespace()),
-                        source=str(symbol.getSource()),
-                        refcount=ref_count,
-                        external=symbol.isExternal(),
-                    )
+            try:
+                if not re.search(query, symbol.getName(True), re.IGNORECASE):
+                    continue
+            except re.error:
+                if query.lower() not in symbol.getName(True).lower():
+                    continue
+            ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
+            symbols_info.append(
+                SymbolInfo(
+                    name=symbol.name,
+                    address=str(symbol.getAddress()),
+                    type=str(symbol.getSymbolType()),
+                    namespace=str(symbol.getParentNamespace()),
+                    source=str(symbol.getSource()),
+                    refcount=ref_count,
+                    external=symbol.isExternal(),
                 )
+            )
         return symbols_info[offset : limit + offset]
 
     @handle_exceptions
     def search_functions_by_name(
         self, query: str, offset: int = 0, limit: int = 100
     ) -> list[SymbolInfo]:
-        """Searches for functions within a binary by name."""
+        """Searches for functions within a binary by name (supports regex)."""
 
         if not query:
             raise ValueError("Query string is required")
 
         symbols_info = []
-        functions = self.find_functions(query)
+        if _REGEX_META.search(query):
+            functions = self.get_all_functions(include_externals=True)
+        else:
+            functions = self.find_functions(query)
         rm = self.program.getReferenceManager()
 
-        # Search for functions containing the query string
         for func in functions:
             symbol = func.getSymbol()
-            if query.lower() in symbol.getName(True).lower():
-                ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
-                symbols_info.append(
-                    SymbolInfo(
-                        name=symbol.getName(),
-                        address=str(symbol.getAddress()),
-                        type=str(symbol.getSymbolType()),
-                        namespace=str(symbol.getParentNamespace()),
-                        source=str(symbol.getSource()),
-                        refcount=ref_count,
-                        external=symbol.isExternal(),
-                    )
+            try:
+                if not re.search(query, symbol.getName(True), re.IGNORECASE):
+                    continue
+            except re.error:
+                if query.lower() not in symbol.getName(True).lower():
+                    continue
+            ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
+            symbols_info.append(
+                SymbolInfo(
+                    name=symbol.getName(),
+                    address=str(symbol.getAddress()),
+                    type=str(symbol.getSymbolType()),
+                    namespace=str(symbol.getParentNamespace()),
+                    source=str(symbol.getSource()),
+                    refcount=ref_count,
+                    external=symbol.isExternal(),
                 )
+            )
         return symbols_info[offset : limit + offset]
 
     @handle_exceptions
@@ -448,23 +464,17 @@ class GhidraTools:
         from ghidra.program.model.data import AbstractStringDataType as StringDataType
 
         func = self.find_function(name_or_address)
-        rm = self.program.getReferenceManager()
         listing = self.program.getListing()
         strings: list[str] = []
         body = func.getBody()
 
-        for rng in body:
-            addr = rng.getMinAddress()
-            while addr is not None and addr <= rng.getMaxAddress():
-                refs = rm.getReferencesFrom(addr)
-                for ref in refs:
-                    dest = ref.getToAddress()
-                    data = listing.getDefinedDataAt(dest)
-                    if data is not None and isinstance(data.getDataType(), StringDataType):
-                        val = data.getValue()
-                        if val is not None:
-                            strings.append(str(val))
-                addr = addr.next()
+        for insn in listing.getInstructions(body, True):
+            for ref in insn.getReferencesFrom():
+                data = listing.getDefinedDataAt(ref.getToAddress())
+                if data is not None and isinstance(data.getDataType(), StringDataType):
+                    val = data.getValue()
+                    if val is not None:
+                        strings.append(str(val))
 
         return strings
 

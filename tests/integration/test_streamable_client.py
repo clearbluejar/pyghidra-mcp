@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import platform
 import subprocess
 import time
 
@@ -68,7 +67,7 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args):
 
 
 @pytest.mark.asyncio
-async def test_streamable_client_smoke(streamable_server):
+async def test_streamable_client_smoke(streamable_server, main_func_name):
     async with streamable_http_client(f"{base_url}/mcp") as (
         read_stream,
         write_stream,
@@ -82,7 +81,7 @@ async def test_streamable_client_smoke(streamable_server):
             binary_name = PyGhidraContext._gen_unique_bin_name(streamable_server)
 
             # Decompile a function
-            name = "entry" if platform.system() == "Darwin" else "main"
+            name = main_func_name
             results = await session.call_tool(
                 "decompile_function",
                 {"binary_name": binary_name, "name_or_address": name},

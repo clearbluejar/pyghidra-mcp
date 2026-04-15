@@ -188,16 +188,29 @@ class PyGhidraMcpClient:
         return self._extract_result(result)
 
     async def decompile_function(
-        self, binary_name: str, function_name_or_address: str
+        self,
+        binary_name: str,
+        function_name_or_address: str,
+        include_callees: bool = False,
+        include_strings: bool = False,
+        include_xrefs: bool = False,
     ) -> dict[str, Any]:
         """Decompile a function."""
         if not self._connected:
             raise ClientError("Not connected")
 
-        result = await self._session.call_tool(
-            "decompile_function",
-            {"binary_name": binary_name, "name_or_address": function_name_or_address},
-        )
+        args: dict[str, Any] = {
+            "binary_name": binary_name,
+            "name_or_address": function_name_or_address,
+        }
+        if include_callees:
+            args["include_callees"] = True
+        if include_strings:
+            args["include_strings"] = True
+        if include_xrefs:
+            args["include_xrefs"] = True
+
+        result = await self._session.call_tool("decompile_function", args)
         extracted = self._extract_result(result)
         # Server returns list[DecompiledFunction]; unwrap single-item batch
         if "result" in extracted and isinstance(extracted["result"], list):

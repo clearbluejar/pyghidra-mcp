@@ -27,6 +27,11 @@ from pyghidra_mcp.models import (
 
 base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
+_IS_MACOS = platform.system() == "Darwin"
+_FUNC_PREFIX = "_" if _IS_MACOS else ""
+_MAIN_FUNC_NAME = "entry" if _IS_MACOS else "main"
+_BASE_ADDRESS = "100000000" if _IS_MACOS else "100000"
+
 
 async def wait_for_server(timeout=120):
     async with aiohttp.ClientSession() as session:
@@ -128,13 +133,11 @@ async def invoke_tool_concurrently(server_binary_path):
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))
 
-            read_addr = "100000000" if platform.system() == "Darwin" else "100000"
-            decomp_name = "entry" if platform.system() == "Darwin" else "main"
-            name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+            name_one = f"{_FUNC_PREFIX}function_one"
             tasks = [
                 session.call_tool(
                     "decompile_function",
-                    {"binary_name": binary_name, "name_or_address": decomp_name},
+                    {"binary_name": binary_name, "name_or_address": _MAIN_FUNC_NAME},
                 ),
                 session.call_tool(
                     "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
@@ -157,10 +160,12 @@ async def invoke_tool_concurrently(server_binary_path):
                     "search_strings", {"binary_name": binary_name, "query": "hello", "limit": 1}
                 ),
                 session.call_tool(
-                    "read_bytes", {"binary_name": binary_name, "address": read_addr, "size": 4}
+                    "read_bytes",
+                    {"binary_name": binary_name, "address": _BASE_ADDRESS, "size": 4},
                 ),
                 session.call_tool(
-                    "gen_callgraph", {"binary_name": binary_name, "function_name": decomp_name}
+                    "gen_callgraph",
+                    {"binary_name": binary_name, "function_name": _MAIN_FUNC_NAME},
                 ),
             ]
 
@@ -175,9 +180,8 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     using streamable-http transport.
     """
     num_clients = 6
-    expected_main = "entry" if platform.system() == "Darwin" else "main"
-    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
-    name_two = "_function_two" if platform.system() == "Darwin" else "function_two"
+    name_one = f"{_FUNC_PREFIX}function_one"
+    name_two = f"{_FUNC_PREFIX}function_two"
     tasks = [invoke_tool_concurrently(streamable_server) for _ in range(num_clients)]
     results = await asyncio.gather(*tasks)
 
@@ -189,8 +193,8 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         # Decompiled function
         decompiled_func_result = json.loads(client_responses[0].content[0].text)
         decompiled_function = DecompiledFunction(**decompiled_func_result)
-        assert expected_main in decompiled_function.name
-        assert expected_main in decompiled_function.code
+        assert _MAIN_FUNC_NAME in decompiled_function.name
+        assert _MAIN_FUNC_NAME in decompiled_function.code
 
         # Symbol search results (formerly function search results)
         search_results_result = json.loads(client_responses[1].content[0].text)
@@ -235,7 +239,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         cross_reference_infos = CrossReferenceInfos(**cross_references_result)
         assert len(cross_reference_infos.cross_references) > 0
         assert any(
-            ref.function_name == expected_main for ref in cross_reference_infos.cross_references
+            ref.function_name == _MAIN_FUNC_NAME for ref in cross_reference_infos.cross_references
         )
 
         # Search symbols results
@@ -268,7 +272,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         read_bytes_result = json.loads(client_responses[10].content[0].text)
         bytes_result = BytesReadResult(**read_bytes_result)
         assert bytes_result.size == 4
-        if platform.system() == "Darwin":
+        if _IS_MACOS:
             assert bytes_result.data.lower() == "cffaedfe"  # Mach-O 64-bit magic (little-endian)
             assert bytes_result.address == "100000000"
         else:
@@ -279,7 +283,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         call_graph_result = json.loads(client_responses[11].content[0].text)
         call_graph = CallGraphResult(**call_graph_result)
         assert len(call_graph.graph) > 0
-        assert expected_main in call_graph.function_name
+        assert _MAIN_FUNC_NAME in call_graph.function_name
         # Graph should be non-empty; entry node name may vary by platform/toolchain
         assert len(call_graph.graph.strip()) > 0
 
