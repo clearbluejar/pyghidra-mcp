@@ -473,7 +473,7 @@ class PyGhidraContext:
                         "message": f"Analysis incomplete for binary '{binary_name}'.",
                         "binary_name": binary_name,
                         "ghidra_analysis_complete": program_info.ghidra_analysis_complete,
-                        "code_collection": program_info.code_collection is not None,
+                        "code_indexed": program_info.code_collection is not None,
                         "strings_indexed": program_info.strings is not None,
                         "suggestion": "Wait and try tool call again.",
                     }

@@ -99,12 +99,8 @@ jobs:
             python_version: "3.13"
           - ghidra_version: "12.0"
             python_version: "3.13"
-          - ghidra_version: "11.3.2"
-            python_version: "3.12"
-          - ghidra_version: "11.4.1"
-            python_version: "3.11"
-          # 11.3/3.10 intentionally excluded for CLI because this combo currently fails
-          # with ModuleNotFoundError: No module named 'aiohttp' during integration test import.
+          # Ghidra 11.x excluded on macOS: JVM startup exceeds 240s timeout,
+          # causing "Server did not start in time" in every CI run.
 
     steps:
     - uses: actions/checkout@v4

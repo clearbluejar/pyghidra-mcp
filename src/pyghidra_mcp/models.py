@@ -29,8 +29,8 @@ class ProgramInfo(BaseModel):
     load_time: float | None = None
     analysis_complete: bool
     metadata: dict
-    code_collection: bool
-    strings_collection: bool
+    code_indexed: bool
+    strings_indexed: bool
 
 
 class ProgramInfos(BaseModel):

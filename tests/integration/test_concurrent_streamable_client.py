@@ -68,7 +68,7 @@ async def wait_for_collections(test_binary, timeout: int = 120) -> None:
                 )
 
                 has_missing = any(
-                    pi.code_collection is False or pi.strings_collection is False
+                    pi.code_indexed is False or pi.strings_indexed is False
                     for pi in program_infos.programs
                 )
 
