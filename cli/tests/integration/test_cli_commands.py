@@ -124,7 +124,12 @@ def streamable_server(test_binary, test_dir, ghidra_env):
                 async with PyGhidraMcpClient(host="127.0.0.1", port=8000) as client:
                     result = await client.list_project_binaries()
                     programs = result.get("programs", [])
-                    if programs and all(p.get("analysis_complete", False) for p in programs):
+                    if programs and all(
+                        p.get("analysis_complete", False)
+                        and p.get("code_collection", False)
+                        and p.get("strings_collection", False)
+                        for p in programs
+                    ):
                         return
             except Exception:
                 pass
