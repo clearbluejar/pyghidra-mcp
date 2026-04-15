@@ -317,3 +317,109 @@ def test_bytes_read_result_model():
     assert result.address == "0x1234"
     assert result.size == 4
     assert result.data == "01020304"
+
+
+def test_decompiled_function_with_error():
+    """Test DecompiledFunction with error field set."""
+    func = DecompiledFunction(name="missing_func", code="", error="Function not found")
+    assert func.name == "missing_func"
+    assert func.code == ""
+    assert func.error == "Function not found"
+    assert func.callees is None
+    assert func.referenced_strings is None
+    assert func.xrefs is None
+
+
+def test_decompiled_function_with_rich_fields():
+    """Test DecompiledFunction with callees, referenced_strings, and xrefs populated."""
+    xref = CrossReferenceInfo(
+        function_name="caller",
+        from_address="0x1000",
+        to_address="0x2000",
+        type="UNCONDITIONAL_CALL",
+    )
+    func = DecompiledFunction(
+        name="rich_func",
+        code="void rich_func() { }",
+        signature="void rich_func()",
+        callees=["helper_a", "helper_b"],
+        referenced_strings=["hello world", "error: %s"],
+        xrefs=[xref],
+    )
+    assert func.callees == ["helper_a", "helper_b"]
+    assert func.referenced_strings == ["hello world", "error: %s"]
+    assert len(func.xrefs) == 1
+    assert func.xrefs[0].function_name == "caller"
+    assert func.error is None
+
+
+def test_decompiled_function_batch_list():
+    """Test a list of DecompiledFunction results with mixed success and error."""
+    results = [
+        DecompiledFunction(
+            name="good_func", code="int good_func() { return 0; }", signature="int good_func()"
+        ),
+        DecompiledFunction(name="bad_func", code="", error="Function not found"),
+    ]
+    assert len(results) == 2
+    assert results[0].code != ""
+    assert results[0].error is None
+    assert results[1].code == ""
+    assert results[1].error == "Function not found"
+
+
+def test_cross_reference_infos_with_target():
+    """Test CrossReferenceInfos with target field."""
+    xrefs = CrossReferenceInfos(
+        target="main",
+        cross_references=[
+            CrossReferenceInfo(
+                function_name="entry",
+                from_address="0x1000",
+                to_address="0x2000",
+                type="UNCONDITIONAL_CALL",
+            ),
+        ],
+    )
+    assert xrefs.target == "main"
+    assert len(xrefs.cross_references) == 1
+    assert xrefs.error is None
+
+
+def test_cross_reference_infos_with_error():
+    """Test CrossReferenceInfos with error field and empty xrefs list."""
+    xrefs = CrossReferenceInfos(
+        target="nonexistent",
+        cross_references=[],
+        error="Symbol 'nonexistent' not found.",
+    )
+    assert xrefs.target == "nonexistent"
+    assert xrefs.cross_references == []
+    assert xrefs.error == "Symbol 'nonexistent' not found."
+
+
+def test_cross_reference_infos_batch_list():
+    """Test a list of CrossReferenceInfos results with mixed success and error."""
+    results = [
+        CrossReferenceInfos(
+            target="func_a",
+            cross_references=[
+                CrossReferenceInfo(
+                    function_name="main",
+                    from_address="0x1000",
+                    to_address="0x2000",
+                    type="UNCONDITIONAL_CALL",
+                ),
+            ],
+        ),
+        CrossReferenceInfos(
+            target="func_b",
+            cross_references=[],
+            error="Symbol 'func_b' not found.",
+        ),
+    ]
+    assert len(results) == 2
+    assert len(results[0].cross_references) == 1
+    assert results[0].error is None
+    assert results[1].cross_references == []
+    assert results[1].error is not None

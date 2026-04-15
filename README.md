@@ -316,13 +316,42 @@ The `Makefile` provides several targets for testing and code quality:
 
 Enable LLMs to perform actions, make deterministic computations, and interact with external services.
 
+#### Batch Operations
+
+`decompile_function` and `list_xrefs` accept a single target or a list of targets, reducing round-trips when analyzing call chains or multiple symbols at once.
+
+```jsonc
+// Decompile three functions in one call, with callees and xrefs attached
+{
+  "binary_name": "firmware.bin",
+  "name_or_address": ["main", "init_hardware", "0x08001234"],
+  "include_callees": true,
+  "include_xrefs": true
+}
+
+// Get cross-references for multiple symbols at once
+{
+  "binary_name": "firmware.bin",
+  "name_or_address": ["malloc", "free", "realloc"]
+}
+```
+
+Per-item errors are returned inline (other targets still succeed):
+
+```jsonc
+[
+  {"name": "main", "code": "void main() { ... }", "callees": ["init_hardware"], "xrefs": [...]},
+  {"name": "0xdeadbeef", "code": "", "error": "Function or symbol '0xdeadbeef' not found."}
+]
+```
+
 #### Code Search
 
 - `search_code(binary_name: str, query: str, limit: int = 5)`: Search for code within a binary by similarity using vector embeddings.
 
 #### Cross-References
 
-- `list_cross_references(binary_name: str, name_or_address: str)`: Finds and lists all cross-references (x-refs) to a given function or address.
+- `list_xrefs(binary_name: str, name_or_address: str | list[str])`: List cross-references to function(s), symbol(s), or address(es). Accepts a single target or a list for batch lookup.
 
 #### Generate Call Graph
 
@@ -330,7 +359,7 @@ Enable LLMs to perform actions, make deterministic computations, and interact wi
 
 #### Decompile Function
 
-- `decompile_function(binary_name: str, name: str)`: Decompile a function from a given binary.
+- `decompile_function(binary_name: str, name_or_address: str | list[str], include_callees: bool = False, include_strings: bool = False, include_xrefs: bool = False)`: Decompile function(s) by name or address. Accepts a single target or a list for batch decompilation. Rich response flags attach callees, strings, and/or xrefs to each result.
 
 #### Import Binary
 

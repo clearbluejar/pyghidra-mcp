@@ -33,7 +33,7 @@ def xref(ctx: click.Context, binary_name: str, name_or_address: str) -> None:
 
     async def run():
         async with client:
-            result = await client.list_cross_references(binary_name, name_or_address)
+            result = await client.list_xrefs(binary_name, name_or_address)
             format_output(result, ctx.obj["OUTPUT_FORMAT"], ctx.obj["VERBOSE"])
 
     try:

@@ -144,7 +144,7 @@ async def invoke_tool_concurrently(server_binary_path):
                 session.call_tool("list_exports", {"binary_name": binary_name}),
                 session.call_tool("list_imports", {"binary_name": binary_name}),
                 session.call_tool(
-                    "list_cross_references",
+                    "list_xrefs",
                     {"binary_name": binary_name, "name_or_address": name_one},
                 ),
                 session.call_tool(

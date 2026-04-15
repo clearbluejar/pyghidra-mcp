@@ -85,13 +85,36 @@ def mcp_error_handler(func):
 
 @mcp_error_handler
 async def decompile_function(
-    binary_name: str, name_or_address: str, ctx: Context
-) -> DecompiledFunction:
-    """Decompile a function to pseudo-C by name or address."""
+    binary_name: str,
+    name_or_address: str | list[str],
+    ctx: Context,
+    include_callees: bool = False,
+    include_strings: bool = False,
+    include_xrefs: bool = False,
+) -> list[DecompiledFunction]:
+    """Decompile function(s) to pseudo-C by name or address.
+
+    Accepts a single target or a list for batch decompilation.
+    Rich response flags attach callees, strings, and/or xrefs to each result.
+    """
     pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
-    return tools.decompile_function_by_name_or_addr(name_or_address)
+    targets = [name_or_address] if isinstance(name_or_address, str) else name_or_address
+    results: list[DecompiledFunction] = []
+    for target in targets:
+        try:
+            result = tools.decompile_function_by_name_or_addr(target)
+            if include_callees:
+                result.callees = tools.get_callees(target)
+            if include_strings:
+                result.referenced_strings = tools.get_referenced_strings(target)
+            if include_xrefs:
+                result.xrefs = tools.list_xrefs(target)
+            results.append(result)
+        except Exception as e:
+            results.append(DecompiledFunction(name=target, code="", error=str(e)))
+    return results
 
 
 @mcp_error_handler
@@ -228,18 +251,26 @@ def list_imports(
 
 
 @mcp_error_handler
-def list_cross_references(
-    binary_name: str, name_or_address: str, ctx: Context
-) -> CrossReferenceInfos:
-    """List cross-references to a function, symbol, or address.
+def list_xrefs(
+    binary_name: str, name_or_address: str | list[str], ctx: Context
+) -> list[CrossReferenceInfos]:
+    """List cross-references to function(s), symbol(s), or address(es).
 
+    Accepts a single target or a list for batch lookup.
     Suggests close matches on no exact hit.
     """
     pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
-    cross_references = tools.list_cross_references(name_or_address)
-    return CrossReferenceInfos(cross_references=cross_references)
+    targets = [name_or_address] if isinstance(name_or_address, str) else name_or_address
+    results: list[CrossReferenceInfos] = []
+    for target in targets:
+        try:
+            cross_references = tools.list_xrefs(target)
+            results.append(CrossReferenceInfos(target=target, cross_references=cross_references))
+        except Exception as e:
+            results.append(CrossReferenceInfos(target=target, cross_references=[], error=str(e)))
+    return results
 
 
 @mcp_error_handler

@@ -406,7 +406,7 @@ class GhidraTools:
         return imports[offset : limit + offset]
 
     @handle_exceptions
-    def list_cross_references(self, name_or_address: str) -> list[CrossReferenceInfo]:
+    def list_xrefs(self, name_or_address: str) -> list[CrossReferenceInfo]:
         """Finds and lists all cross-references (x-refs) to a given function, symbol,
         or address within a binary.
         """
@@ -431,6 +431,42 @@ class GhidraTools:
                 )
             )
         return cross_references
+
+    @handle_exceptions
+    def get_callees(self, name_or_address: str) -> list[str]:
+        """Get names of functions called by the given function."""
+        from ghidra.util.task import ConsoleTaskMonitor
+
+        func = self.find_function(name_or_address)
+        monitor = ConsoleTaskMonitor()
+        called = func.getCalledFunctions(monitor)
+        return [f.getName() for f in called]
+
+    @handle_exceptions
+    def get_referenced_strings(self, name_or_address: str) -> list[str]:
+        """Get string literals referenced within the given function's body."""
+        from ghidra.program.model.data import AbstractStringDataType as StringDataType
+
+        func = self.find_function(name_or_address)
+        rm = self.program.getReferenceManager()
+        listing = self.program.getListing()
+        strings: list[str] = []
+        body = func.getBody()
+
+        for rng in body:
+            addr = rng.getMinAddress()
+            while addr is not None and addr <= rng.getMaxAddress():
+                refs = rm.getReferencesFrom(addr)
+                for ref in refs:
+                    dest = ref.getToAddress()
+                    data = listing.getDefinedDataAt(dest)
+                    if data is not None and isinstance(data.getDataType(), StringDataType):
+                        val = data.getValue()
+                        if val is not None:
+                            strings.append(str(val))
+                addr = addr.next()
+
+        return strings
 
     def _search_code_literal(
         self,

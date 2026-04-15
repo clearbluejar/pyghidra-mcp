@@ -7,6 +7,11 @@ class DecompiledFunction(BaseModel):
     name: str
     code: str
     signature: str | None = None
+    error: str | None = None
+    # Rich response fields (populated when include_* flags are set)
+    callees: list[str] | None = None
+    referenced_strings: list[str] | None = None
+    xrefs: list["CrossReferenceInfo"] | None = None
 
 
 class ProgramBasicInfo(BaseModel):
@@ -58,7 +63,13 @@ class CrossReferenceInfo(BaseModel):
 
 
 class CrossReferenceInfos(BaseModel):
+    target: str | None = None
     cross_references: list[CrossReferenceInfo]
+    error: str | None = None
+
+
+# Resolve forward reference for DecompiledFunction.xrefs
+DecompiledFunction.model_rebuild()
 
 
 class SymbolInfo(BaseModel):

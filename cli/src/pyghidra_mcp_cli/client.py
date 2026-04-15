@@ -198,7 +198,11 @@ class PyGhidraMcpClient:
             "decompile_function",
             {"binary_name": binary_name, "name_or_address": function_name_or_address},
         )
-        return self._extract_result(result)
+        extracted = self._extract_result(result)
+        # Server returns list[DecompiledFunction]; unwrap single-item batch
+        if "result" in extracted and isinstance(extracted["result"], list):
+            return extracted["result"][0]
+        return extracted
 
     async def search_symbols(
         self, binary_name: str, query: str, offset: int = 0, limit: int = 25
@@ -287,16 +291,20 @@ class PyGhidraMcpClient:
         )
         return self._extract_result(result)
 
-    async def list_cross_references(self, binary_name: str, name_or_address: str) -> dict[str, Any]:
+    async def list_xrefs(self, binary_name: str, name_or_address: str) -> dict[str, Any]:
         """List cross-references to a symbol or address."""
         if not self._connected:
             raise ClientError("Not connected")
 
         result = await self._session.call_tool(
-            "list_cross_references",
+            "list_xrefs",
             {"binary_name": binary_name, "name_or_address": name_or_address},
         )
-        return self._extract_result(result)
+        extracted = self._extract_result(result)
+        # Server returns list[CrossReferenceInfos]; unwrap single-item batch
+        if "result" in extracted and isinstance(extracted["result"], list):
+            return extracted["result"][0]
+        return extracted
 
     async def read_bytes(self, binary_name: str, address: str, size: int = 32) -> dict[str, Any]:
         """Read bytes from memory."""
