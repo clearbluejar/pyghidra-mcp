@@ -350,7 +350,7 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
     help="Location to store GZFs of analyzed binaries.",
 )
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
-def main(
+def main(  # noqa: C901
     transport: str,
     input_paths: list[Path],
     project_path: Path,
