@@ -108,6 +108,8 @@ jobs:
           pip install -e .[dev]
 
           command -v Xvfb
+          sudo mkdir -p /tmp/.X11-unix
+          sudo chmod 1777 /tmp/.X11-unix
           Xvfb :99 -nolisten tcp &
           export DISPLAY=:99
 
