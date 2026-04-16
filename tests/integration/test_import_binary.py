@@ -100,11 +100,12 @@ async def test_import_raw_binary_single_file(
 
             content = response.content[0].text
             assert raw_blob_for_import in content
-            assert '"queued_count": 1' in content
-            assert '"skipped_count": 0' in content
+            assert '"queued_count": 0' in content
+            assert '"skipped_count": 1' in content
+            assert "no supported Ghidra loader detected" in content
 
             imported = False
-            for _ in range(240):
+            for _ in range(5):
                 await asyncio.sleep(1)
 
                 response = await session.call_tool("list_project_binaries", {})
@@ -113,4 +114,4 @@ async def test_import_raw_binary_single_file(
                     imported = True
                     break
 
-            assert imported, f"Raw binary {raw_binary_name} did not appear in project"
+            assert not imported, f"Raw binary {raw_binary_name} should have been skipped"

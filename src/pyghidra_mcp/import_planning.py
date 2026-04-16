@@ -58,7 +58,7 @@ def build_import_plan(binary_paths: Iterable[str | Path]) -> ImportPlan:
             continue
 
         if path.is_file():
-            allowed, reason = _classify_import_path(path, allow_raw_binary=True)
+            allowed, reason = _classify_import_path(path, allow_raw_binary=False)
             if allowed:
                 candidates.append(ImportCandidate(path, None))
             else:

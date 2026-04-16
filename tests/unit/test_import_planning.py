@@ -3,7 +3,7 @@ from pathlib import Path
 import pyghidra_mcp.import_planning as import_planning
 
 
-def test_build_import_plan_allows_raw_single_file_but_not_directory_children(monkeypatch, tmp_path):
+def test_build_import_plan_skips_raw_single_file_and_directory_children(monkeypatch, tmp_path):
     raw_file = tmp_path / "blob.bin"
     raw_file.write_bytes(b"\x00" * 32)
     nested_dir = tmp_path / "tree"
@@ -19,8 +19,9 @@ def test_build_import_plan_allows_raw_single_file_but_not_directory_children(mon
     single_plan = import_planning.build_import_plan([raw_file])
     directory_plan = import_planning.build_import_plan([nested_dir])
 
-    assert [candidate.path for candidate in single_plan.candidates] == [raw_file]
-    assert single_plan.skipped == []
+    assert single_plan.candidates == []
+    assert len(single_plan.skipped) == 1
+    assert single_plan.skipped[0].path == raw_file
 
     assert directory_plan.candidates == []
     assert len(directory_plan.skipped) == 1
