@@ -100,13 +100,14 @@ jobs:
         push: never
         runCmd: |
           sudo apt-get update
-          sudo apt-get install -y libxtst6 libxi6 libxrender1
+          sudo apt-get install -y xvfb libxtst6 libxi6 libxrender1
 
           pip install --upgrade pip
           python -m venv .venv
           source .venv/bin/activate
           pip install -e .[dev]
 
+          command -v Xvfb
           Xvfb :99 -nolisten tcp &
           export DISPLAY=:99
 
