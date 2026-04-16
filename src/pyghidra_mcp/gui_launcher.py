@@ -64,7 +64,9 @@ class GuiPyGhidraMcpLauncher(PyGhidraLauncher):
         stdout = _PyGhidraStdOut(sys.stdout)
         stderr = _PyGhidraStdOut(sys.stderr)
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            Thread(lambda: Ghidra.main(["ghidra.GhidraRun", *self.args])).start()
+            Thread(
+                lambda: Ghidra.main(["ghidra.GhidraRun", *self.args])  # pyright: ignore[reportArgumentType]
+            ).start()
 
     def run_gui_event_loop(self) -> None:
         """Block until the GUI is shutting down."""
