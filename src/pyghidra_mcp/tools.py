@@ -6,6 +6,7 @@ import functools
 import logging
 import re
 import typing
+from contextlib import contextmanager
 
 from ghidrecomp.callgraph import gen_callgraph
 from jpype import JByte
@@ -37,6 +38,17 @@ if typing.TYPE_CHECKING:
     from .context import ProgramInfo
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def ghidra_transaction(program, description: str):
+    tx_id = program.startTransaction(description)
+    committed = False
+    try:
+        yield
+        committed = True
+    finally:
+        program.endTransaction(tx_id, committed)
 
 
 def handle_exceptions(func):
@@ -325,6 +337,16 @@ class GhidraTools:
         except re.error:
             return query.lower() in symbol_name.lower()
 
+    @classmethod
+    def _symbol_matches_query(cls, query: str, symbol) -> bool:
+        """Match against both simple and namespace-qualified symbol names."""
+        names = {str(symbol.getName())}
+        try:
+            names.add(str(symbol.getName(True)))
+        except TypeError:
+            pass
+        return any(cls._matches_query(query, name) for name in names)
+
     def _symbol_to_info(self, symbol, rm) -> SymbolInfo:
         """Convert a Ghidra Symbol to a SymbolInfo model."""
         ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
@@ -362,7 +384,7 @@ class GhidraTools:
         results = [
             self._symbol_to_info(sym, rm)
             for sym in symbols
-            if self._matches_query(query, sym.getName(True))
+            if self._symbol_matches_query(query, sym)
         ]
         return results[offset : limit + offset]
 
@@ -772,3 +794,93 @@ class GhidraTools:
             graph=selected_graph_content,
             mermaid_url=mermaid_url,
         )
+
+    @handle_exceptions
+    def rename_function(self, name_or_address: str, new_name: str) -> dict:
+        from ghidra.program.model.symbol import SourceType
+
+        func = self.find_function(name_or_address)
+        old_name = str(func.getName())
+        address = str(func.getEntryPoint())
+
+        with ghidra_transaction(
+            self.program,
+            f"pyghidra-mcp: rename {old_name} -> {new_name}",
+        ):
+            func.setName(new_name, SourceType.USER_DEFINED)
+
+        self.invalidate_decompiler_cache()
+        return {
+            "address": address,
+            "old_name": old_name,
+            "new_name": new_name,
+        }
+
+    @handle_exceptions
+    def set_comment(self, target: str, comment: str, comment_type: str) -> dict:
+        from ghidra.program.model.listing import CommentType
+
+        normalized_type = comment_type.lower()
+        if normalized_type == "decompiler":
+            func = self.find_function(target)
+            addr = func.getEntryPoint()
+
+            with ghidra_transaction(
+                self.program,
+                f"pyghidra-mcp: set function comment @ {addr}",
+            ):
+                func.setComment(comment)
+
+            self.invalidate_decompiler_cache()
+            return {
+                "address": str(addr),
+                "comment": comment,
+                "comment_type": "decompiler",
+            }
+
+        listing_comment_types = {
+            "plate": CommentType.PLATE,
+            "pre": CommentType.PRE,
+            "eol": CommentType.EOL,
+            "post": CommentType.POST,
+            "repeatable": CommentType.REPEATABLE,
+        }
+        ghidra_comment_type = listing_comment_types.get(normalized_type)
+        if ghidra_comment_type is None:
+            allowed = ["decompiler", *listing_comment_types.keys()]
+            raise ValueError(f"Invalid comment_type '{comment_type}'. Expected one of: {allowed}")
+
+        addr = self._parse_address(target)
+        with ghidra_transaction(
+            self.program,
+            f"pyghidra-mcp: set {normalized_type} comment @ {addr}",
+        ):
+            self.program.getListing().setComment(addr, ghidra_comment_type, comment)
+
+        self.invalidate_decompiler_cache()
+        return {
+            "address": str(addr),
+            "comment": comment,
+            "comment_type": normalized_type,
+        }
+
+    def invalidate_decompiler_cache(self) -> None:
+        for method_name in ("flushCache", "resetDecompiler"):
+            method = getattr(self.decompiler, method_name, None)
+            if method is not None:
+                try:
+                    method()
+                except Exception:
+                    logger.debug(
+                        "Failed to invalidate decompiler cache with %s",
+                        method_name,
+                        exc_info=True,
+                    )
+                return
+
+    def _parse_address(self, address: str):
+        addr_str = address[2:] if address.lower().startswith("0x") else address
+        addr = self.program.getAddressFactory().getAddress(addr_str)
+        if addr is None:
+            raise ValueError(f"Invalid address: {address}")
+        return addr
