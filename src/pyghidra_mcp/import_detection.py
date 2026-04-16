@@ -9,11 +9,10 @@ def is_ghidra_importable(path: Path, *, allow_binary_loader: bool = False) -> bo
     if not path.is_file():
         return False
 
-    from java.io import File  # type: ignore
-
     from ghidra.app.util.opinion import LoaderService
     from ghidra.formats.gfilesystem import FileSystemService
     from ghidra.util.task import TaskMonitor
+    from java.io import File  # type: ignore
 
     fs_service = FileSystemService.getInstance()
     provider = None
