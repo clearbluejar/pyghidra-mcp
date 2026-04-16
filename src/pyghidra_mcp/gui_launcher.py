@@ -1,10 +1,11 @@
+import contextlib
 import os
 import sys
 import threading
 import time
 from pathlib import Path
 
-from pyghidra.launcher import DeferredPyGhidraLauncher
+from pyghidra.launcher import DeferredPyGhidraLauncher, _PyGhidraStdOut
 
 REEXEC_ENV = "PYGHIDRA_MCP_REEXEC"
 
@@ -49,12 +50,16 @@ class GuiPyGhidraMcpLauncher(DeferredPyGhidraLauncher):
         self._shutdown_requested = False
 
     def run_gui_event_loop(self) -> None:
-        """Initialize the Ghidra GUI and block until the JVM is shutting down."""
+        """Launch the Ghidra GUI and block until the JVM is shutting down."""
+        from ghidra import Ghidra
         from java.lang import Runtime, Thread  # type: ignore
 
         Runtime.getRuntime().addShutdownHook(Thread(self._is_exiting.set))
 
-        self.initialize_ghidra(headless=False)
+        stdout = _PyGhidraStdOut(sys.stdout)
+        stderr = _PyGhidraStdOut(sys.stderr)
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            Thread(lambda: Ghidra.main(["ghidra.GhidraRun", *self.args])).start()
 
         if sys.platform == "darwin":
             from pyghidra.launcher import _run_mac_app
