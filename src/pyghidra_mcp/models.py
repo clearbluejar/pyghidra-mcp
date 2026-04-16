@@ -37,6 +37,37 @@ class ProgramInfos(BaseModel):
     programs: list[ProgramInfo]
 
 
+class OpenProgramInfo(BaseModel):
+    name: str
+    path: str
+    current: bool
+    analysis_complete: bool
+
+
+class OpenProgramInfos(BaseModel):
+    programs: list[OpenProgramInfo]
+
+
+class GotoResponse(BaseModel):
+    binary_name: str
+    address: str
+    success: bool
+
+
+class RenameResponse(BaseModel):
+    binary_name: str
+    address: str
+    old_name: str
+    new_name: str
+
+
+class CommentResponse(BaseModel):
+    binary_name: str
+    address: str
+    comment: str
+    comment_type: str
+
+
 class ExportInfo(BaseModel):
     name: str
     address: str

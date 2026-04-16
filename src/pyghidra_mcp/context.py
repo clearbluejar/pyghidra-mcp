@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Union
 import chromadb
 from chromadb.config import Settings
 
+from pyghidra_mcp.models import ProgramInfo as ProgramInfoModel
 from pyghidra_mcp.tools import GhidraTools
 
 if TYPE_CHECKING:
@@ -208,6 +209,27 @@ class PyGhidraContext:
             return names
 
         return list_folder_contents(self.project.getRootFolder())
+
+    def list_program_infos(self) -> list[ProgramInfo]:
+        """Return loaded program infos for MCP project listing."""
+        return list(self.programs.values())
+
+    def list_project_binary_infos(self) -> list[ProgramInfoModel]:
+        """Return MCP response models for project binaries."""
+        program_infos = []
+        for name, pi in self.programs.items():
+            program_infos.append(
+                ProgramInfoModel(
+                    name=name,
+                    file_path=str(pi.file_path) if pi.file_path else None,
+                    load_time=pi.load_time,
+                    analysis_complete=pi.analysis_complete,
+                    metadata={},
+                    code_indexed=pi.code_collection is not None,
+                    strings_indexed=pi.strings is not None,
+                )
+            )
+        return program_infos
 
     def list_binary_domain_files(self) -> list["DomainFile"]:
         """Return a list of DomainFile objects for all binaries in the project.
@@ -700,15 +722,15 @@ class PyGhidraContext:
         force_analysis: bool = False,
         verbose_analysis: bool = False,
     ):
+        # Import symbol utilities from ghidrecomp
+        from ghidrecomp.utility import get_pdb, set_pdb, set_remote_pdbs, setup_symbol_server
+
         from ghidra.app.script import GhidraScriptUtil
         from ghidra.framework.model import DomainFile
         from ghidra.program.flatapi import FlatProgramAPI
         from ghidra.program.model.listing import Program
         from ghidra.program.util import GhidraProgramUtilities
         from ghidra.util.task import ConsoleTaskMonitor
-
-        # Import symbol utilities from ghidrecomp
-        from ghidrecomp.utility import get_pdb, set_pdb, set_remote_pdbs, setup_symbol_server
 
         df = df_or_prog
         if not isinstance(df_or_prog, DomainFile):
@@ -932,12 +954,13 @@ class PyGhidraContext:
         """
         Apply GDT to program
         """
+        from java.io import File  # type: ignore
+        from java.util import List  # type: ignore
+
         from ghidra.app.cmd.function import ApplyFunctionDataTypesCmd
         from ghidra.program.model.data import FileDataTypeManager
         from ghidra.program.model.symbol import SourceType
         from ghidra.util.task import ConsoleTaskMonitor
-        from java.io import File  # type: ignore
-        from java.util import List  # type: ignore
 
         gdt_path = Path(gdt_path)
 

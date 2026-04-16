@@ -7,11 +7,14 @@ import pytest
 from pyghidra_mcp.tools import GhidraTools
 
 
-def _make_mock_symbol(name, address="0x1000"):
+def _make_mock_symbol(name, address="0x1000", qualified_name=None):
     """Create a mock Ghidra Symbol."""
     sym = Mock()
     sym.name = name
-    sym.getName.return_value = name
+    qualified = qualified_name or name
+    sym.getName.side_effect = lambda include_namespace=False: (
+        qualified if include_namespace else name
+    )
     sym.getAddress.return_value = address
     sym.getSymbolType.return_value = "Function"
     sym.getParentNamespace.return_value = "Global"
@@ -20,9 +23,9 @@ def _make_mock_symbol(name, address="0x1000"):
     return sym
 
 
-def _make_mock_function(name, address="0x1000"):
+def _make_mock_function(name, address="0x1000", qualified_name=None):
     """Create a mock Ghidra Function with a Symbol."""
-    sym = _make_mock_symbol(name, address)
+    sym = _make_mock_symbol(name, address, qualified_name=qualified_name)
     func = Mock()
     func.getSymbol.return_value = sym
     func.getEntryPoint.return_value = address
@@ -103,6 +106,14 @@ class TestSearchFunctionsOnly:
         results = tools.search_symbols_by_name("^MAIN$", functions_only=True)
         names = [s.name for s in results]
         assert names == ["main"]
+
+    def test_regex_exact_match_uses_simple_name_when_symbol_is_namespaced(self):
+        """Anchored matches should work against display names, not just qualified names."""
+        funcs = [_make_mock_function("entry", "0x1000", qualified_name="Global::entry")]
+        tools = _make_tools(functions=funcs)
+        results = tools.search_symbols_by_name("^entry$", functions_only=True)
+        names = [s.name for s in results]
+        assert names == ["entry"]
 
     def test_invalid_regex_falls_back_to_substring(self):
         """Invalid regex like bare '*' falls back to substring match."""

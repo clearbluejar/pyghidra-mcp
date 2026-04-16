@@ -54,3 +54,13 @@ def test_init_project_programs_uses_domain_file_paths(monkeypatch):
         "/ls-aa11bb": "root-info",
         "/bin/tools/libfoo-cc22dd": "nested-info",
     }
+
+
+def test_list_program_infos_returns_loaded_programs():
+    context = PyGhidraContext.__new__(PyGhidraContext)
+    context.programs = {
+        "/one": "one-info",
+        "/two": "two-info",
+    }
+
+    assert context.list_program_infos() == ["one-info", "two-info"]

@@ -3,6 +3,7 @@
 import json
 import logging
 import sys
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +16,10 @@ from mcp.server.fastmcp import FastMCP
 
 from pyghidra_mcp import __version__, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
+from pyghidra_mcp.context_protocol import MCPContext
+from pyghidra_mcp.gui_context import GuiPyGhidraContext
+from pyghidra_mcp.gui_launcher import GuiPyGhidraMcpLauncher, ensure_macos_framework_python
+from pyghidra_mcp.project_spec import DEFAULT_PROJECT_NAME, ProjectSpec
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,7 +32,7 @@ logger = logging.getLogger(__name__)
 # Init Pyghidra
 # ---------------------------------------------------------------------------------
 @asynccontextmanager
-async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
+async def server_lifespan(server: Server) -> AsyncIterator[MCPContext]:
     """Manage server startup and shutdown lifecycle."""
     try:
         yield server._pyghidra_context  # type: ignore
@@ -39,22 +44,32 @@ async def server_lifespan(server: Server) -> AsyncIterator[PyGhidraContext]:
 mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
 
 
-# MCP Tools
-# ---------------------------------------------------------------------------------
-# Register tools from mcp_tools module
-mcp.tool()(mcp_tools.decompile_function)
-mcp.tool()(mcp_tools.search_symbols_by_name)
-mcp.tool()(mcp_tools.search_code)
-mcp.tool()(mcp_tools.list_project_binaries)
-mcp.tool()(mcp_tools.list_project_binary_metadata)
-mcp.tool()(mcp_tools.delete_project_binary)
-mcp.tool()(mcp_tools.list_exports)
-mcp.tool()(mcp_tools.list_imports)
-mcp.tool()(mcp_tools.list_xrefs)
-mcp.tool()(mcp_tools.search_strings)
-mcp.tool()(mcp_tools.read_bytes)
-mcp.tool()(mcp_tools.gen_callgraph)
-mcp.tool()(mcp_tools.import_binary)
+def register_common_tools(server: FastMCP) -> None:
+    server.tool()(mcp_tools.decompile_function)
+    server.tool()(mcp_tools.search_symbols_by_name)
+    server.tool()(mcp_tools.search_code)
+    server.tool()(mcp_tools.list_project_binaries)
+    server.tool()(mcp_tools.list_project_binary_metadata)
+    server.tool()(mcp_tools.rename_function)
+    server.tool()(mcp_tools.set_comment)
+    server.tool()(mcp_tools.delete_project_binary)
+    server.tool()(mcp_tools.list_exports)
+    server.tool()(mcp_tools.list_imports)
+    server.tool()(mcp_tools.list_xrefs)
+    server.tool()(mcp_tools.search_strings)
+    server.tool()(mcp_tools.read_bytes)
+    server.tool()(mcp_tools.gen_callgraph)
+    server.tool()(mcp_tools.import_binary)
+
+
+def register_gui_tools(server: FastMCP) -> None:
+    server.tool()(mcp_tools.list_open_programs)
+    server.tool()(mcp_tools.open_program_in_gui)
+    server.tool()(mcp_tools.set_current_program)
+    server.tool()(mcp_tools.goto)
+
+
+register_common_tools(mcp)
 
 
 def init_pyghidra_context(
@@ -146,6 +161,41 @@ def init_pyghidra_context(
     return mcp
 
 
+def init_gui_context(
+    mcp: FastMCP,
+    *,
+    project_spec: ProjectSpec,
+    input_paths: list[Path],
+) -> FastMCP:
+    logger.info("Waiting for Ghidra GUI project...")
+    gui_context = GuiPyGhidraContext(project_spec=project_spec)
+    if input_paths:
+        logger.info("Importing/opening GUI binaries: %s", ", ".join(map(str, input_paths)))
+        gui_context.import_binaries(input_paths)
+    mcp._pyghidra_context = gui_context  # type: ignore
+    logger.info("GUI-backed server initialized")
+    return mcp
+
+
+def run_mcp_server(mcp: FastMCP, transport: str) -> None:
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    elif transport in ["streamable-http", "http"]:
+        mcp.run(transport="streamable-http")
+    elif transport == "sse":
+        import warnings
+
+        warnings.warn(
+            "SSE transport is deprecated per the MCP spec (June 2025). "
+            "Use --transport streamable-http instead.",
+            DeprecationWarning,
+            stacklevel=1,
+        )
+        mcp.run(transport="sse")
+    else:
+        raise ValueError(f"Invalid transport: {transport}")
+
+
 # MCP Server Entry Point
 # ---------------------------------------------------------------------------------
 
@@ -218,6 +268,15 @@ def init_pyghidra_context(
     default=False,
     show_default=True,
     help="Wait for initial project analysis to complete before starting the server.",
+)
+@optgroup.option(
+    "--gui/--no-gui",
+    default=False,
+    show_default=True,
+    help=(
+        "Launch Ghidra GUI in-process and serve MCP over HTTP against GUI-open programs. "
+        "Cannot attach to an already-running external Ghidra process."
+    ),
 )
 # --- Project Options ---
 @optgroup.group("Project Management")
@@ -297,6 +356,7 @@ def main(
     gzfs_path: str | None,
     max_workers: int,
     wait_for_analysis: bool,
+    gui: bool,
     list_project_binaries: bool,
     delete_project_binary: str | None,
     sym_file_path: str | None,
@@ -310,25 +370,57 @@ def main(
     For streamable-http and sse, it will start an HTTP server on the specified port (default 8000).
 
     """
-    # Handle both .gpr files and directory paths
-    if project_path.suffix.lower() == ".gpr":
-        # Check constraint: cannot use --project-name with .gpr files
-        if project_name != "my_project":  # project_name was explicitly provided (not default)
-            raise click.BadParameter("Cannot use --project-name when specifying a .gpr file")
+    try:
+        project_spec = ProjectSpec.from_cli(
+            project_path,
+            project_name,
+            default_project_name=DEFAULT_PROJECT_NAME,
+        )
+    except ValueError as e:
+        raise click.BadParameter(str(e)) from e
 
-        # Direct .gpr opening - create pyghidra-mcp alongside existing project
-        project_directory = str(project_path.parent)
-        project_name = project_path.stem
-        pyghidra_mcp_dir = project_path.parent / f"{project_name}-pyghidra-mcp"
-    else:
-        # Directory-based opening - create self-contained project
-        # Use provided project_name (defaults to my_project)
-        # This creates the structure:
-        # project_path/project_name.gpr, project_path/project_name-pyghidra-mcp/, etc.
-        project_directory = str(project_path)
-        pyghidra_mcp_dir = project_path / f"{project_name}-pyghidra-mcp"
+    project_directory = str(project_spec.project_directory)
+    project_name = project_spec.project_name
+    pyghidra_mcp_dir = project_spec.pyghidra_mcp_dir
     mcp.settings.port = port
     mcp.settings.host = host
+
+    if gui:
+        if transport == "stdio":
+            raise click.UsageError("--gui requires --transport streamable-http or --transport http")
+        if transport == "sse":
+            raise click.UsageError("--gui requires --transport streamable-http or --transport http")
+        if list_project_binaries or delete_project_binary:
+            raise click.UsageError("GUI mode does not support project-management CLI actions yet")
+        if not project_spec.gpr_path.exists():
+            raise click.UsageError(
+                f"GUI mode currently requires an existing Ghidra project: {project_spec.gpr_path}"
+            )
+
+        register_gui_tools(mcp)
+        ensure_macos_framework_python()
+        launcher = GuiPyGhidraMcpLauncher(project_spec.gpr_path)
+        launcher.start()
+
+        def gui_server_thread() -> None:
+            init_gui_context(mcp=mcp, project_spec=project_spec, input_paths=input_paths)
+            run_mcp_server(mcp, transport)
+
+        server_thread = threading.Thread(
+            target=gui_server_thread,
+            name="pyghidra-mcp-gui-server",
+            daemon=True,
+        )
+        server_thread.start()
+        try:
+            launcher.run_gui_event_loop()
+        finally:
+            launcher.request_shutdown()
+            launcher.wait_for_shutdown()
+            context = getattr(mcp, "_pyghidra_context", None)
+            if context is not None:
+                context.close()
+        return
 
     init_pyghidra_context(
         mcp=mcp,
@@ -352,22 +444,7 @@ def main(
     )
 
     try:
-        if transport == "stdio":
-            mcp.run(transport="stdio")
-        elif transport in ["streamable-http", "http"]:
-            mcp.run(transport="streamable-http")
-        elif transport == "sse":
-            import warnings
-
-            warnings.warn(
-                "SSE transport is deprecated per the MCP spec (June 2025). "
-                "Use --transport streamable-http instead.",
-                DeprecationWarning,
-                stacklevel=1,
-            )
-            mcp.run(transport="sse")
-        else:
-            raise ValueError(f"Invalid transport: {transport}")
+        run_mcp_server(mcp, transport)
     finally:
         mcp._pyghidra_context.close()  # type: ignore
 
