@@ -1,7 +1,7 @@
 # PyGhidra MCP Makefile
 # Development and deployment commands for the PyGhidra MCP server
 
-.PHONY: help install install-dev run test test-integration test-unit lint format typecheck clean pre-commit-install check dev build
+.PHONY: help install install-dev run test test-integration test-integration-fast test-integration-gui test-unit lint format typecheck clean pre-commit-install check dev build
 
 # Default target
 help:
@@ -14,6 +14,8 @@ help:
 	@echo "  test               Run the full test suite (unit and integration)"
 	@echo "  test-unit          Run unit tests"
 	@echo "  test-integration   Run integration tests"
+	@echo "  test-integration-fast Run the lightweight integration smoke test used in pre-commit"
+	@echo "  test-integration-gui Run GUI integration tests (requires Ghidra, GUI support)"
 	@echo "  lint               Check code style with ruff"
 	@echo "  format             Format code with ruff"
 	@echo "  typecheck          Run type checking with ruff"
@@ -49,6 +51,14 @@ test-unit:
 test-integration:
 	@echo "Running integration tests..."
 	uv run pytest tests/integration/ -v
+
+test-integration-fast:
+	@echo "Running lightweight integration smoke test..."
+	uv run pytest tests/integration/test_concurrent_streamable_client.py -v --doctest-modules
+
+test-integration-gui:
+	@echo "Running GUI integration tests..."
+	uv run pytest tests/integration/test_gui_smoke.py tests/integration/test_gui_background_indexing.py -v
 
 # Code quality targets
 lint:

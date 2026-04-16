@@ -72,7 +72,7 @@ def register_gui_tools(server: FastMCP) -> None:
 register_common_tools(mcp)
 
 
-def init_pyghidra_context(
+def init_pyghidra_context(  # noqa: C901
     mcp: FastMCP,
     *,
     input_paths: list[Path],
@@ -144,13 +144,20 @@ def init_pyghidra_context(
             click.echo(f"Error: {e}", err=True)
         sys.exit(0)
 
+    imported_programs: list[str] = []
     if len(bin_paths) > 0:
         logger.info(f"Adding new bins: {', '.join(map(str, bin_paths))}")
         logger.info(f"Importing binaries to {project_directory}")
-        pyghidra_context.import_binaries(bin_paths)
+        imported_programs = pyghidra_context.import_binaries(bin_paths)
 
-    logger.info(f"Analyzing project: {pyghidra_context.project}")
-    pyghidra_context.analyze_project()
+    if imported_programs or force_analysis or wait_for_analysis:
+        logger.info(f"Analyzing project: {pyghidra_context.project}")
+        pyghidra_context.analyze_project()
+        for binary_name in imported_programs:
+            pyghidra_context.schedule_indexing(binary_name)
+    else:
+        logger.info("Skipping full-project analysis on startup; using existing project state.")
+        pyghidra_context.schedule_startup_indexing()
 
     if len(pyghidra_context.list_binaries()) == 0:
         logger.warning("No binaries were imported and none exist in the project.")
@@ -172,6 +179,7 @@ def init_gui_context(
     if input_paths:
         logger.info("Importing/opening GUI binaries: %s", ", ".join(map(str, input_paths)))
         gui_context.import_binaries(input_paths)
+    gui_context.schedule_startup_indexing()
     mcp._pyghidra_context = gui_context  # type: ignore
     logger.info("GUI-backed server initialized")
     return mcp

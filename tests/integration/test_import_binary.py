@@ -35,6 +35,17 @@ int main() {
     os.unlink(bin_file)
 
 
+@pytest.fixture()
+def raw_blob_for_import():
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".bin", delete=False) as f:
+        f.write(bytes(range(256)) * 4)
+        blob_file = f.name
+
+    yield os.path.abspath(blob_file)
+
+    os.unlink(blob_file)
+
+
 @pytest.mark.asyncio
 async def test_import_binary(
     test_binary_for_import, server_params_no_input, find_binary_in_list_response
@@ -55,6 +66,7 @@ async def test_import_binary(
 
             content = response.content[0].text
             assert test_binary_for_import in content
+            assert '"queued_count": 1' in content
 
             ready = False
             for _ in range(240):
@@ -70,3 +82,35 @@ async def test_import_binary(
                     break
 
             assert ready
+
+
+@pytest.mark.asyncio
+async def test_import_raw_binary_single_file(
+    raw_blob_for_import, server_params_no_input, find_binary_in_list_response
+):
+    async with stdio_client(server_params_no_input) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            raw_binary_name = PyGhidraContext._gen_unique_bin_name(raw_blob_for_import)
+
+            response = await session.call_tool(
+                "import_binary", {"binary_path": raw_blob_for_import}
+            )
+
+            content = response.content[0].text
+            assert raw_blob_for_import in content
+            assert '"queued_count": 1' in content
+            assert '"skipped_count": 0' in content
+
+            imported = False
+            for _ in range(240):
+                await asyncio.sleep(1)
+
+                response = await session.call_tool("list_project_binaries", {})
+                program = find_binary_in_list_response(response, raw_binary_name)
+                if program:
+                    imported = True
+                    break
+
+            assert imported, f"Raw binary {raw_binary_name} did not appear in project"

@@ -79,6 +79,48 @@ jobs:
         path: junit/integration-test-results-${{ matrix.image }}.xml
         retention-days: 7
 
+  test-linux-gui:
+    name: test-linux-gui (12.0ghidra3.13python-bookworm)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Overwrite original devcontainer with workflow devcontainer
+      run: cp .github/workflows/devcontainer.json .devcontainer/devcontainer.json
+
+    - name: Run GUI integration smoke tests on devcontainer
+      env:
+        DC_IMAGE_TAG: "12.0ghidra3.13python-bookworm"
+      uses: devcontainers/ci@v0.3
+      with:
+        imageName: ghcr.io/clearbluejar/ghidra-python
+        cacheFrom: ghcr.io/clearbluejar/ghidra-python
+        imageTag: ${{ env.DC_IMAGE_TAG }}
+        push: never
+        runCmd: |
+          pip install --upgrade pip
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -e .[dev]
+
+          Xvfb :99 -nolisten tcp &
+          export DISPLAY=:99
+
+          mkdir -p junit
+          python -m pytest \
+            tests/integration/test_gui_smoke.py \
+            tests/integration/test_gui_background_indexing.py \
+            --junitxml=junit/gui-integration-test-results.xml
+
+    - name: Upload GUI integration test results
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: gui-integration-test-results
+        path: junit/gui-integration-test-results.xml
+        retention-days: 7
+
   test-macos:
     name: test-macos (${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python)
     runs-on: macos-latest

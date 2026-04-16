@@ -2,6 +2,7 @@ import sys
 import types
 from unittest.mock import Mock, call
 
+import pyghidra_mcp.context as context_module
 from pyghidra_mcp.context import PyGhidraContext
 
 
@@ -64,3 +65,58 @@ def test_list_program_infos_returns_loaded_programs():
     }
 
     assert context.list_program_infos() == ["one-info", "two-info"]
+
+
+def test_get_program_info_schedules_indexing_for_ready_binary():
+    context = PyGhidraContext.__new__(PyGhidraContext)
+    program_info = Mock()
+    program_info.analysis_complete = True
+    context.programs = {"/bin/sample": program_info}
+    context.schedule_indexing = Mock()
+
+    result = context.get_program_info("/bin/sample")
+
+    assert result is program_info
+    context.schedule_indexing.assert_called_once_with("/bin/sample")
+
+
+def test_schedule_startup_indexing_skips_large_projects():
+    context = PyGhidraContext.__new__(PyGhidraContext)
+    context.programs = {f"/bin/{i}": Mock(analysis_complete=True) for i in range(11)}
+    context.schedule_indexing = Mock()
+
+    context.schedule_startup_indexing(max_binaries=10)
+
+    context.schedule_indexing.assert_not_called()
+
+
+def test_schedule_startup_indexing_indexes_small_projects():
+    context = PyGhidraContext.__new__(PyGhidraContext)
+    program_a = Mock()
+    program_a.name = "/bin/a"
+    program_a.analysis_complete = True
+    program_b = Mock()
+    program_b.name = "/bin/b"
+    program_b.analysis_complete = True
+    context.programs = {"/bin/a": program_a, "/bin/b": program_b}
+    context.schedule_indexing = Mock()
+
+    context.schedule_startup_indexing(max_binaries=10)
+
+    context.schedule_indexing.assert_has_calls([call("/bin/a"), call("/bin/b")])
+
+
+def test_is_binary_file_uses_ghidra_importability(monkeypatch, tmp_path):
+    context = PyGhidraContext.__new__(PyGhidraContext)
+    candidate = tmp_path / "sample.bin"
+    candidate.write_bytes(b"data")
+    checked: list = []
+
+    def fake_is_ghidra_importable(path):
+        checked.append(path)
+        return True
+
+    monkeypatch.setattr(context_module, "is_ghidra_importable", fake_is_ghidra_importable)
+
+    assert context._is_binary_file(candidate) is True
+    assert checked == [candidate]

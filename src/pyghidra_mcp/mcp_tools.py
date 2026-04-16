@@ -25,6 +25,7 @@ from pyghidra_mcp.models import (
     ExportInfos,
     GotoResponse,
     ImportInfos,
+    ImportRequestResult,
     OpenProgramInfo,
     OpenProgramInfos,
     ProgramInfos,
@@ -407,13 +408,7 @@ def gen_callgraph(
 
 
 @mcp_error_handler
-def import_binary(binary_path: str, ctx: Context) -> str:
+def import_binary(binary_path: str, ctx: Context) -> ImportRequestResult:
     """Import a binary into the project from a file path."""
-    # We would like to do context progress updates, but until that is more
-    # widely supported by clients, we will resort to this
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
-    pyghidra_context.import_binary_backgrounded(binary_path)
-    return (
-        f"Importing {binary_path} in the background."
-        "When ready, it will appear analyzed in binary list."
-    )
+    return pyghidra_context.import_binary_backgrounded(binary_path)
