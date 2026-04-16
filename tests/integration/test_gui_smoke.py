@@ -21,9 +21,22 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-async def _wait_for_http_server(base_url: str, timeout: int = 240) -> None:
+async def _wait_for_http_server(
+    base_url: str,
+    proc: subprocess.Popen[str],
+    timeout: int = 240,
+) -> None:
     async with aiohttp.ClientSession() as session:
         for _ in range(timeout):
+            if proc.poll() is not None:
+                stdout = proc.stdout.read() if proc.stdout else ""
+                stderr = proc.stderr.read() if proc.stderr else ""
+                raise RuntimeError(
+                    "GUI server exited before startup.\n"
+                    f"exit_code={proc.returncode}\n"
+                    f"stdout:\n{stdout}\n"
+                    f"stderr:\n{stderr}"
+                )
             try:
                 async with session.get(f"{base_url}/mcp") as response:
                     if response.status == 406:
@@ -117,7 +130,7 @@ async def test_gui_smoke(
     )
 
     try:
-        await _wait_for_http_server(base_url)
+        await _wait_for_http_server(base_url, proc)
 
         async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
             async with ClientSession(read, write) as session:

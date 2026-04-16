@@ -409,10 +409,16 @@ def main(
         ensure_macos_framework_python()
         launcher = GuiPyGhidraMcpLauncher(project_spec.gpr_path)
         launcher.start()
+        gui_server_error: list[BaseException] = []
 
         def gui_server_thread() -> None:
-            init_gui_context(mcp=mcp, project_spec=project_spec, input_paths=input_paths)
-            run_mcp_server(mcp, transport)
+            try:
+                init_gui_context(mcp=mcp, project_spec=project_spec, input_paths=input_paths)
+                run_mcp_server(mcp, transport)
+            except BaseException as exc:
+                gui_server_error.append(exc)
+                logger.exception("GUI MCP server failed during startup or runtime.")
+                launcher.request_shutdown()
 
         server_thread = threading.Thread(
             target=gui_server_thread,
@@ -428,6 +434,8 @@ def main(
             context = getattr(mcp, "_pyghidra_context", None)
             if context is not None:
                 context.close()
+        if gui_server_error:
+            raise RuntimeError("GUI MCP server failed to start.") from gui_server_error[0]
         return
 
     init_pyghidra_context(

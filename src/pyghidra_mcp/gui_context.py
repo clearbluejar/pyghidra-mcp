@@ -33,7 +33,7 @@ class GuiPyGhidraContext(IndexingMixin):
         project_spec: ProjectSpec,
         *,
         pyghidra_mcp_dir: Path | None = None,
-        readiness_timeout: float = 30.0,
+        readiness_timeout: float = 240.0,
         readiness_interval: float = 0.2,
     ):
         self.project_spec = project_spec
