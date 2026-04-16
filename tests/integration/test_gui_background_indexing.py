@@ -49,6 +49,9 @@ async def test_gui_background_indexing_eventually_enables_string_search(
     find_binary_in_list_response,
 ):
     gui_env = _gui_env_or_skip(dict(ghidra_env), is_macos)
+    headless_env = dict(ghidra_env)
+    if not is_macos:
+        headless_env.pop("DISPLAY", None)
     fixture_name = "gui_background_indexing"
     project_dir = isolated_project_root / fixture_name
     project_name = f"{fixture_name}_project"
@@ -65,7 +68,7 @@ async def test_gui_background_indexing_eventually_enables_string_search(
             "--wait-for-analysis",
             test_binary,
         ],
-        env=gui_env,
+        env=headless_env,
     )
 
     binary_name = PyGhidraContext._gen_unique_bin_name(test_binary)

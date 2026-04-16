@@ -51,6 +51,9 @@ async def test_gui_smoke(
     find_binary_in_list_response,
 ):
     gui_env = _gui_env_or_skip(dict(ghidra_env))
+    headless_env = dict(ghidra_env)
+    if platform.system() == "Linux":
+        headless_env.pop("DISPLAY", None)
     fixture_name = "gui_smoke"
     project_dir = isolated_project_root / fixture_name
     project_name = f"{fixture_name}_project"
@@ -67,7 +70,7 @@ async def test_gui_smoke(
             "--wait-for-analysis",
             test_binary,
         ],
-        env=gui_env,
+        env=headless_env,
     )
 
     binary_name = PyGhidraContext._gen_unique_bin_name(test_binary)
