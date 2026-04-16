@@ -2,6 +2,8 @@
 # ---------------------------------------------------------------------------------
 import json
 import logging
+import os
+import signal
 import sys
 import threading
 from collections.abc import AsyncIterator
@@ -410,6 +412,7 @@ def main(
         launcher = GuiPyGhidraMcpLauncher(project_spec.gpr_path)
         launcher.start()
         gui_server_error: list[BaseException] = []
+        gui_server_failed = threading.Event()
 
         def gui_server_thread() -> None:
             try:
@@ -417,8 +420,20 @@ def main(
                 run_mcp_server(mcp, transport)
             except BaseException as exc:
                 gui_server_error.append(exc)
+                gui_server_failed.set()
                 logger.exception("GUI MCP server failed during startup or runtime.")
                 launcher.request_shutdown()
+
+        def gui_failure_monitor() -> None:
+            gui_server_failed.wait()
+            if not gui_server_failed.is_set():
+                return
+            launcher.wait_for_shutdown(timeout=1.0)
+            try:
+                sys.stderr.flush()
+                sys.stdout.flush()
+            finally:
+                os.kill(os.getpid(), signal.SIGTERM)
 
         server_thread = threading.Thread(
             target=gui_server_thread,
@@ -426,6 +441,11 @@ def main(
             daemon=True,
         )
         server_thread.start()
+        threading.Thread(
+            target=gui_failure_monitor,
+            name="pyghidra-mcp-gui-failure-monitor",
+            daemon=True,
+        ).start()
         try:
             launcher.run_gui_event_loop()
         finally:

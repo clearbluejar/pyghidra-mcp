@@ -44,7 +44,18 @@ async def _wait_for_http_server(
             except aiohttp.ClientConnectorError:
                 pass
             await asyncio.sleep(1)
-    raise RuntimeError("GUI server did not start in time")
+    proc.terminate()
+    try:
+        stdout, stderr = proc.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate(timeout=10)
+    raise RuntimeError(
+        "GUI server did not start in time.\n"
+        f"exit_code={proc.returncode}\n"
+        f"stdout:\n{stdout}\n"
+        f"stderr:\n{stderr}"
+    )
 
 
 def _gui_env_or_skip(env: dict[str, str]) -> dict[str, str]:
