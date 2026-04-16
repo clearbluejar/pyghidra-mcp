@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import platform
 import signal
 import socket
@@ -36,6 +37,8 @@ async def _wait_for_http_server(base_url: str, timeout: int = 240) -> None:
 def _gui_env_or_skip(env: dict[str, str]) -> dict[str, str]:
     if platform.system() == "Linux" and not env.get("DISPLAY"):
         pytest.skip("GUI smoke test requires DISPLAY on Linux (e.g. Xvfb in CI).")
+    if platform.system() == "Darwin" and os.environ.get("GITHUB_ACTIONS") == "true":
+        pytest.skip("GUI smoke test is not supported on GitHub-hosted macOS runners.")
     return env
 
 
