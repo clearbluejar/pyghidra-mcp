@@ -119,34 +119,27 @@ async def decompile_function(
 
 @mcp_error_handler
 def search_symbols_by_name(
-    binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
+    binary_name: str,
+    query: str,
+    ctx: Context,
+    functions_only: bool = False,
+    offset: int = 0,
+    limit: int = 25,
 ) -> SymbolSearchResults:
     """Search symbols by regex pattern (case-insensitive).
 
     Supports full regex (e.g. ``^main$``, ``func.*init``). Plain substrings
-    still work since they are valid regex. Includes functions, labels,
-    classes, namespaces, and variables.
-    """
-    pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
-    program_info = pyghidra_context.get_program_info(binary_name)
-    tools = GhidraTools(program_info)
-    symbols = tools.search_symbols_by_name(query, offset, limit)
-    return SymbolSearchResults(symbols=symbols)
-
-
-@mcp_error_handler
-def search_functions_by_name(
-    binary_name: str, query: str, ctx: Context, offset: int = 0, limit: int = 25
-) -> SymbolSearchResults:
-    """Search functions only by regex pattern, case-insensitive (no labels/variables).
-
-    Supports full regex (e.g. ``^main$``, ``func.*init``). Plain substrings
     still work since they are valid regex.
+
+    Set ``functions_only=True`` to search only function symbols
+    (excludes labels, variables, classes, namespaces).
     """
     pyghidra_context: PyGhidraContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
-    symbols = tools.search_functions_by_name(query, offset, limit)
+    symbols = tools.search_symbols_by_name(
+        query, functions_only=functions_only, offset=offset, limit=limit
+    )
     return SymbolSearchResults(symbols=symbols)
 
 

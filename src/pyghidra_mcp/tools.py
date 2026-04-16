@@ -317,80 +317,54 @@ class GhidraTools:
 
         return strings
 
+    @staticmethod
+    def _matches_query(query: str, symbol_name: str) -> bool:
+        """Check if a symbol name matches a query (regex with substring fallback)."""
+        try:
+            return bool(re.search(query, symbol_name, re.IGNORECASE))
+        except re.error:
+            return query.lower() in symbol_name.lower()
+
+    def _symbol_to_info(self, symbol, rm) -> SymbolInfo:
+        """Convert a Ghidra Symbol to a SymbolInfo model."""
+        ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
+        return SymbolInfo(
+            name=symbol.getName(),
+            address=str(symbol.getAddress()),
+            type=str(symbol.getSymbolType()),
+            namespace=str(symbol.getParentNamespace()),
+            source=str(symbol.getSource()),
+            refcount=ref_count,
+            external=symbol.isExternal(),
+        )
+
     @handle_exceptions
     def search_symbols_by_name(
-        self, query: str, offset: int = 0, limit: int = 100
+        self, query: str, functions_only: bool = False, offset: int = 0, limit: int = 100
     ) -> list[SymbolInfo]:
-        """Searches for symbols within a binary by name (supports regex)."""
+        """Searches for symbols within a binary by name (supports regex).
+
+        When functions_only=True, searches only function symbols (no labels/variables).
+        """
 
         if not query:
             raise ValueError("Query string is required")
 
-        symbols_info = []
-        if _REGEX_META.search(query):
-            symbols = self.get_all_symbols(include_externals=True)
-        else:
-            symbols = self.find_symbols(query)
         rm = self.program.getReferenceManager()
+        is_regex = bool(_REGEX_META.search(query))
 
-        for symbol in symbols:
-            try:
-                if not re.search(query, symbol.getName(True), re.IGNORECASE):
-                    continue
-            except re.error:
-                if query.lower() not in symbol.getName(True).lower():
-                    continue
-            ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
-            symbols_info.append(
-                SymbolInfo(
-                    name=symbol.name,
-                    address=str(symbol.getAddress()),
-                    type=str(symbol.getSymbolType()),
-                    namespace=str(symbol.getParentNamespace()),
-                    source=str(symbol.getSource()),
-                    refcount=ref_count,
-                    external=symbol.isExternal(),
-                )
-            )
-        return symbols_info[offset : limit + offset]
-
-    @handle_exceptions
-    def search_functions_by_name(
-        self, query: str, offset: int = 0, limit: int = 100
-    ) -> list[SymbolInfo]:
-        """Searches for functions within a binary by name (supports regex)."""
-
-        if not query:
-            raise ValueError("Query string is required")
-
-        symbols_info = []
-        if _REGEX_META.search(query):
-            functions = self.get_all_functions(include_externals=True)
+        if functions_only:
+            sources = self.get_all_functions(True) if is_regex else self.find_functions(query)
+            symbols = (func.getSymbol() for func in sources)
         else:
-            functions = self.find_functions(query)
-        rm = self.program.getReferenceManager()
+            symbols = self.get_all_symbols(True) if is_regex else self.find_symbols(query)
 
-        for func in functions:
-            symbol = func.getSymbol()
-            try:
-                if not re.search(query, symbol.getName(True), re.IGNORECASE):
-                    continue
-            except re.error:
-                if query.lower() not in symbol.getName(True).lower():
-                    continue
-            ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
-            symbols_info.append(
-                SymbolInfo(
-                    name=symbol.getName(),
-                    address=str(symbol.getAddress()),
-                    type=str(symbol.getSymbolType()),
-                    namespace=str(symbol.getParentNamespace()),
-                    source=str(symbol.getSource()),
-                    refcount=ref_count,
-                    external=symbol.isExternal(),
-                )
-            )
-        return symbols_info[offset : limit + offset]
+        results = [
+            self._symbol_to_info(sym, rm)
+            for sym in symbols
+            if self._matches_query(query, sym.getName(True))
+        ]
+        return results[offset : limit + offset]
 
     @handle_exceptions
     def list_exports(
