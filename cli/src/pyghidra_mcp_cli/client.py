@@ -218,21 +218,27 @@ class PyGhidraMcpClient:
         return extracted
 
     async def search_symbols(
-        self, binary_name: str, query: str, offset: int = 0, limit: int = 25
+        self,
+        binary_name: str,
+        query: str,
+        functions_only: bool = False,
+        offset: int = 0,
+        limit: int = 25,
     ) -> dict[str, Any]:
         """Search for symbols by name."""
         if not self._connected:
             raise ClientError("Not connected")
 
-        result = await self._session.call_tool(
-            "search_symbols_by_name",
-            {
-                "binary_name": binary_name,
-                "query": query,
-                "offset": offset,
-                "limit": limit,
-            },
-        )
+        args: dict[str, Any] = {
+            "binary_name": binary_name,
+            "query": query,
+            "offset": offset,
+            "limit": limit,
+        }
+        if functions_only:
+            args["functions_only"] = True
+
+        result = await self._session.call_tool("search_symbols_by_name", args)
         return self._extract_result(result)
 
     async def search_code(

@@ -28,8 +28,13 @@ def search() -> None:
 @click.argument("query")
 @click.option("-o", "--offset", type=int, default=0, help="Offset for pagination.")
 @click.option("-l", "--limit", type=int, default=25, help="Maximum results to return.")
+@click.option(
+    "-f", "--functions-only", is_flag=True, default=False, help="Search only function symbols."
+)
 @click.pass_context
-def symbols(ctx: click.Context, binary_name: str, query: str, offset: int, limit: int) -> None:
+def symbols(
+    ctx: click.Context, binary_name: str, query: str, offset: int, limit: int, functions_only: bool
+) -> None:
     """Search for symbols by name in a binary."""
 
     client = PyGhidraMcpClient(
@@ -39,7 +44,9 @@ def symbols(ctx: click.Context, binary_name: str, query: str, offset: int, limit
 
     async def run():
         async with client:
-            result = await client.search_symbols(binary_name, query, offset=offset, limit=limit)
+            result = await client.search_symbols(
+                binary_name, query, functions_only=functions_only, offset=offset, limit=limit
+            )
             format_output(result, ctx.obj["OUTPUT_FORMAT"], ctx.obj["VERBOSE"])
 
     import asyncio

@@ -44,7 +44,6 @@ mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
 # Register tools from mcp_tools module
 mcp.tool()(mcp_tools.decompile_function)
 mcp.tool()(mcp_tools.search_symbols_by_name)
-mcp.tool()(mcp_tools.search_functions_by_name)
 mcp.tool()(mcp_tools.search_code)
 mcp.tool()(mcp_tools.list_project_binaries)
 mcp.tool()(mcp_tools.list_project_binary_metadata)

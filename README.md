@@ -190,7 +190,10 @@ pyghidra-mcp-cli list binaries
 # Decompile a function
 pyghidra-mcp-cli decompile --binary ls main
 
-# Search for symbols
+# Decompile with callees, referenced strings, and cross-references
+pyghidra-mcp-cli decompile --binary ls main --callees --strings --xrefs
+
+# Search for symbols (supports regex patterns)
 pyghidra-mcp-cli search symbols --binary ls printf -l 10
 ```
 
@@ -397,7 +400,7 @@ Per-item errors are returned inline (other targets still succeed):
 
 #### Search Symbols
 
-- `search_symbols_by_name(binary_name: str, query: str, offset: int = 0, limit: int = 25)`: Search for symbols within a binary by name (case-insensitive substring).
+- `search_symbols_by_name(binary_name: str, query: str, functions_only: bool = False, offset: int = 0, limit: int = 25)`: Search for symbols within a binary by name. Supports regex patterns (e.g. `^main$`, `func.*one`) with case-insensitive matching, or plain substring queries. Set `functions_only=True` to exclude labels, variables, and other non-function symbols.
 
 ### Prompts
 

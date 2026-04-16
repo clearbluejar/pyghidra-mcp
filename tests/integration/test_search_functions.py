@@ -19,8 +19,8 @@ async def test_search_functions_by_name(server_params, func_prefix):
             binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
 
             response = await session.call_tool(
-                "search_functions_by_name",
-                {"binary_name": binary_name, "query": "function_"},
+                "search_symbols_by_name",
+                {"binary_name": binary_name, "query": "function_", "functions_only": True},
             )
 
             search_results = SymbolSearchResults.model_validate_json(response.content[0].text)
