@@ -99,6 +99,9 @@ jobs:
         imageTag: ${{ env.DC_IMAGE_TAG }}
         push: never
         runCmd: |
+          sudo apt-get update
+          sudo apt-get install -y libxtst6 libxi6 libxrender1
+
           pip install --upgrade pip
           python -m venv .venv
           source .venv/bin/activate
