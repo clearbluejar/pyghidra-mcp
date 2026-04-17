@@ -53,8 +53,9 @@ class GuiPyGhidraMcpLauncher(PyGhidraLauncher):
 
     def _launch(self) -> None:
         """Start the Ghidra GUI without blocking the caller."""
-        from ghidra import Ghidra
         from java.lang import Runtime, Thread  # type: ignore
+
+        from ghidra import Ghidra
 
         if sys.platform == "win32":
             appid = ctypes.c_wchar_p(self.app_info.name)

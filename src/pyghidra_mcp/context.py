@@ -642,14 +642,13 @@ class PyGhidraContext(IndexingMixin):
         verbose_analysis: bool = False,
     ):
         # Import symbol utilities from ghidrecomp
-        from ghidrecomp.utility import get_pdb, set_pdb, set_remote_pdbs, setup_symbol_server
-
         from ghidra.app.script import GhidraScriptUtil
         from ghidra.framework.model import DomainFile
         from ghidra.program.flatapi import FlatProgramAPI
         from ghidra.program.model.listing import Program
         from ghidra.program.util import GhidraProgramUtilities
         from ghidra.util.task import ConsoleTaskMonitor
+        from ghidrecomp.utility import get_pdb, set_pdb, set_remote_pdbs, setup_symbol_server
 
         df = df_or_prog
         if not isinstance(df_or_prog, DomainFile):
@@ -873,13 +872,12 @@ class PyGhidraContext(IndexingMixin):
         """
         Apply GDT to program
         """
-        from java.io import File  # type: ignore
-        from java.util import List  # type: ignore
-
         from ghidra.app.cmd.function import ApplyFunctionDataTypesCmd
         from ghidra.program.model.data import FileDataTypeManager
         from ghidra.program.model.symbol import SourceType
         from ghidra.util.task import ConsoleTaskMonitor
+        from java.io import File  # type: ignore
+        from java.util import List  # type: ignore
 
         gdt_path = Path(gdt_path)
 
