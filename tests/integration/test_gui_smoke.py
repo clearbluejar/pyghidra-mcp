@@ -155,6 +155,7 @@ async def test_gui_smoke(
     proc = subprocess.Popen(
         [
             "python",
+            "-u",
             "-m",
             "pyghidra_mcp",
             "--gui",
@@ -167,7 +168,7 @@ async def test_gui_smoke(
             "--project-path",
             str(project_gpr),
         ],
-        env=gui_env,
+        env={**gui_env, "PYTHONUNBUFFERED": "1"},
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
