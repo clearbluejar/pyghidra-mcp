@@ -818,7 +818,26 @@ class GhidraTools:
 
     @handle_exceptions
     def set_comment(self, target: str, comment: str, comment_type: str) -> dict:
-        from ghidra.program.model.listing import CommentType
+        try:
+            from ghidra.program.model.listing import CommentType
+
+            listing_comment_types = {
+                "plate": CommentType.PLATE,
+                "pre": CommentType.PRE,
+                "eol": CommentType.EOL,
+                "post": CommentType.POST,
+                "repeatable": CommentType.REPEATABLE,
+            }
+        except ImportError:
+            from ghidra.program.model.listing import CodeUnit
+
+            listing_comment_types = {
+                "plate": CodeUnit.PLATE_COMMENT,
+                "pre": CodeUnit.PRE_COMMENT,
+                "eol": CodeUnit.EOL_COMMENT,
+                "post": CodeUnit.POST_COMMENT,
+                "repeatable": CodeUnit.REPEATABLE_COMMENT,
+            }
 
         normalized_type = comment_type.lower()
         if normalized_type == "decompiler":
@@ -838,13 +857,6 @@ class GhidraTools:
                 "comment_type": "decompiler",
             }
 
-        listing_comment_types = {
-            "plate": CommentType.PLATE,
-            "pre": CommentType.PRE,
-            "eol": CommentType.EOL,
-            "post": CommentType.POST,
-            "repeatable": CommentType.REPEATABLE,
-        }
         ghidra_comment_type = listing_comment_types.get(normalized_type)
         if ghidra_comment_type is None:
             allowed = ["decompiler", *listing_comment_types.keys()]

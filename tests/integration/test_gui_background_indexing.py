@@ -1,7 +1,5 @@
 import asyncio
 import json
-import os
-import platform
 import signal
 import socket
 import subprocess
@@ -91,27 +89,27 @@ async def _wait_for_http_server(  # noqa: C901
     )
 
 
-def _gui_env_or_skip(env: dict[str, str]) -> dict[str, str]:
-    if platform.system() == "Linux" and not env.get("DISPLAY"):
-        pytest.skip("GUI smoke test requires DISPLAY on Linux (e.g. Xvfb in CI).")
-    if platform.system() == "Darwin" and os.environ.get("GITHUB_ACTIONS") == "true":
-        pytest.skip("GUI smoke test is not supported on GitHub-hosted macOS runners.")
+def _gui_env_or_skip(env: dict[str, str], is_macos: bool) -> dict[str, str]:
+    if not is_macos and not env.get("DISPLAY"):
+        pytest.skip("GUI indexing test requires DISPLAY on Linux (e.g. Xvfb in CI).")
+    if is_macos and env.get("GITHUB_ACTIONS") == "true":
+        pytest.skip("GUI indexing test is not supported on GitHub-hosted macOS runners.")
     return env
 
 
 @pytest.mark.asyncio
-async def test_gui_smoke(
+async def test_gui_background_indexing_eventually_enables_string_search(
     test_binary,
     ghidra_env,
     isolated_project_root,
-    main_func_name,
+    is_macos,
     find_binary_in_list_response,
 ):
-    gui_env = _gui_env_or_skip(dict(ghidra_env))
+    gui_env = _gui_env_or_skip(dict(ghidra_env), is_macos)
     headless_env = dict(ghidra_env)
-    if platform.system() == "Linux":
+    if not is_macos:
         headless_env.pop("DISPLAY", None)
-    fixture_name = "gui_smoke"
+    fixture_name = "gui_background_indexing"
     project_dir = isolated_project_root / fixture_name
     project_name = f"{fixture_name}_project"
 
@@ -181,42 +179,31 @@ async def test_gui_smoke(
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                binaries = await session.call_tool("list_project_binaries", {})
-                program = find_binary_in_list_response(binaries, binary_name)
-                assert program is not None
-                assert program["analysis_complete"] is True
-
                 opened = await session.call_tool(
                     "open_program_in_gui",
                     {"binary_name": binary_name, "current": True},
                 )
                 opened_payload = json.loads(opened.content[0].text)
                 assert opened_payload["current"] is True
-                assert opened_payload["analysis_complete"] is True
 
-                goto_result = await session.call_tool(
-                    "goto",
-                    {
-                        "binary_name": binary_name,
-                        "target": main_func_name,
-                        "target_type": "function",
-                    },
-                )
-                goto_payload = json.loads(goto_result.content[0].text)
-                assert goto_payload["success"] is True
+                strings_indexed = False
+                for _ in range(240):
+                    binaries = await session.call_tool("list_project_binaries", {})
+                    program = find_binary_in_list_response(binaries, binary_name)
+                    if program and program["strings_indexed"]:
+                        strings_indexed = True
+                        break
+                    await asyncio.sleep(1)
 
-                comment_result = await session.call_tool(
-                    "set_comment",
-                    {
-                        "binary_name": binary_name,
-                        "target": main_func_name,
-                        "comment_type": "decompiler",
-                        "comment": "GUI smoke test comment.",
-                    },
+                assert strings_indexed
+
+                response = await session.call_tool(
+                    "search_strings",
+                    {"binary_name": binary_name, "query": "hello"},
                 )
-                comment_payload = json.loads(comment_result.content[0].text)
-                assert comment_payload["comment_type"] == "decompiler"
-                assert comment_payload["comment"] == "GUI smoke test comment."
+                payload = json.loads(response.content[0].text)
+                values = [entry["value"] for entry in payload["strings"]]
+                assert any("World" in value for value in values)
     finally:
         proc.send_signal(signal.SIGINT)
         try:

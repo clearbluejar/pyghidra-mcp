@@ -1,8 +1,10 @@
+import sys
 import threading
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
+import pyghidra_mcp.gui_context as gui_context_module
 from pyghidra_mcp.context import ProgramInfo
 from pyghidra_mcp.gui_context import GuiPyGhidraContext
 
@@ -111,3 +113,117 @@ def test_refresh_programs_resyncs_existing_program_state():
 
     assert context._sync_program_info.call_count == 1
     assert context.programs["/folder/sample"].analysis_complete is True
+
+
+def test_gui_get_program_info_schedules_indexing_for_ready_binary():
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    program_info = Mock()
+    program_info.analysis_complete = True
+    context._resolve_program_info = Mock(return_value=program_info)
+    context.schedule_indexing = Mock()
+
+    result = context.get_program_info("/folder/sample")
+
+    assert result is program_info
+    context.schedule_indexing.assert_called_once_with("/folder/sample")
+
+
+def test_gui_schedule_startup_indexing_uses_open_programs():
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    context._programs_lock = threading.RLock()
+    context.refresh_programs = Mock()
+    context.programs = {
+        "/folder/a": Mock(),
+        "/folder/b": Mock(),
+    }
+    context.schedule_indexing = Mock()
+
+    context.schedule_startup_indexing()
+
+    context.schedule_indexing.assert_has_calls([call("/folder/a"), call("/folder/b")])
+
+
+def test_gui_is_binary_file_uses_ghidra_importability(monkeypatch, tmp_path):
+    candidate = tmp_path / "sample.bin"
+    candidate.write_bytes(b"data")
+    checked: list = []
+
+    def fake_is_ghidra_importable(path):
+        checked.append(path)
+        return False
+
+    monkeypatch.setattr(gui_context_module, "is_ghidra_importable", fake_is_ghidra_importable)
+
+    assert GuiPyGhidraContext._is_binary_file(candidate) is False
+    assert checked == [candidate]
+
+
+def test_wait_for_gui_ready_opens_project_when_frontend_is_idle(monkeypatch, tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project_gpr = project_dir / "proj.gpr"
+    project_gpr.write_text("", encoding="utf-8")
+
+    project_spec = Mock(
+        project_directory=project_dir,
+        gpr_path=project_gpr,
+        project_name="proj",
+    )
+
+    opened_project = Mock()
+    project_manager = Mock(getLastOpenedProject=Mock(return_value="locator"))
+    front_end_tool = Mock(getProjectManager=Mock(return_value=project_manager))
+    app_info = Mock(
+        getActiveProject=Mock(side_effect=[None, opened_project]),
+        getFrontEndTool=Mock(return_value=front_end_tool),
+    )
+
+    monkeypatch.setitem(sys.modules, "ghidra.framework.main", Mock(AppInfo=app_info))
+    monkeypatch.setitem(
+        sys.modules,
+        "ghidra.framework.model",
+        Mock(ProjectLocator=Mock(return_value="locator")),
+    )
+    monkeypatch.setattr(gui_context_module, "_run_on_swing", Mock(return_value=opened_project))
+    monkeypatch.setattr(gui_context_module.time, "sleep", Mock())
+
+    project = GuiPyGhidraContext.wait_for_gui_ready(project_spec, timeout=1, interval=0)
+
+    assert project is opened_project
+    gui_context_module._run_on_swing.assert_called_once()
+    project_manager.getLastOpenedProject.assert_not_called()
+
+
+def test_wait_for_gui_ready_tolerates_frontend_not_running_yet(monkeypatch, tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project_gpr = project_dir / "proj.gpr"
+    project_gpr.write_text("", encoding="utf-8")
+
+    project_spec = Mock(
+        project_directory=project_dir,
+        gpr_path=project_gpr,
+        project_name="proj",
+    )
+
+    opened_project = Mock()
+    project_manager = Mock(getLastOpenedProject=Mock(return_value="locator"))
+    front_end_tool = Mock(getProjectManager=Mock(return_value=project_manager))
+    app_info = Mock(
+        getActiveProject=Mock(side_effect=[None, None, opened_project]),
+        getFrontEndTool=Mock(side_effect=[RuntimeError("frontend not ready"), front_end_tool]),
+    )
+
+    monkeypatch.setitem(sys.modules, "ghidra.framework.main", Mock(AppInfo=app_info))
+    monkeypatch.setitem(
+        sys.modules,
+        "ghidra.framework.model",
+        Mock(ProjectLocator=Mock(return_value="locator")),
+    )
+    monkeypatch.setattr(gui_context_module, "_run_on_swing", Mock(return_value=opened_project))
+    monkeypatch.setattr(gui_context_module.time, "sleep", Mock())
+
+    project = GuiPyGhidraContext.wait_for_gui_ready(project_spec, timeout=1, interval=0)
+
+    assert project is opened_project
+    gui_context_module._run_on_swing.assert_called_once()

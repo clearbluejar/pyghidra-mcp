@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from .context import ProgramInfo
-    from .models import ProgramInfo as ProgramInfoModel
+    from .models import ImportRequestResult, ProgramInfo as ProgramInfoModel
 
 
 class MCPContext(Protocol):
@@ -23,6 +23,6 @@ class MCPContext(Protocol):
 
     def delete_program(self, program_name: str) -> bool: ...
 
-    def import_binary_backgrounded(self, binary_path: str | Path) -> None: ...
+    def import_binary_backgrounded(self, binary_path: str | Path) -> "ImportRequestResult": ...
 
     def close(self, save: bool = True) -> None: ...

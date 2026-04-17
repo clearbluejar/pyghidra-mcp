@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import platform
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -16,16 +17,16 @@ from pyghidra_mcp.models import (
     BytesReadResult,
     CallGraphResult,
     CodeSearchResults,
+    CommentResponse,
     CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
     ImportInfos,
     ProgramInfos,
+    RenameResponse,
     StringSearchResults,
     SymbolSearchResults,
 )
-
-base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
 _IS_MACOS = platform.system() == "Darwin"
 _FUNC_PREFIX = "_" if _IS_MACOS else ""
@@ -33,7 +34,13 @@ _MAIN_FUNC_NAME = "entry" if _IS_MACOS else "main"
 _BASE_ADDRESS = "100000000" if _IS_MACOS else "100000"
 
 
-async def wait_for_server(timeout=120):
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+async def wait_for_server(base_url: str, timeout=120):
     async with aiohttp.ClientSession() as session:
         for _ in range(timeout):
             try:
@@ -46,7 +53,7 @@ async def wait_for_server(timeout=120):
         raise RuntimeError("Server did not start in time")
 
 
-async def wait_for_collections(test_binary, timeout: int = 120) -> None:
+async def wait_for_collections(base_url: str, test_binary, timeout: int = 120) -> None:
     """
     Repeatedly call `list_project_binaries` until all programs have both
     collections populated, or until *timeout* seconds elapse.
@@ -88,8 +95,14 @@ def streamable_project_args(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def streamable_server(test_binary, ghidra_env, streamable_project_args):
+def streamable_base_url():
+    return f"http://127.0.0.1:{_find_free_port()}"
+
+
+@pytest.fixture(scope="module")
+def streamable_server(test_binary, ghidra_env, streamable_project_args, streamable_base_url):
     """Fixture to start the pyghidra-mcp server in a separate process."""
+    port = int(streamable_base_url.rsplit(":", 1)[1])
     proc = subprocess.Popen(
         [
             "python",
@@ -99,13 +112,17 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args):
             "--wait-for-analysis",
             "--transport",
             "streamable-http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
             test_binary,
         ],
         env=ghidra_env,
     )
 
     try:
-        asyncio.run(wait_for_server())
+        asyncio.run(wait_for_server(streamable_base_url))
     except Exception:
         proc.terminate()
         proc.wait()
@@ -114,7 +131,7 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args):
     time.sleep(3)
 
     try:
-        asyncio.run(wait_for_collections(test_binary))
+        asyncio.run(wait_for_collections(streamable_base_url, test_binary))
     except Exception:
         proc.terminate()
         proc.wait()
@@ -122,12 +139,12 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args):
 
     time.sleep(2)
 
-    yield test_binary
+    yield test_binary, streamable_base_url
     proc.terminate()
     proc.wait()
 
 
-async def invoke_tool_concurrently(server_binary_path):
+async def invoke_tool_concurrently(base_url: str, server_binary_path):
     async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -173,16 +190,57 @@ async def invoke_tool_concurrently(server_binary_path):
             return responses
 
 
+async def invoke_mutation_tools(base_url: str, server_binary_path):
+    async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))
+
+            old_name = f"{_FUNC_PREFIX}function_two"
+            new_name = f"{old_name}_renamed"
+
+            rename_response = await session.call_tool(
+                "rename_function",
+                {
+                    "binary_name": binary_name,
+                    "name_or_address": old_name,
+                    "new_name": new_name,
+                },
+            )
+            comment_response = await session.call_tool(
+                "set_comment",
+                {
+                    "binary_name": binary_name,
+                    "target": new_name,
+                    "comment": "Renamed during concurrent streamable integration test.",
+                    "comment_type": "decompiler",
+                },
+            )
+            symbol_response = await session.call_tool(
+                "search_symbols_by_name",
+                {"binary_name": binary_name, "query": new_name},
+            )
+            decompile_response = await session.call_tool(
+                "decompile_function",
+                {"binary_name": binary_name, "name_or_address": new_name},
+            )
+
+            return rename_response, comment_response, symbol_response, decompile_response
+
+
 @pytest.mark.asyncio
 async def test_concurrent_streamable_client_invocations(streamable_server):
     """
     Tests concurrent client connections and tool invocations to the pyghidra-mcp server
     using streamable-http transport.
     """
+    streamable_binary, streamable_base_url = streamable_server
     num_clients = 6
     name_one = f"{_FUNC_PREFIX}function_one"
     name_two = f"{_FUNC_PREFIX}function_two"
-    tasks = [invoke_tool_concurrently(streamable_server) for _ in range(num_clients)]
+    tasks = [
+        invoke_tool_concurrently(streamable_base_url, streamable_binary) for _ in range(num_clients)
+    ]
     results = await asyncio.gather(*tasks)
 
     assert len(results) == num_clients
@@ -208,7 +266,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         program_infos = ProgramInfos(**program_infos_result)
         assert len(program_infos.programs) >= 1
         assert any(
-            os.path.basename(streamable_server) in program.name
+            os.path.basename(streamable_binary) in program.name
             for program in program_infos.programs
         )
 
@@ -220,7 +278,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         assert metadata.get("Processor") is not None
         assert metadata.get("Endian") is not None
         assert metadata.get("Address Size") is not None
-        assert os.path.basename(streamable_server) in metadata.get("Program Name")
+        assert os.path.basename(streamable_binary) in metadata.get("Program Name")
 
         # List exports
         export_infos_result = json.loads(client_responses[4].content[0].text)
@@ -287,5 +345,30 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         # Graph should be non-empty; entry node name may vary by platform/toolchain
         assert len(call_graph.graph.strip()) > 0
 
-        # Delete binary
-        # This test is omitted due to complexity in concurrent scenarios
+    (
+        rename_response,
+        comment_response,
+        symbol_response,
+        decompile_response,
+    ) = await invoke_mutation_tools(streamable_base_url, streamable_binary)
+
+    renamed_name = f"{_FUNC_PREFIX}function_two_renamed"
+
+    rename_result = json.loads(rename_response.content[0].text)
+    rename = RenameResponse(**rename_result)
+    assert rename.old_name == f"{_FUNC_PREFIX}function_two"
+    assert rename.new_name == renamed_name
+
+    comment_result = json.loads(comment_response.content[0].text)
+    comment = CommentResponse(**comment_result)
+    assert comment.comment_type == "decompiler"
+    assert comment.comment == "Renamed during concurrent streamable integration test."
+
+    symbol_result = json.loads(symbol_response.content[0].text)
+    symbol_search = SymbolSearchResults(**symbol_result)
+    assert any(renamed_name in symbol.name for symbol in symbol_search.symbols)
+
+    decompile_result = json.loads(decompile_response.content[0].text)
+    decompiled = DecompiledFunction(**decompile_result)
+    assert renamed_name in decompiled.name
+    assert renamed_name in decompiled.code

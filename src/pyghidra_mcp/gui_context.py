@@ -8,13 +8,40 @@ from pathlib import Path
 from typing import Any
 
 from pyghidra_mcp.context import ProgramInfo
-from pyghidra_mcp.models import ProgramInfo as ProgramInfoModel
+from pyghidra_mcp.import_detection import is_ghidra_importable
+from pyghidra_mcp.import_planning import ImportCandidate, build_import_plan
+from pyghidra_mcp.indexing_mixin import IndexingMixin
+from pyghidra_mcp.models import (
+    ImportRequestResult,
+    ProgramInfo as ProgramInfoModel,
+    SkippedImport as SkippedImportModel,
+)
 from pyghidra_mcp.project_spec import ProjectSpec
 
 logger = logging.getLogger(__name__)
 
 
-class GuiPyGhidraContext:
+def _run_on_swing(fn, *args, **kwargs):
+    import jpype
+    from ghidra.util import Swing
+    from java.lang import Runnable  # type: ignore
+
+    result_box: list[Any] = [None]
+    exc_box: list[BaseException | None] = [None]
+
+    def runnable():
+        try:
+            result_box[0] = fn(*args, **kwargs)
+        except BaseException as e:
+            exc_box[0] = e
+
+    Swing.runNow(jpype.JProxy(Runnable, dict={"run": runnable}))
+    if exc_box[0] is not None:
+        raise exc_box[0]
+    return result_box[0]
+
+
+class GuiPyGhidraContext(IndexingMixin):
     """MCP context backed by the active in-process Ghidra GUI project.
 
     The GUI owns the project and Program lifecycle. This context owns only MCP-side
@@ -36,23 +63,69 @@ class GuiPyGhidraContext:
         self.programs: dict[str, ProgramInfo] = {}
         self._programs_lock = threading.RLock()
         self.import_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self._init_indexing_state(self.pyghidra_mcp_dir, threaded=True)
 
         self.project = self.wait_for_gui_ready(
+            project_spec,
             timeout=readiness_timeout,
             interval=readiness_interval,
         )
         self.refresh_programs()
 
     @staticmethod
-    def wait_for_gui_ready(timeout: float = 30.0, interval: float = 0.2):
-        """Wait until Ghidra has an active project."""
+    def wait_for_gui_ready(  # noqa: C901
+        project_spec: ProjectSpec,
+        timeout: float = 30.0,
+        interval: float = 0.2,
+    ):
+        """Wait until Ghidra has an active project, opening it if the GUI is idle."""
         from ghidra.framework.main import AppInfo
 
         deadline = time.time() + timeout
+        attempted_open = False
         while time.time() < deadline:
-            project = AppInfo.getActiveProject()
+            try:
+                project = AppInfo.getActiveProject()
+            except Exception:
+                project = None
             if project is not None:
                 return project
+
+            try:
+                front_end_tool = AppInfo.getFrontEndTool()
+            except Exception:
+                front_end_tool = None
+            if front_end_tool is not None and not attempted_open:
+                attempted_open = True
+
+                def do_open(front_end_tool=front_end_tool, project_spec=project_spec):
+                    from ghidra.framework.model import ProjectLocator
+
+                    active_project = AppInfo.getActiveProject()
+                    if active_project is not None:
+                        return active_project
+
+                    project_manager = front_end_tool.getProjectManager()
+                    locator = project_manager.getLastOpenedProject()
+                    if locator is None:
+                        locator = ProjectLocator(
+                            str(project_spec.project_directory.absolute()),
+                            project_spec.project_name,
+                        )
+                    opened_project = project_manager.openProject(locator, True, False)
+                    front_end_tool.setActiveProject(opened_project)
+                    return opened_project
+
+                try:
+                    project = _run_on_swing(do_open)
+                except Exception:
+                    logger.exception(
+                        "Failed to explicitly open GUI project %s; continuing to wait.",
+                        project_spec.gpr_path,
+                    )
+                else:
+                    if project is not None:
+                        return project
             time.sleep(interval)
 
         raise RuntimeError("Timed out waiting for Ghidra GUI active project.")
@@ -133,6 +206,7 @@ class GuiPyGhidraContext:
             with self._programs_lock:
                 program_info = self.programs.get(expected_path)
                 if program_info is not None:
+                    self.schedule_indexing(expected_path)
                     return {
                         "name": program_info.name,
                         "path": expected_path,
@@ -148,23 +222,7 @@ class GuiPyGhidraContext:
         return self.open_program_in_gui(binary_name, current=True)
 
     def run_on_swing(self, fn, *args, **kwargs):
-        import jpype
-        from ghidra.util import Swing
-        from java.lang import Runnable  # type: ignore
-
-        result_box: list[Any] = [None]
-        exc_box: list[BaseException | None] = [None]
-
-        def runnable():
-            try:
-                result_box[0] = fn(*args, **kwargs)
-            except BaseException as e:
-                exc_box[0] = e
-
-        Swing.runNow(jpype.JProxy(Runnable, dict={"run": runnable}))
-        if exc_box[0] is not None:
-            raise exc_box[0]
-        return result_box[0]
+        return _run_on_swing(fn, *args, **kwargs)
 
     def goto(self, binary_name: str, target: str, target_type: str) -> dict[str, Any]:
         normalized_type = target_type.lower()
@@ -329,6 +387,7 @@ class GuiPyGhidraContext:
                     }
                 )
             )
+        self.schedule_indexing(binary_name)
         return program_info
 
     def _resolve_program_info(self, binary_name: str) -> ProgramInfo:
@@ -376,22 +435,26 @@ class GuiPyGhidraContext:
         self.refresh_programs()
         return True
 
-    def import_binaries(self, binary_paths: Sequence[str | Path]) -> None:
-        resolved_paths: list[Path] = [Path(p) for p in binary_paths]
+    def import_binaries(self, binary_paths: Sequence[str | Path]) -> list[str]:
+        import_plan = build_import_plan(binary_paths)
+        for skipped in import_plan.skipped:
+            logger.info("Skipping %s: %s", skipped.path, skipped.reason)
 
-        files_to_import: list[tuple[Path, Path | None]] = []
-        for path in resolved_paths:
-            if path.is_dir():
-                for candidate in path.rglob("*"):
-                    if candidate.is_file() and self._is_binary_file(candidate):
-                        files_to_import.append((candidate, candidate.relative_to(path).parent))
-            elif path.is_file() and self._is_binary_file(path):
-                files_to_import.append((path, None))
+        return self._import_candidates(import_plan.candidates)
 
-        for binary_path, relative_path in files_to_import:
-            self.import_binary(binary_path, relative_path=relative_path)
+    def _import_candidates(self, candidates: list[ImportCandidate]) -> list[str]:
+        imported_programs: list[str] = []
+        for candidate in candidates:
+            imported = self.import_binary(candidate.path, relative_path=candidate.relative_path)
+            if isinstance(imported, list):
+                imported_programs.extend(imported)
+            else:
+                imported_programs.append(imported)
+        return imported_programs
 
-    def import_binary(self, binary_path: str | Path, relative_path: Path | None = None) -> None:
+    def import_binary(
+        self, binary_path: str | Path, relative_path: Path | None = None
+    ) -> str | list[str]:
         from ghidra.app.util.importer import ProgramLoader
         from ghidra.util.task import TaskMonitor
         from java.io import File  # type: ignore
@@ -410,7 +473,7 @@ class GuiPyGhidraContext:
 
         try:
             self.open_program_in_gui(expected_path)
-            return
+            return expected_path
         except ValueError:
             pass
 
@@ -430,19 +493,51 @@ class GuiPyGhidraContext:
             if load_results is not None:
                 load_results.close()
 
-        self.open_program_in_gui(str(domain_file.getPathname()))
+        opened = self.open_program_in_gui(str(domain_file.getPathname()))
+        return str(opened["path"])
 
-    def import_binary_backgrounded(self, binary_path: str | Path) -> None:
+    def import_binary_backgrounded(self, binary_path: str | Path) -> ImportRequestResult:
         binary_path = Path(binary_path)
         if not binary_path.exists():
             raise FileNotFoundError(f"The file {binary_path} cannot be found")
 
-        future = self.import_executor.submit(self.import_binary, binary_path)
-        future.add_done_callback(self._import_done_callback)
+        import_plan = build_import_plan([binary_path])
+
+        if import_plan.candidates:
+            future = self.import_executor.submit(self._import_candidates, import_plan.candidates)
+            future.add_done_callback(self._import_done_callback)
+
+        queued_paths = [str(candidate.path) for candidate in import_plan.candidates]
+        skipped = [
+            SkippedImportModel(path=str(skipped.path), reason=skipped.reason)
+            for skipped in import_plan.skipped
+        ]
+        message = (
+            f"Queued {len(queued_paths)} import(s) from {binary_path} in the background."
+            if queued_paths
+            else f"No importable files were queued from {binary_path}."
+        )
+        return ImportRequestResult(
+            requested_path=str(binary_path),
+            queued_count=len(queued_paths),
+            queued_paths=queued_paths,
+            skipped_count=len(skipped),
+            skipped=skipped,
+            message=message,
+        )
+
+    def schedule_startup_indexing(self, *, max_binaries: int | None = None) -> None:
+        """Index currently open GUI programs in the background."""
+        self.refresh_programs()
+        with self._programs_lock:
+            program_paths = list(self.programs)
+        for binary_name in program_paths:
+            self.schedule_indexing(binary_name)
 
     def close(self, save: bool = True) -> None:
         """Release MCP-owned resources. Does not close the GUI project or programs."""
         self.import_executor.shutdown(wait=True)
+        self.shutdown_indexing()
         with self._programs_lock:
             for program_info in self.programs.values():
                 self._dispose_decompiler(program_info)
@@ -450,7 +545,7 @@ class GuiPyGhidraContext:
 
     @staticmethod
     def _is_binary_file(path: Path) -> bool:
-        return True
+        return is_ghidra_importable(path)
 
     @staticmethod
     def _import_done_callback(future: concurrent.futures.Future) -> None:
@@ -478,6 +573,12 @@ class GuiPyGhidraContext:
                 f"Binary name '{binary_name}' is ambiguous. Use one of these paths: {paths}"
             )
         return None
+
+    def _lookup_program_info(self, binary_name: str) -> ProgramInfo | None:
+        try:
+            return self._resolve_program_info(binary_name)
+        except ValueError:
+            return None
 
     def _init_program_info(self, program) -> ProgramInfo:
         from ghidra.program.flatapi import FlatProgramAPI

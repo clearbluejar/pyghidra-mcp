@@ -1,6 +1,7 @@
 import asyncio
 import os
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,9 @@ void hello() {
         # Create a non-binary file (should be skipped)
         readme = root / "README.txt"
         readme.write_text("This is not a binary")
+        archive = root / "embedded.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("payload.txt", "not importing this")
 
         yield root, bin_file_1, bin_file_2
 
@@ -59,6 +63,7 @@ void hello() {
         c_file_1.unlink(missing_ok=True)
         c_file_2.unlink(missing_ok=True)
         readme.unlink(missing_ok=True)
+        archive.unlink(missing_ok=True)
         bin_file_1.unlink(missing_ok=True)
         bin_file_2.unlink(missing_ok=True)
 
@@ -83,7 +88,14 @@ async def test_import_binaries_recursive(
                 "import_binary", {"binary_path": str(filesystem_root)}
             )
             content = response.content[0].text
-            assert "Importing" in content
+            assert '"queued_count": 2' in content
+            assert '"skipped_count": 4' in content
+            assert "README.txt" in content
+            assert "embedded.zip" in content
+            assert "program1.c" in content
+            assert "program2.c" in content
+            assert "archive/container imports are not supported" in content
+            assert "no supported Ghidra loader detected" in content
 
             bin_1_name = PyGhidraContext._gen_unique_bin_name(bin_file_1)
             bin_2_name = PyGhidraContext._gen_unique_bin_name(bin_file_2)

@@ -33,6 +33,12 @@ def test_request_shutdown_closes_frontend_tool(monkeypatch):
     front_end_tool.close.assert_called_once_with()
 
 
+def test_launcher_accepts_user_agreement_vmarg():
+    launcher = GuiPyGhidraMcpLauncher(Path("/tmp/project.gpr"))
+
+    assert "-DUSER_AGREEMENT=ACCEPT" in launcher.vm_args
+
+
 def test_request_shutdown_is_idempotent(monkeypatch):
     front_end_tool = Mock()
 

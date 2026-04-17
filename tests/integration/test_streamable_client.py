@@ -1,6 +1,6 @@
 import asyncio
 import json
-import os
+import socket
 import subprocess
 import time
 
@@ -12,7 +12,11 @@ from mcp.client.streamable_http import streamable_http_client
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import DecompiledFunction
 
-base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 @pytest.fixture(scope="module")
@@ -22,8 +26,14 @@ def streamable_project_args(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def streamable_server(test_binary, ghidra_env, streamable_project_args):
+def streamable_base_url():
+    return f"http://127.0.0.1:{_find_free_port()}"
+
+
+@pytest.fixture(scope="module")
+def streamable_server(test_binary, ghidra_env, streamable_project_args, streamable_base_url):
     """Fixture to start the pyghidra-mcp server in a separate process."""
+    port = int(streamable_base_url.rsplit(":", 1)[1])
     proc = subprocess.Popen(
         [
             "python",
@@ -33,6 +43,10 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args):
             "--wait-for-analysis",
             "--transport",
             "streamable-http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
             test_binary,
         ],
         env=ghidra_env,
@@ -44,7 +58,7 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args):
         async with aiohttp.ClientSession() as session:
             for _ in range(timeout):
                 try:
-                    async with session.get(f"{base_url}/mcp") as response:
+                    async with session.get(f"{streamable_base_url}/mcp") as response:
                         if response.status == 406:
                             return
                 except aiohttp.ClientConnectorError:
@@ -61,14 +75,15 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args):
 
     time.sleep(2)
 
-    yield test_binary
+    yield test_binary, streamable_base_url
     proc.terminate()
     proc.wait()
 
 
 @pytest.mark.asyncio
 async def test_streamable_client_smoke(streamable_server, main_func_name):
-    async with streamable_http_client(f"{base_url}/mcp") as (
+    streamable_binary, streamable_base_url = streamable_server
+    async with streamable_http_client(f"{streamable_base_url}/mcp") as (
         read_stream,
         write_stream,
         _,
@@ -78,7 +93,7 @@ async def test_streamable_client_smoke(streamable_server, main_func_name):
             await session.initialize()
             # Session initialized
 
-            binary_name = PyGhidraContext._gen_unique_bin_name(streamable_server)
+            binary_name = PyGhidraContext._gen_unique_bin_name(streamable_binary)
 
             # Decompile a function
             name = main_func_name

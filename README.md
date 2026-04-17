@@ -20,6 +20,11 @@ MCP is a unified interface that allows language models, development tools (like 
 
 With `pyghidra-mcp`, Ghidra becomes an intelligent backend—ready to respond to context-rich queries, automate deep reverse engineering tasks, and integrate into AI-assisted workflows.
 
+`pyghidra-mcp` now supports two operating modes:
+
+- `headless` mode for CLI-driven analysis and automation
+- `--gui` mode, which launches Ghidra through `pyghidra-mcp` and shares live program state with the running GUI
+
 
 > [!NOTE]
 > This beta project is under active development. We would love your feedback, bug reports, feature requests, and code.
@@ -28,7 +33,7 @@ With `pyghidra-mcp`, Ghidra becomes an intelligent backend—ready to respond to
 
 Yes, the original [ghidra-mcp](https://github.com/LaurieWired/GhidraMCP) is fantastic. But `pyghidra-mcp` takes a different approach:
 
-- 🐍 **No GUI required** – Run entirely via CLI for streamlined automation and scripting.
+- 🐍 **Headless-first, GUI-capable** – Run entirely via CLI for streamlined automation, or launch Ghidra with `--gui` when you want live GUI navigation and edits.
 - 🔁 **Designed for automation** – Ideal for integrating with LLMs, CI pipelines, and tooling that needs repeatable behavior.
 - ✅ **CI/CD friendly** – Built with robust unit and integration tests for both client and server sessions.
 - 🚀 **Quick startup** – Asynchronous startup allows the server to start handling requests while binaries are still being analyzed in the background. Supports fast command-line launching with minimal setup.
@@ -151,6 +156,20 @@ Run the [Python package](https://pypi.org/p/pyghidra-mcp) as a CLI command using
 uvx pyghidra-mcp # Creates pyghidra_mcp_projects directory by default
 ```
 
+To launch and control a live Ghidra GUI from MCP, use `--gui` with `streamable-http` and an existing `.gpr` project:
+
+```bash
+uv run pyghidra-mcp \
+  --gui \
+  --transport streamable-http \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --project-path /absolute/path/to/my_project.gpr
+```
+
+> [!IMPORTANT]
+> `--gui` launches Ghidra through `pyghidra-mcp`. It does not attach to an already-running external Ghidra instance.
+
 Or, run as a [Docker container](https://ghcr.io/clearbluejar/pyghidra-mcp):
 
 ```bash
@@ -269,6 +288,52 @@ pyghidra_mcp --project-path ~/existing/ghidra/my_research.gpr
 # └── chromadb/, gzfs/ (pyghidra-mcp additions)
 ```
 
+### GUI Mode
+
+Use GUI mode when you want MCP actions to operate against the same live program objects that Ghidra is displaying.
+
+- `--gui` requires `--transport streamable-http`
+- `--project-path` must point to an existing `.gpr`
+- Ghidra is launched by `pyghidra-mcp`, which keeps GUI and MCP transactions in the same JVM
+- GUI-only tools are only exposed when running with `--gui`
+
+Example:
+
+```bash
+pyghidra-mcp \
+  --gui \
+  --transport streamable-http \
+  --project-path /absolute/path/to/my_research.gpr
+```
+
+GUI mode is the right choice when you want to:
+
+- open or switch programs in CodeBrowser
+- navigate the listing to a function or address
+- rename functions or add comments and immediately see those changes in Ghidra
+
+### Startup Defaults and Large Projects
+
+`pyghidra-mcp` does not require `--wait-for-analysis` by default. The server can start while analysis and MCP-side indexing continue in the background.
+
+This matters for large projects:
+
+- starting a project with many binaries does not need to block server startup
+- `--wait-for-analysis` is available when you want a fully analyzed project before serving requests
+- for large existing projects, expect analysis and indexing readiness to vary by binary
+
+Current limitation:
+
+- Ghidra analysis state and MCP indexing state are separate
+- a binary can be fully analyzed in Ghidra while `search_strings` or semantic `search_code` are still waiting on MCP-side indexing
+- this is more noticeable when opening larger existing projects
+
+In practice:
+
+- decompilation, navigation, renaming, and comments can still work for a binary while indexing-heavy search features are catching up
+- if startup latency matters more than immediate search readiness, keep the default `--no-wait-for-analysis`
+- if immediate readiness matters more than startup time, use `--wait-for-analysis`
+
 
 ## Development
 
@@ -305,6 +370,8 @@ The `Makefile` provides several targets for testing and code quality:
 - `make test`: Run the full test suite (unit and integration).
 - `make test-unit`: Run unit tests.
 - `make test-integration`: Run integration tests.
+- `make test-integration-fast`: Run the lightweight integration smoke test used by pre-commit.
+- `make test-integration-gui`: Run GUI integration tests. Requires a working Ghidra install and GUI support.
 - `make lint`: Check code style with `ruff`.
 - `make format`: Format code with `ruff`.
 - `make typecheck`: Run type checking with `ruff`.
@@ -312,6 +379,12 @@ The `Makefile` provides several targets for testing and code quality:
 - `make dev`: Run the development workflow (format and check).
 - `make build`: Build distribution packages.
 - `make clean`: Clean build artifacts and cache.
+
+Recommended split:
+
+- pre-commit: `ruff`, `pyright`, unit tests, and one lightweight integration smoke test
+- GitHub Actions: full headless integration coverage plus the supported Linux GUI lane under `Xvfb`
+- local/manual: macOS GUI validation and any heavier environment-specific debugging
 
 ## API
 
@@ -378,7 +451,7 @@ Per-item errors are returned inline (other targets still succeed):
 
 #### List Project Binaries
 
-- `list_project_binaries()`: Lists the names of all binaries currently loaded in the Ghidra project.
+- `list_project_binaries()`: Lists binaries in the current Ghidra project. In GUI mode this includes project binaries that exist on disk even if they are not currently open in CodeBrowser.
 
 #### List Project Binary Metadata
 
@@ -401,6 +474,23 @@ Per-item errors are returned inline (other targets still succeed):
 #### Search Symbols
 
 - `search_symbols_by_name(binary_name: str, query: str, functions_only: bool = False, offset: int = 0, limit: int = 25)`: Search for symbols within a binary by name. Supports regex patterns (e.g. `^main$`, `func.*one`) with case-insensitive matching, or plain substring queries. Set `functions_only=True` to exclude labels, variables, and other non-function symbols.
+
+#### Rename Function
+
+- `rename_function(binary_name: str, name_or_address: str, new_name: str)`: Rename a function by name or address. In GUI mode this runs as a live Ghidra transaction and updates the open program.
+
+#### Set Comment
+
+- `set_comment(binary_name: str, target: str, comment: str, comment_type: str)`: Set a function/decompiler comment or listing comment. Supported `comment_type` values are `decompiler`, `plate`, `pre`, `eol`, `post`, and `repeatable`.
+
+#### GUI-only Tools
+
+These tools are only available when `pyghidra-mcp` is started with `--gui`:
+
+- `list_open_programs()`: List programs currently open in the Ghidra GUI.
+- `open_program_in_gui(binary_name: str)`: Open a project binary in CodeBrowser.
+- `set_current_program(binary_name: str)`: Make an open program the active GUI program.
+- `goto(binary_name: str, target: str, target_type: str)`: Navigate the Ghidra GUI to an address or function. `target_type` must be `address` or `function`.
 
 ### Prompts
 
@@ -440,6 +530,10 @@ Options:
   --project-name TEXT               Name for the project (used for Ghidra project
                                     files). Ignored when using .gpr files.
                                     [default: my_project]
+  --gui / --no-gui                  Launch and control a live Ghidra GUI for the
+                                    provided project. Requires streamable-http
+                                    and an existing .gpr project.
+                                    [default: no-gui]
   -p, --port INTEGER                Port to listen on for HTTP-based transports
                                     (streamable-http, sse). [default: 8000]
   -o, --host TEXT                   Host to listen on for HTTP-based transports
@@ -546,6 +640,15 @@ pyghidra-mcp -t streamable-http
 
 By default, the Python package will run in `stdio` mode, so you will have to include `-t streamable-http`.
 
+GUI mode uses this transport:
+
+```bash
+pyghidra-mcp \
+  --gui \
+  --transport streamable-http \
+  --project-path /absolute/path/to/my_project.gpr
+```
+
 #### Docker
 
 ```
@@ -640,5 +743,3 @@ This ensures consistency across the codebase and helps us maintain robust, scala
 ______________________________________________________________________
 
 Made with ❤️ by the [PyGhidra-MCP Team](https://github.com/clearbluejar/pyghidra-mcp)
-
-

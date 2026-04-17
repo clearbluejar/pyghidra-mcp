@@ -48,6 +48,20 @@ class OpenProgramInfos(BaseModel):
     programs: list[OpenProgramInfo]
 
 
+class SkippedImport(BaseModel):
+    path: str
+    reason: str
+
+
+class ImportRequestResult(BaseModel):
+    requested_path: str
+    queued_count: int
+    queued_paths: list[str]
+    skipped_count: int
+    skipped: list[SkippedImport]
+    message: str
+
+
 class GotoResponse(BaseModel):
     binary_name: str
     address: str
