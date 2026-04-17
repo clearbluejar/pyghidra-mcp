@@ -153,8 +153,9 @@ def init_pyghidra_context(  # noqa: C901
     if imported_programs or force_analysis or wait_for_analysis:
         logger.info(f"Analyzing project: {pyghidra_context.project}")
         pyghidra_context.analyze_project()
-        for binary_name in imported_programs:
-            pyghidra_context.schedule_indexing(binary_name)
+        if not wait_for_analysis:
+            for binary_name in imported_programs:
+                pyghidra_context.schedule_indexing(binary_name)
     else:
         logger.info("Skipping full-project analysis on startup; using existing project state.")
         pyghidra_context.schedule_startup_indexing()

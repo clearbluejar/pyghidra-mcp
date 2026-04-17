@@ -1,3 +1,4 @@
+import sys
 import threading
 from unittest.mock import Mock, call
 
@@ -155,3 +156,36 @@ def test_gui_is_binary_file_uses_ghidra_importability(monkeypatch, tmp_path):
 
     assert GuiPyGhidraContext._is_binary_file(candidate) is False
     assert checked == [candidate]
+
+
+def test_wait_for_gui_ready_opens_project_when_frontend_is_idle(monkeypatch, tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project_gpr = project_dir / "proj.gpr"
+    project_gpr.write_text("", encoding="utf-8")
+
+    project_spec = Mock(
+        project_directory=project_dir,
+        gpr_path=project_gpr,
+    )
+
+    opened_project = Mock()
+    front_end_tool = Mock()
+    app_info = Mock(
+        getActiveProject=Mock(side_effect=[None, opened_project]),
+        getFrontEndTool=Mock(return_value=front_end_tool),
+    )
+
+    monkeypatch.setitem(sys.modules, "ghidra.framework.main", Mock(AppInfo=app_info))
+    monkeypatch.setitem(
+        sys.modules,
+        "ghidra.framework.model",
+        Mock(ProjectLocator=Mock(return_value="locator")),
+    )
+    monkeypatch.setattr(gui_context_module, "_run_on_swing", Mock(return_value=opened_project))
+    monkeypatch.setattr(gui_context_module.time, "sleep", Mock())
+
+    project = GuiPyGhidraContext.wait_for_gui_ready(project_spec, timeout=1, interval=0)
+
+    assert project is opened_project
+    gui_context_module._run_on_swing.assert_called_once()

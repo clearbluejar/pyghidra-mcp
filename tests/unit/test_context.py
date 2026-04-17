@@ -120,3 +120,17 @@ def test_is_binary_file_uses_ghidra_importability(monkeypatch, tmp_path):
 
     assert context._is_binary_file(candidate) is True
     assert checked == [candidate]
+
+
+def test_analysis_done_callback_skips_startup_indexing_when_waiting():
+    context = PyGhidraContext.__new__(PyGhidraContext)
+    context.wait_for_analysis = True
+    context.programs = {"/bin/sample": Mock()}
+    context.schedule_startup_indexing = Mock()
+
+    future = Mock()
+    future.result.return_value = None
+
+    context._analysis_done_callback(future)
+
+    context.schedule_startup_indexing.assert_not_called()

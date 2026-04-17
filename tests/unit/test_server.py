@@ -60,3 +60,23 @@ def test_init_pyghidra_context_analyzes_new_imports(monkeypatch):
     fake_context.analyze_project.assert_called_once_with()
     fake_context.schedule_indexing.assert_called_once_with("/bin/new")
     fake_context.schedule_startup_indexing.assert_not_called()
+
+
+def test_init_pyghidra_context_wait_for_analysis_skips_background_indexing(monkeypatch):
+    fake_context = Mock()
+    fake_context.import_binaries.return_value = ["/bin/new"]
+    fake_context.list_binaries.return_value = ["/bin/new"]
+
+    monkeypatch.setattr(server, "pyghidra", Mock(start=Mock()))
+    monkeypatch.setattr(server, "PyGhidraContext", Mock(return_value=fake_context))
+
+    kwargs = _common_kwargs()
+    kwargs["wait_for_analysis"] = True
+
+    server.init_pyghidra_context(
+        input_paths=[Path("/tmp/newbin")],
+        **kwargs,
+    )
+
+    fake_context.analyze_project.assert_called_once_with()
+    fake_context.schedule_indexing.assert_not_called()

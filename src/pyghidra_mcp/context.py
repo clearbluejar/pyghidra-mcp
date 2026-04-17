@@ -146,17 +146,17 @@ class PyGhidraContext(IndexingMixin):
         """
         Saves changes to all open programs and closes the project.
         """
-        for _program_name, program_info in self.programs.items():
-            program = program_info.program
-            self.project.close(program)
-
         if self.executor:
             self.executor.shutdown(wait=True)
+
+        self.shutdown_indexing()
 
         if self.import_executor:
             self.import_executor.shutdown(wait=True)
 
-        self.shutdown_indexing()
+        for _program_name, program_info in self.programs.items():
+            program = program_info.program
+            self.project.close(program)
 
         self.project.close()
         logger.info(f"Project {self.project_name} closed.")
@@ -554,7 +554,8 @@ class PyGhidraContext(IndexingMixin):
         try:
             future.result()
             logging.info("Asynchronous analysis finished successfully.")
-            self.schedule_startup_indexing(max_binaries=max(len(self.programs), 1))
+            if not self.wait_for_analysis:
+                self.schedule_startup_indexing(max_binaries=max(len(self.programs), 1))
         except Exception as e:
             logging.error(f"Asynchronous analysis failed with exception: {e}")
             raise e

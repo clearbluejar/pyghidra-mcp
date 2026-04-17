@@ -21,6 +21,26 @@ from pyghidra_mcp.project_spec import ProjectSpec
 logger = logging.getLogger(__name__)
 
 
+def _run_on_swing(fn, *args, **kwargs):
+    import jpype
+    from ghidra.util import Swing
+    from java.lang import Runnable  # type: ignore
+
+    result_box: list[Any] = [None]
+    exc_box: list[BaseException | None] = [None]
+
+    def runnable():
+        try:
+            result_box[0] = fn(*args, **kwargs)
+        except BaseException as e:
+            exc_box[0] = e
+
+    Swing.runNow(jpype.JProxy(Runnable, dict={"run": runnable}))
+    if exc_box[0] is not None:
+        raise exc_box[0]
+    return result_box[0]
+
+
 class GuiPyGhidraContext(IndexingMixin):
     """MCP context backed by the active in-process Ghidra GUI project.
 
@@ -46,21 +66,57 @@ class GuiPyGhidraContext(IndexingMixin):
         self._init_indexing_state(self.pyghidra_mcp_dir, threaded=True)
 
         self.project = self.wait_for_gui_ready(
+            project_spec,
             timeout=readiness_timeout,
             interval=readiness_interval,
         )
         self.refresh_programs()
 
     @staticmethod
-    def wait_for_gui_ready(timeout: float = 30.0, interval: float = 0.2):
-        """Wait until Ghidra has an active project."""
+    def wait_for_gui_ready(
+        project_spec: ProjectSpec,
+        timeout: float = 30.0,
+        interval: float = 0.2,
+    ):
+        """Wait until Ghidra has an active project, opening it if the GUI is idle."""
         from ghidra.framework.main import AppInfo
+        from ghidra.framework.model import ProjectLocator
 
         deadline = time.time() + timeout
+        locator = ProjectLocator(
+            str(project_spec.project_directory.absolute()),
+            project_spec.gpr_path.name,
+        )
+        attempted_open = False
         while time.time() < deadline:
             project = AppInfo.getActiveProject()
             if project is not None:
                 return project
+
+            front_end_tool = AppInfo.getFrontEndTool()
+            if front_end_tool is not None and not attempted_open:
+                attempted_open = True
+
+                def do_open(front_end_tool=front_end_tool, locator=locator):
+                    active_project = AppInfo.getActiveProject()
+                    if active_project is not None:
+                        return active_project
+
+                    project_manager = front_end_tool.getProjectManager()
+                    opened_project = project_manager.openProject(locator, True, False)
+                    front_end_tool.setActiveProject(opened_project)
+                    return opened_project
+
+                try:
+                    project = _run_on_swing(do_open)
+                except Exception:
+                    logger.exception(
+                        "Failed to explicitly open GUI project %s; continuing to wait.",
+                        project_spec.gpr_path,
+                    )
+                else:
+                    if project is not None:
+                        return project
             time.sleep(interval)
 
         raise RuntimeError("Timed out waiting for Ghidra GUI active project.")
@@ -157,23 +213,7 @@ class GuiPyGhidraContext(IndexingMixin):
         return self.open_program_in_gui(binary_name, current=True)
 
     def run_on_swing(self, fn, *args, **kwargs):
-        import jpype
-        from ghidra.util import Swing
-        from java.lang import Runnable  # type: ignore
-
-        result_box: list[Any] = [None]
-        exc_box: list[BaseException | None] = [None]
-
-        def runnable():
-            try:
-                result_box[0] = fn(*args, **kwargs)
-            except BaseException as e:
-                exc_box[0] = e
-
-        Swing.runNow(jpype.JProxy(Runnable, dict={"run": runnable}))
-        if exc_box[0] is not None:
-            raise exc_box[0]
-        return result_box[0]
+        return _run_on_swing(fn, *args, **kwargs)
 
     def goto(self, binary_name: str, target: str, target_type: str) -> dict[str, Any]:
         normalized_type = target_type.lower()
