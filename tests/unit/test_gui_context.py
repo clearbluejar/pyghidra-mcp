@@ -167,10 +167,12 @@ def test_wait_for_gui_ready_opens_project_when_frontend_is_idle(monkeypatch, tmp
     project_spec = Mock(
         project_directory=project_dir,
         gpr_path=project_gpr,
+        project_name="proj",
     )
 
     opened_project = Mock()
-    front_end_tool = Mock()
+    project_manager = Mock(getLastOpenedProject=Mock(return_value="locator"))
+    front_end_tool = Mock(getProjectManager=Mock(return_value=project_manager))
     app_info = Mock(
         getActiveProject=Mock(side_effect=[None, opened_project]),
         getFrontEndTool=Mock(return_value=front_end_tool),
@@ -189,3 +191,4 @@ def test_wait_for_gui_ready_opens_project_when_frontend_is_idle(monkeypatch, tmp
 
     assert project is opened_project
     gui_context_module._run_on_swing.assert_called_once()
+    project_manager.getLastOpenedProject.assert_not_called()

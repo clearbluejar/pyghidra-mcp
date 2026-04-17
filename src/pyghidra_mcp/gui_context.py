@@ -80,13 +80,8 @@ class GuiPyGhidraContext(IndexingMixin):
     ):
         """Wait until Ghidra has an active project, opening it if the GUI is idle."""
         from ghidra.framework.main import AppInfo
-        from ghidra.framework.model import ProjectLocator
 
         deadline = time.time() + timeout
-        locator = ProjectLocator(
-            str(project_spec.project_directory.absolute()),
-            project_spec.gpr_path.name,
-        )
         attempted_open = False
         while time.time() < deadline:
             project = AppInfo.getActiveProject()
@@ -97,12 +92,20 @@ class GuiPyGhidraContext(IndexingMixin):
             if front_end_tool is not None and not attempted_open:
                 attempted_open = True
 
-                def do_open(front_end_tool=front_end_tool, locator=locator):
+                def do_open(front_end_tool=front_end_tool, project_spec=project_spec):
+                    from ghidra.framework.model import ProjectLocator
+
                     active_project = AppInfo.getActiveProject()
                     if active_project is not None:
                         return active_project
 
                     project_manager = front_end_tool.getProjectManager()
+                    locator = project_manager.getLastOpenedProject()
+                    if locator is None:
+                        locator = ProjectLocator(
+                            str(project_spec.project_directory.absolute()),
+                            project_spec.project_name,
+                        )
                     opened_project = project_manager.openProject(locator, True, False)
                     front_end_tool.setActiveProject(opened_project)
                     return opened_project
