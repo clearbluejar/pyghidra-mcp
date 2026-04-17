@@ -3,6 +3,7 @@ import json
 import signal
 import socket
 import subprocess
+from pathlib import Path
 
 import aiohttp
 import pytest
@@ -19,9 +20,53 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-async def _wait_for_http_server(base_url: str, timeout: int = 240) -> None:
+async def _wait_for_http_server(  # noqa: C901
+    base_url: str,
+    proc: subprocess.Popen[str],
+    env: dict[str, str],
+    timeout: int = 240,
+) -> None:
+    def _safe_read_stream(stream) -> str:
+        if stream is None:
+            return ""
+        try:
+            return stream.read()
+        except ValueError:
+            return ""
+
+    def _application_log_contents(env: dict[str, str]) -> str:
+        home = env.get("HOME")
+        ghidra_version = env.get("GHIDRA_VERSION")
+        if not home or not ghidra_version:
+            return ""
+
+        app_log = (
+            Path(home)
+            / ".config"
+            / "ghidra"
+            / f"ghidra_{ghidra_version}_PUBLIC"
+            / "application.log"
+        )
+        if not app_log.exists():
+            return ""
+
+        try:
+            return app_log.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
     async with aiohttp.ClientSession() as session:
         for _ in range(timeout):
+            if proc.poll() is not None:
+                stdout = _safe_read_stream(proc.stdout)
+                stderr = _safe_read_stream(proc.stderr)
+                raise RuntimeError(
+                    "GUI server exited before startup.\n"
+                    f"exit_code={proc.returncode}\n"
+                    f"stdout:\n{stdout}\n"
+                    f"stderr:\n{stderr}\n"
+                    f"application_log:\n{_application_log_contents(env)}"
+                )
             try:
                 async with session.get(f"{base_url}/mcp") as response:
                     if response.status == 406:
@@ -29,7 +74,19 @@ async def _wait_for_http_server(base_url: str, timeout: int = 240) -> None:
             except aiohttp.ClientConnectorError:
                 pass
             await asyncio.sleep(1)
-    raise RuntimeError("GUI server did not start in time")
+    proc.terminate()
+    try:
+        stdout, stderr = proc.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate(timeout=10)
+    raise RuntimeError(
+        "GUI server did not start in time.\n"
+        f"exit_code={proc.returncode}\n"
+        f"stdout:\n{stdout}\n"
+        f"stderr:\n{stderr}\n"
+        f"application_log:\n{_application_log_contents(env)}"
+    )
 
 
 def _gui_env_or_skip(env: dict[str, str], is_macos: bool) -> dict[str, str]:
@@ -115,7 +172,7 @@ async def test_gui_background_indexing_eventually_enables_string_search(
     )
 
     try:
-        await _wait_for_http_server(base_url)
+        await _wait_for_http_server(base_url, proc, gui_env)
 
         async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -154,5 +211,8 @@ async def test_gui_background_indexing_eventually_enables_string_search(
             proc.kill()
             proc.wait(timeout=10)
 
-        stderr = proc.stderr.read() if proc.stderr else ""
+        try:
+            stderr = proc.stderr.read() if proc.stderr else ""
+        except ValueError:
+            stderr = ""
         assert "AWT blocker activation interrupted" not in stderr
