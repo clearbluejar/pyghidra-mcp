@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Union
 
 import chromadb
 
+from pyghidra_mcp.decompiler_pool import DecompilerPool
 from pyghidra_mcp.import_detection import is_ghidra_importable
 from pyghidra_mcp.import_planning import ImportCandidate, build_import_plan
 from pyghidra_mcp.indexing_mixin import IndexingMixin
@@ -20,7 +21,6 @@ from pyghidra_mcp.models import (
 )
 
 if TYPE_CHECKING:
-    from ghidra.app.decompiler import DecompInterface
     from ghidra.base.project import GhidraProject
     from ghidra.framework.model import DomainFile
     from ghidra.program.flatapi import FlatProgramAPI
@@ -38,7 +38,7 @@ class ProgramInfo:
     name: str
     program: "Program"
     flat_api: "FlatProgramAPI | None"
-    decompiler: "DecompInterface"
+    decompiler_pool: DecompilerPool
     metadata: dict  # Ghidra program metadata
     ghidra_analysis_complete: bool
     file_path: Path | None = None
@@ -98,9 +98,6 @@ class PyGhidraContext(IndexingMixin):
         self.project_path = Path(project_path)
         self.project: GhidraProject = self._get_or_create_project()
 
-        self.programs: dict[str, ProgramInfo] = {}
-        self._init_project_programs()
-
         # Use provided pyghidra-mcp directory or create default
         if pyghidra_mcp_dir:
             self.pyghidra_mcp_dir = pyghidra_mcp_dir
@@ -142,6 +139,9 @@ class PyGhidraContext(IndexingMixin):
         )
         self.wait_for_analysis = wait_for_analysis
 
+        self.programs: dict[str, ProgramInfo] = {}
+        self._init_project_programs()
+
     def close(self, save: bool = True):
         """
         Saves changes to all open programs and closes the project.
@@ -155,6 +155,7 @@ class PyGhidraContext(IndexingMixin):
             self.import_executor.shutdown(wait=True)
 
         for _program_name, program_info in self.programs.items():
+            self._dispose_decompiler(program_info)
             program = program_info.program
             self.project.close(program)
 
@@ -273,6 +274,7 @@ class PyGhidraContext(IndexingMixin):
             try:
                 program_to_delete: Program = program_info.program
                 program_to_delete_df: DomainFile = program_to_delete.getDomainFile()
+                self._dispose_decompiler(program_info)
                 self.project.close(program_to_delete)
                 program_to_delete_df.delete()
                 # clean up program reference
@@ -519,7 +521,7 @@ class PyGhidraContext(IndexingMixin):
             name=program.name,
             program=program,
             flat_api=FlatProgramAPI(program),
-            decompiler=self.setup_decompiler(program),
+            decompiler_pool=self._create_decompiler_pool(program),
             metadata=metadata,
             ghidra_analysis_complete=False,
             file_path=metadata["Executable Location"],
@@ -640,13 +642,14 @@ class PyGhidraContext(IndexingMixin):
         verbose_analysis: bool = False,
     ):
         # Import symbol utilities from ghidrecomp
+        from ghidrecomp.utility import get_pdb, set_pdb, set_remote_pdbs, setup_symbol_server
+
         from ghidra.app.script import GhidraScriptUtil
         from ghidra.framework.model import DomainFile
         from ghidra.program.flatapi import FlatProgramAPI
         from ghidra.program.model.listing import Program
         from ghidra.program.util import GhidraProgramUtilities
         from ghidra.util.task import ConsoleTaskMonitor
-        from ghidrecomp.utility import get_pdb, set_pdb, set_remote_pdbs, setup_symbol_server
 
         df = df_or_prog
         if not isinstance(df_or_prog, DomainFile):
@@ -870,12 +873,13 @@ class PyGhidraContext(IndexingMixin):
         """
         Apply GDT to program
         """
+        from java.io import File  # type: ignore
+        from java.util import List  # type: ignore
+
         from ghidra.app.cmd.function import ApplyFunctionDataTypesCmd
         from ghidra.program.model.data import FileDataTypeManager
         from ghidra.program.model.symbol import SourceType
         from ghidra.util.task import ConsoleTaskMonitor
-        from java.io import File  # type: ignore
-        from java.util import List  # type: ignore
 
         gdt_path = Path(gdt_path)
 
@@ -904,7 +908,7 @@ class PyGhidraContext(IndexingMixin):
         meta = prog.getMetadata()
         return dict(meta)
 
-    def setup_decompiler(self, program: "Program") -> "DecompInterface":
+    def setup_decompiler(self, program: "Program"):
         from ghidra.app.decompiler import DecompileOptions, DecompInterface
 
         prog_options = DecompileOptions()
@@ -921,3 +925,14 @@ class PyGhidraContext(IndexingMixin):
         decomp.openProgram(program)
 
         return decomp
+
+    def _create_decompiler_pool(self, program: "Program") -> DecompilerPool:
+        pool_size = 2 if self.threaded else 1
+        return DecompilerPool(lambda: self.setup_decompiler(program), size=pool_size)
+
+    @staticmethod
+    def _dispose_decompiler(program_info: ProgramInfo) -> None:
+        try:
+            program_info.decompiler_pool.dispose()
+        except Exception:
+            logger.debug("Failed to dispose decompiler pool", exc_info=True)

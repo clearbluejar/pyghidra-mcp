@@ -75,6 +75,25 @@ class RenameResponse(BaseModel):
     new_name: str
 
 
+class VariableRenameResponse(BaseModel):
+    binary_name: str
+    function_name: str
+    function_address: str
+    variable_kind: str
+    old_name: str
+    new_name: str
+
+
+class VariableTypeResponse(BaseModel):
+    binary_name: str
+    function_name: str
+    function_address: str
+    variable_kind: str
+    variable_name: str
+    old_type: str
+    new_type: str
+
+
 class CommentResponse(BaseModel):
     binary_name: str
     address: str

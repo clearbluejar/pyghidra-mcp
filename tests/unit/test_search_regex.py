@@ -44,7 +44,7 @@ def _make_tools(functions=None, symbols=None):
     tools = GhidraTools.__new__(GhidraTools)
     tools.program_info = program_info
     tools.program = program_info.program
-    tools.decompiler = Mock()
+    tools.decompiler_pool = Mock()
 
     if functions is not None:
         tools.get_all_functions = Mock(return_value=functions)

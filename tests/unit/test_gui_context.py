@@ -91,7 +91,7 @@ def test_refresh_programs_resyncs_existing_program_state():
         name="sample",
         program=program,
         flat_api=None,
-        decompiler=Mock(),
+        decompiler_pool=Mock(),
         metadata={},
         ghidra_analysis_complete=False,
     )

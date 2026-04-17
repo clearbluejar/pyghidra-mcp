@@ -72,11 +72,46 @@ class GhidraTools:
         """Initialize with a Ghidra ProgramInfo object"""
         self.program_info = program_info
         self.program = program_info.program
-        self.decompiler = program_info.decompiler
+        self.decompiler_pool = program_info.decompiler_pool
 
     def _get_filename(self, func: "Function"):
         max_path_len = 50
         return f"{func.getSymbol().getName(True)[:max_path_len]}-{func.entryPoint}"
+
+    def _resolve_function_variable(
+        self,
+        function_name_or_address: str,
+        variable_name: str,
+    ) -> tuple["Function", str, typing.Any]:
+        func = self.find_function(function_name_or_address)
+        function_name = str(func.getName())
+
+        matches: list[tuple[str, typing.Any]] = []
+        for param in func.getParameters():
+            if str(param.getName()) == variable_name:
+                matches.append(("parameter", param))
+        for local in func.getLocalVariables():
+            if str(local.getName()) == variable_name:
+                matches.append(("local", local))
+
+        if not matches:
+            raise ValueError(f"Variable '{variable_name}' not found in function '{function_name}'.")
+        if len(matches) > 1:
+            kinds = ", ".join(kind for kind, _ in matches)
+            raise ValueError(
+                f"Ambiguous variable '{variable_name}' in function '{function_name}' ({kinds})."
+            )
+
+        variable_kind, variable = matches[0]
+        return func, variable_kind, variable
+
+    def _parse_data_type(self, type_name: str):
+        from ghidra.util.data import DataTypeParser  # type: ignore
+        from ghidra.util.data.DataTypeParser import AllowedDataTypes  # type: ignore
+
+        dtm = self.program.getDataTypeManager()
+        parser = DataTypeParser(dtm, dtm, typing.cast(typing.Any, None), AllowedDataTypes.DYNAMIC)
+        return parser.parse(type_name)
 
     def _lookup_functions(
         self,
@@ -248,14 +283,15 @@ class GhidraTools:
         """Finds and decompiles a function in a specified binary and returns its pseudo-C code."""
 
         func = self.find_function(name_or_address)
-        return self.decompile_function(func)
+        return self.decompile_function(func, timeout=timeout)
 
     def decompile_function(self, func: "Function", timeout: int = 0) -> DecompiledFunction:
         """Decompiles a function in a specified binary and returns its pseudo-C code."""
         from ghidra.util.task import ConsoleTaskMonitor
 
         monitor = ConsoleTaskMonitor()
-        result: DecompileResults = self.decompiler.decompileFunction(func, timeout, monitor)
+        with self.decompiler_pool.acquire() as decompiler:
+            result: DecompileResults = decompiler.decompileFunction(func, timeout, monitor)
         if "" == result.getErrorMessage():
             code = result.decompiledFunction.getC()
             sig = result.decompiledFunction.getSignature()
@@ -817,6 +853,69 @@ class GhidraTools:
         }
 
     @handle_exceptions
+    def rename_variable(
+        self,
+        function_name_or_address: str,
+        variable_name: str,
+        new_name: str,
+    ) -> dict:
+        from ghidra.program.model.symbol import SourceType
+
+        func, variable_kind, variable = self._resolve_function_variable(
+            function_name_or_address, variable_name
+        )
+        old_name = str(variable_name)
+        function_name = str(func.getName())
+        function_address = str(func.getEntryPoint())
+        with ghidra_transaction(
+            self.program,
+            f"pyghidra-mcp: rename {variable_kind} {old_name} -> {new_name}",
+        ):
+            variable.setName(new_name, SourceType.USER_DEFINED)
+
+        self.invalidate_decompiler_cache()
+        return {
+            "function_name": function_name,
+            "function_address": function_address,
+            "variable_kind": variable_kind,
+            "old_name": old_name,
+            "new_name": new_name,
+        }
+
+    @handle_exceptions
+    def set_variable_type(
+        self,
+        function_name_or_address: str,
+        variable_name: str,
+        type_name: str,
+    ) -> dict:
+        from ghidra.program.model.symbol import SourceType
+
+        func, variable_kind, variable = self._resolve_function_variable(
+            function_name_or_address, variable_name
+        )
+        function_name = str(func.getName())
+        function_address = str(func.getEntryPoint())
+        old_type = str(variable.getDataType().getDisplayName())
+        data_type = self._parse_data_type(type_name)
+
+        with ghidra_transaction(
+            self.program,
+            f"pyghidra-mcp: set {variable_kind} type {variable_name} -> {type_name}",
+        ):
+            variable.setDataType(data_type, SourceType.USER_DEFINED)
+
+        self.invalidate_decompiler_cache()
+        return {
+            "function_name": function_name,
+            "function_address": function_address,
+            "variable_kind": variable_kind,
+            "variable_name": str(variable.getName()),
+            "old_type": old_type,
+            "new_type": str(variable.getDataType().getDisplayName()),
+        }
+
+    @handle_exceptions
     def set_comment(self, target: str, comment: str, comment_type: str) -> dict:
         try:
             from ghidra.program.model.listing import CommentType
@@ -877,18 +976,10 @@ class GhidraTools:
         }
 
     def invalidate_decompiler_cache(self) -> None:
-        for method_name in ("flushCache", "resetDecompiler"):
-            method = getattr(self.decompiler, method_name, None)
-            if method is not None:
-                try:
-                    method()
-                except Exception:
-                    logger.debug(
-                        "Failed to invalidate decompiler cache with %s",
-                        method_name,
-                        exc_info=True,
-                    )
-                return
+        try:
+            self.decompiler_pool.invalidate_all()
+        except Exception:
+            logger.debug("Failed to invalidate decompiler cache", exc_info=True)
 
     def _parse_address(self, address: str):
         addr_str = address[2:] if address.lower().startswith("0x") else address
