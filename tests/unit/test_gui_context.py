@@ -192,3 +192,38 @@ def test_wait_for_gui_ready_opens_project_when_frontend_is_idle(monkeypatch, tmp
     assert project is opened_project
     gui_context_module._run_on_swing.assert_called_once()
     project_manager.getLastOpenedProject.assert_not_called()
+
+
+def test_wait_for_gui_ready_tolerates_frontend_not_running_yet(monkeypatch, tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project_gpr = project_dir / "proj.gpr"
+    project_gpr.write_text("", encoding="utf-8")
+
+    project_spec = Mock(
+        project_directory=project_dir,
+        gpr_path=project_gpr,
+        project_name="proj",
+    )
+
+    opened_project = Mock()
+    project_manager = Mock(getLastOpenedProject=Mock(return_value="locator"))
+    front_end_tool = Mock(getProjectManager=Mock(return_value=project_manager))
+    app_info = Mock(
+        getActiveProject=Mock(side_effect=[None, None, opened_project]),
+        getFrontEndTool=Mock(side_effect=[RuntimeError("frontend not ready"), front_end_tool]),
+    )
+
+    monkeypatch.setitem(sys.modules, "ghidra.framework.main", Mock(AppInfo=app_info))
+    monkeypatch.setitem(
+        sys.modules,
+        "ghidra.framework.model",
+        Mock(ProjectLocator=Mock(return_value="locator")),
+    )
+    monkeypatch.setattr(gui_context_module, "_run_on_swing", Mock(return_value=opened_project))
+    monkeypatch.setattr(gui_context_module.time, "sleep", Mock())
+
+    project = GuiPyGhidraContext.wait_for_gui_ready(project_spec, timeout=1, interval=0)
+
+    assert project is opened_project
+    gui_context_module._run_on_swing.assert_called_once()

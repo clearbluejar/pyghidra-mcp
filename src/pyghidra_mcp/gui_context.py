@@ -73,7 +73,7 @@ class GuiPyGhidraContext(IndexingMixin):
         self.refresh_programs()
 
     @staticmethod
-    def wait_for_gui_ready(
+    def wait_for_gui_ready(  # noqa: C901
         project_spec: ProjectSpec,
         timeout: float = 30.0,
         interval: float = 0.2,
@@ -84,11 +84,17 @@ class GuiPyGhidraContext(IndexingMixin):
         deadline = time.time() + timeout
         attempted_open = False
         while time.time() < deadline:
-            project = AppInfo.getActiveProject()
+            try:
+                project = AppInfo.getActiveProject()
+            except Exception:
+                project = None
             if project is not None:
                 return project
 
-            front_end_tool = AppInfo.getFrontEndTool()
+            try:
+                front_end_tool = AppInfo.getFrontEndTool()
+            except Exception:
+                front_end_tool = None
             if front_end_tool is not None and not attempted_open:
                 attempted_open = True
 
