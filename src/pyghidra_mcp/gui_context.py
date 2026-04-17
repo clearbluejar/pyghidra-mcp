@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pyghidra_mcp.context import ProgramInfo
+from pyghidra_mcp.decompiler_pool import DecompilerPool
 from pyghidra_mcp.import_detection import is_ghidra_importable
 from pyghidra_mcp.import_planning import ImportCandidate, build_import_plan
 from pyghidra_mcp.indexing_mixin import IndexingMixin
@@ -53,7 +54,7 @@ class GuiPyGhidraContext(IndexingMixin):
         project_spec: ProjectSpec,
         *,
         pyghidra_mcp_dir: Path | None = None,
-        readiness_timeout: float = 30.0,
+        readiness_timeout: float = 240.0,
         readiness_interval: float = 0.2,
     ):
         self.project_spec = project_spec
@@ -587,7 +588,7 @@ class GuiPyGhidraContext(IndexingMixin):
             name=program.getName(),
             program=program,
             flat_api=FlatProgramAPI(program),
-            decompiler=self._setup_decompiler(program),
+            decompiler_pool=self._create_decompiler_pool(program),
             metadata={},
             ghidra_analysis_complete=False,
             file_path=None,
@@ -632,13 +633,12 @@ class GuiPyGhidraContext(IndexingMixin):
         return decompiler
 
     @staticmethod
+    def _create_decompiler_pool(program) -> DecompilerPool:
+        return DecompilerPool(lambda: GuiPyGhidraContext._setup_decompiler(program), size=2)
+
+    @staticmethod
     def _dispose_decompiler(program_info: ProgramInfo) -> None:
-        decompiler = program_info.decompiler
-        for method_name in ("dispose", "closeProgram"):
-            method = getattr(decompiler, method_name, None)
-            if method is not None:
-                try:
-                    method()
-                except Exception:
-                    logger.debug("Failed to dispose decompiler with %s", method_name, exc_info=True)
-                return
+        try:
+            program_info.decompiler_pool.dispose()
+        except Exception:
+            logger.debug("Failed to dispose decompiler pool", exc_info=True)

@@ -4,6 +4,7 @@ MCP Tool handlers for pyghidra-mcp.
 This module contains all MCP tool implementations with centralized error handling.
 """
 
+import asyncio
 import functools
 import logging
 from typing import Literal, cast
@@ -33,6 +34,8 @@ from pyghidra_mcp.models import (
     SearchMode,
     StringSearchResults,
     SymbolSearchResults,
+    VariableRenameResponse,
+    VariableTypeResponse,
 )
 from pyghidra_mcp.tools import GhidraTools
 
@@ -96,8 +99,6 @@ def mcp_error_handler(func):
         except Exception as e:
             raise handle_error(e) from e
 
-    import asyncio
-
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
@@ -113,26 +114,33 @@ async def decompile_function(
     include_callees: bool = False,
     include_strings: bool = False,
     include_xrefs: bool = False,
+    timeout_sec: int = 30,
 ) -> list[DecompiledFunction]:
     """Decompile function(s) to pseudo-C by name or address.
 
     Accepts a single target or a list for batch decompilation.
     Rich response flags attach callees, strings, and/or xrefs to each result.
+    `timeout_sec` applies per target.
     """
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
     targets = [name_or_address] if isinstance(name_or_address, str) else name_or_address
     results: list[DecompiledFunction] = []
+
+    def _decompile_target(target: str) -> DecompiledFunction:
+        result = tools.decompile_function_by_name_or_addr(target, timeout=timeout_sec)
+        if include_callees:
+            result.callees = tools.get_callees(target)
+        if include_strings:
+            result.referenced_strings = tools.get_referenced_strings(target)
+        if include_xrefs:
+            result.xrefs = tools.list_xrefs(target)
+        return result
+
     for target in targets:
         try:
-            result = tools.decompile_function_by_name_or_addr(target)
-            if include_callees:
-                result.callees = tools.get_callees(target)
-            if include_strings:
-                result.referenced_strings = tools.get_referenced_strings(target)
-            if include_xrefs:
-                result.xrefs = tools.list_xrefs(target)
+            result = await asyncio.to_thread(_decompile_target, target)
             results.append(result)
         except Exception as e:
             results.append(DecompiledFunction(name=target, code="", error=str(e)))
@@ -262,6 +270,52 @@ def rename_function(
     )
     result = cast(dict, result)
     return RenameResponse(binary_name=binary_name, **result)
+
+
+@mcp_error_handler
+def rename_variable(
+    binary_name: str,
+    function_name_or_address: str,
+    variable_name: str,
+    new_name: str,
+    ctx: Context,
+) -> VariableRenameResponse:
+    """Rename a function parameter or local variable by exact name within a function.
+
+    Missing or ambiguous names return an error instead of guessing.
+    """
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.rename_variable(function_name_or_address, variable_name, new_name),
+    )
+    result = cast(dict, result)
+    return VariableRenameResponse(binary_name=binary_name, **result)
+
+
+@mcp_error_handler
+def set_variable_type(
+    binary_name: str,
+    function_name_or_address: str,
+    variable_name: str,
+    type_name: str,
+    ctx: Context,
+) -> VariableTypeResponse:
+    """Set the data type for a function parameter or local variable by exact name.
+
+    Missing or ambiguous names return an error instead of guessing.
+    """
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.set_variable_type(function_name_or_address, variable_name, type_name),
+    )
+    result = cast(dict, result)
+    return VariableTypeResponse(binary_name=binary_name, **result)
 
 
 @mcp_error_handler

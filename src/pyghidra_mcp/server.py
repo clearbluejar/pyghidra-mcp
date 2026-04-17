@@ -51,6 +51,8 @@ def register_common_tools(server: FastMCP) -> None:
     server.tool()(mcp_tools.list_project_binaries)
     server.tool()(mcp_tools.list_project_binary_metadata)
     server.tool()(mcp_tools.rename_function)
+    server.tool()(mcp_tools.rename_variable)
+    server.tool()(mcp_tools.set_variable_type)
     server.tool()(mcp_tools.set_comment)
     server.tool()(mcp_tools.delete_project_binary)
     server.tool()(mcp_tools.list_exports)
@@ -355,7 +357,7 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
     help="Location to store GZFs of analyzed binaries.",
 )
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
-def main(
+def main(  # noqa: C901
     transport: str,
     input_paths: list[Path],
     project_path: Path,
@@ -416,10 +418,16 @@ def main(
         ensure_macos_framework_python()
         launcher = GuiPyGhidraMcpLauncher(project_spec.gpr_path)
         launcher.start()
+        gui_server_error: list[BaseException] = []
 
         def gui_server_thread() -> None:
-            init_gui_context(mcp=mcp, project_spec=project_spec, input_paths=input_paths)
-            run_mcp_server(mcp, transport)
+            try:
+                init_gui_context(mcp=mcp, project_spec=project_spec, input_paths=input_paths)
+                run_mcp_server(mcp, transport)
+            except BaseException as exc:
+                gui_server_error.append(exc)
+                logger.exception("GUI MCP server failed during startup or runtime.")
+                launcher.request_shutdown()
 
         server_thread = threading.Thread(
             target=gui_server_thread,
@@ -435,6 +443,8 @@ def main(
             context = getattr(mcp, "_pyghidra_context", None)
             if context is not None:
                 context.close()
+        if gui_server_error:
+            raise RuntimeError("GUI MCP server failed to start.") from gui_server_error[0]
         return
 
     init_pyghidra_context(
