@@ -7,6 +7,7 @@ import pyghidra_mcp.server as server
 def _common_kwargs():
     return {
         "mcp": Mock(),
+        "transport": "stdio",
         "project_name": "proj",
         "project_directory": "/tmp/proj",
         "pyghidra_mcp_dir": Path("/tmp/proj-pyghidra-mcp"),
@@ -80,3 +81,27 @@ def test_init_pyghidra_context_wait_for_analysis_skips_background_indexing(monke
 
     fake_context.analyze_project.assert_called_once_with()
     fake_context.schedule_indexing.assert_not_called()
+    fake_context.schedule_startup_indexing.assert_not_called()
+
+
+def test_init_pyghidra_context_wait_for_analysis_indexes_for_streamable_server(monkeypatch):
+    fake_context = Mock()
+    fake_context.import_binaries.return_value = ["/bin/new"]
+    fake_context.list_binaries.return_value = ["/bin/new"]
+    fake_context.programs = {"/bin/new": Mock()}
+
+    monkeypatch.setattr(server, "pyghidra", Mock(start=Mock()))
+    monkeypatch.setattr(server, "PyGhidraContext", Mock(return_value=fake_context))
+
+    kwargs = _common_kwargs()
+    kwargs["wait_for_analysis"] = True
+    kwargs["transport"] = "streamable-http"
+
+    server.init_pyghidra_context(
+        input_paths=[Path("/tmp/newbin")],
+        **kwargs,
+    )
+
+    fake_context.analyze_project.assert_called_once_with()
+    fake_context.schedule_indexing.assert_not_called()
+    fake_context.schedule_startup_indexing.assert_called_once_with(max_binaries=1)

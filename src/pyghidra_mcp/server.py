@@ -75,6 +75,7 @@ register_common_tools(mcp)
 def init_pyghidra_context(  # noqa: C901
     mcp: FastMCP,
     *,
+    transport: str,
     input_paths: list[Path],
     project_name: str,
     project_directory: str,
@@ -153,7 +154,12 @@ def init_pyghidra_context(  # noqa: C901
     if imported_programs or force_analysis or wait_for_analysis:
         logger.info(f"Analyzing project: {pyghidra_context.project}")
         pyghidra_context.analyze_project()
-        if not wait_for_analysis:
+        if wait_for_analysis:
+            if transport != "stdio":
+                pyghidra_context.schedule_startup_indexing(
+                    max_binaries=max(len(pyghidra_context.programs), 1)
+                )
+        else:
             for binary_name in imported_programs:
                 pyghidra_context.schedule_indexing(binary_name)
     else:
@@ -434,6 +440,7 @@ def main(
     init_pyghidra_context(
         mcp=mcp,
         input_paths=input_paths,
+        transport=transport,
         project_name=project_name,
         project_directory=project_directory,
         force_analysis=force_analysis,
