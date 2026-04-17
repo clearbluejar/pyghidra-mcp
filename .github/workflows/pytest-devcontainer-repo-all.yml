@@ -99,6 +99,7 @@ jobs:
         imageTag: ${{ env.DC_IMAGE_TAG }}
         push: never
         runCmd: |
+          set -o pipefail
           sudo apt-get update
           sudo apt-get install -y xvfb libxtst6 libxi6 libxrender1
 
@@ -117,14 +118,21 @@ jobs:
           python -m pytest \
             tests/integration/test_gui_smoke.py \
             tests/integration/test_gui_background_indexing.py \
-            --junitxml=junit/gui-integration-test-results.xml
+            -rA \
+            -vv \
+            -s \
+            --durations=10 \
+            --junitxml=junit/gui-integration-test-results.xml \
+            2>&1 | tee junit/gui-integration-test.log
 
     - name: Upload GUI integration test results
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
         name: gui-integration-test-results
-        path: junit/gui-integration-test-results.xml
+        path: |
+          junit/gui-integration-test-results.xml
+          junit/gui-integration-test.log
         retention-days: 7
 
   test-macos:
