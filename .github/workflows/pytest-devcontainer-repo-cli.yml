@@ -95,12 +95,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - ghidra_version: latest
-            python_version: "3.13"
           - ghidra_version: "12.0"
             python_version: "3.13"
-          # Ghidra 11.x excluded on macOS: JVM startup exceeds 240s timeout,
-          # causing "Server did not start in time" in every CI run.
+          # Keep macOS CLI coverage on one supported Ghidra release. The full
+          # version matrix already runs on Linux, and "latest" regularly times
+          # out on hosted macOS runners.
 
     steps:
     - uses: actions/checkout@v4
