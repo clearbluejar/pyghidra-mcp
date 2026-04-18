@@ -291,8 +291,9 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
     default=False,
     show_default=True,
     help=(
-        "Launch Ghidra GUI in-process and serve MCP over HTTP against GUI-open programs. "
-        "Cannot attach to an already-running external Ghidra process."
+        "Launch Ghidra GUI in-process, then open the requested project after startup and "
+        "serve MCP over HTTP against GUI-open programs. Cannot attach to an already-running "
+        "external Ghidra process."
     ),
 )
 # --- Project Options ---
