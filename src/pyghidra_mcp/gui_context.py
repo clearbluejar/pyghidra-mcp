@@ -189,7 +189,13 @@ class GuiPyGhidraContext(IndexingMixin):
                 )
             return results
 
-    def open_program_in_gui(self, binary_name: str, *, current: bool = False) -> dict[str, Any]:
+    def open_program_in_gui(
+        self,
+        binary_name: str,
+        *,
+        current: bool = False,
+        new_window: bool = True,
+    ) -> dict[str, Any]:
         from java.util import List  # type: ignore
 
         from ghidra.app.services import ProgramManager
@@ -199,7 +205,7 @@ class GuiPyGhidraContext(IndexingMixin):
         program_manager = (
             primary_tool.getService(ProgramManager) if primary_tool is not None else None
         )
-        if program_manager is None or not self._tool_is_visible(primary_tool):
+        if new_window or program_manager is None or not self._tool_is_visible(primary_tool):
             self.project.getToolServices().launchDefaultTool(List.of(domain_file))
         else:
             state = ProgramManager.OPEN_CURRENT if current else ProgramManager.OPEN_VISIBLE

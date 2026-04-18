@@ -248,7 +248,7 @@ def test_wait_for_gui_ready_tolerates_frontend_not_running_yet(monkeypatch, tmp_
     assert project is active_project
 
 
-def test_open_program_in_gui_prefers_codebrowser_launch():
+def test_open_program_in_gui_default_launches_new_window():
     sys.modules["ghidra.app.services"] = Mock(ProgramManager=Mock(OPEN_CURRENT=1, OPEN_VISIBLE=2))
     sys.modules["ghidra.framework.model"] = Mock(DomainFile=Mock(DEFAULT_VERSION=1))
     sys.modules["java.util"] = Mock(List=Mock(of=Mock(side_effect=lambda value: [value])))
@@ -298,14 +298,10 @@ def test_open_program_in_gui_prefers_codebrowser_launch():
     assert result["path"] == "/prog"
 
 
-def test_open_program_in_gui_raises_clear_error_when_no_program_manager_after_launch():
+def test_open_program_in_gui_new_window_launches_default_tool():
     sys.modules["ghidra.app.services"] = Mock(ProgramManager=Mock(OPEN_CURRENT=1, OPEN_VISIBLE=2))
-    sys.modules["ghidra.framework.model"] = Mock(DomainFile=Mock(DEFAULT_VERSION=1))
     sys.modules["java.util"] = Mock(List=Mock(of=Mock(side_effect=lambda value: [value])))
-    tool_services = Mock(
-        launchDefaultTool=Mock(return_value=None),
-        getRunningTools=Mock(return_value=[]),
-    )
+    tool_services = Mock(launchDefaultTool=Mock(return_value=Mock()))
     context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
     context.project = Mock(getToolServices=Mock(return_value=tool_services))
     context._find_domain_file = Mock(
@@ -313,16 +309,35 @@ def test_open_program_in_gui_raises_clear_error_when_no_program_manager_after_la
             getPathname=Mock(return_value="/prog"),
         )
     )
+    program_manager = Mock(getCurrentProgram=Mock(return_value=Mock()), openProgram=Mock())
+    primary_tool = Mock(getService=Mock(return_value=program_manager))
+    context._get_primary_program_manager_tool = Mock(return_value=primary_tool)
+    context._tool_is_visible = Mock(return_value=True)
     context.refresh_programs = Mock()
-    context._programs_lock = threading.RLock()
-    context.programs = {}
+    context.schedule_indexing = Mock()
     context.run_on_swing = Mock(side_effect=lambda fn, *args, **kwargs: fn(*args, **kwargs))
+    tool = Mock(getService=Mock(return_value=program_manager))
+    context._find_tool_for_program = Mock(return_value=tool)
+    context._programs_lock = threading.RLock()
+    context.programs = {
+        "/prog": ProgramInfo(
+            name="prog",
+            program=Mock(),
+            flat_api=None,
+            decompiler_pool=Mock(),
+            metadata={},
+            ghidra_analysis_complete=True,
+        )
+    }
 
-    with pytest.raises(RuntimeError, match="Timed out waiting for GUI to open program"):
-        context.open_program_in_gui("/prog")
+    result = context.open_program_in_gui("/prog", new_window=True)
+
+    tool_services.launchDefaultTool.assert_called_once()
+    program_manager.openProgram.assert_not_called()
+    assert result["path"] == "/prog"
 
 
-def test_open_program_in_gui_returns_opened_program_state():
+def test_open_program_in_gui_reuses_visible_tool_when_requested():
     sys.modules["ghidra.app.services"] = Mock(ProgramManager=Mock(OPEN_CURRENT=1, OPEN_VISIBLE=2))
     sys.modules["ghidra.framework.model"] = Mock(DomainFile=Mock(DEFAULT_VERSION=1))
 
@@ -354,10 +369,35 @@ def test_open_program_in_gui_returns_opened_program_state():
         )
     }
 
-    result = context.open_program_in_gui("/prog")
+    result = context.open_program_in_gui("/prog", new_window=False)
 
+    tool_services.launchDefaultTool.assert_not_called()
     program_manager.openProgram.assert_called_once()
     assert result["path"] == "/prog"
+
+
+def test_open_program_in_gui_raises_clear_error_when_no_program_manager_after_launch():
+    sys.modules["ghidra.app.services"] = Mock(ProgramManager=Mock(OPEN_CURRENT=1, OPEN_VISIBLE=2))
+    sys.modules["ghidra.framework.model"] = Mock(DomainFile=Mock(DEFAULT_VERSION=1))
+    sys.modules["java.util"] = Mock(List=Mock(of=Mock(side_effect=lambda value: [value])))
+    tool_services = Mock(
+        launchDefaultTool=Mock(return_value=None),
+        getRunningTools=Mock(return_value=[]),
+    )
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    context.project = Mock(getToolServices=Mock(return_value=tool_services))
+    context._find_domain_file = Mock(
+        return_value=Mock(
+            getPathname=Mock(return_value="/prog"),
+        )
+    )
+    context.refresh_programs = Mock()
+    context._programs_lock = threading.RLock()
+    context.programs = {}
+    context.run_on_swing = Mock(side_effect=lambda fn, *args, **kwargs: fn(*args, **kwargs))
+
+    with pytest.raises(RuntimeError, match="Timed out waiting for GUI to open program"):
+        context.open_program_in_gui("/prog")
 
 
 def test_tool_is_visible_prefers_frame_visibility():
