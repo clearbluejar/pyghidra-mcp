@@ -47,7 +47,8 @@ class GuiPyGhidraMcpLauncher(PyGhidraLauncher):
     def __init__(self, project_gpr_path: Path, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.add_vmargs("-DUSER_AGREEMENT=ACCEPT")
-        self.args = [str(project_gpr_path.absolute())]
+        self.project_gpr_path = project_gpr_path
+        self.args = []
         self._is_exiting = threading.Event()
         self._shutdown_requested = False
 

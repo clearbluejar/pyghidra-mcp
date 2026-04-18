@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 def _run_on_swing(fn, *args, **kwargs):
     import jpype
-    from ghidra.util import Swing
     from java.lang import Runnable  # type: ignore
+
+    from ghidra.util import Swing
 
     result_box: list[Any] = [None]
     exc_box: list[BaseException | None] = [None]
@@ -40,6 +41,24 @@ def _run_on_swing(fn, *args, **kwargs):
     if exc_box[0] is not None:
         raise exc_box[0]
     return result_box[0]
+
+
+def _open_gui_project(front_end_tool, project_spec):
+    from ghidra.framework.main import AppInfo
+    from ghidra.framework.model import ProjectLocator
+
+    active_project = AppInfo.getActiveProject()
+    if active_project is not None:
+        return active_project
+
+    project_manager = front_end_tool.getProjectManager()
+    locator = ProjectLocator(
+        str(project_spec.project_directory.absolute()),
+        project_spec.project_name,
+    )
+    opened_project = project_manager.openProject(locator, True, False)
+    front_end_tool.setActiveProject(opened_project)
+    return opened_project
 
 
 class GuiPyGhidraContext(IndexingMixin):
@@ -74,12 +93,12 @@ class GuiPyGhidraContext(IndexingMixin):
         self.refresh_programs()
 
     @staticmethod
-    def wait_for_gui_ready(  # noqa: C901
+    def wait_for_gui_ready(
         project_spec: ProjectSpec,
         timeout: float = 30.0,
         interval: float = 0.2,
     ):
-        """Wait until Ghidra has an active project, opening it if the GUI is idle."""
+        """Wait until Ghidra has an active project, opening the requested one if needed."""
         from ghidra.framework.main import AppInfo
 
         deadline = time.time() + timeout
@@ -99,26 +118,12 @@ class GuiPyGhidraContext(IndexingMixin):
             if front_end_tool is not None and not attempted_open:
                 attempted_open = True
 
-                def do_open(front_end_tool=front_end_tool, project_spec=project_spec):
-                    from ghidra.framework.model import ProjectLocator
-
-                    active_project = AppInfo.getActiveProject()
-                    if active_project is not None:
-                        return active_project
-
-                    project_manager = front_end_tool.getProjectManager()
-                    locator = project_manager.getLastOpenedProject()
-                    if locator is None:
-                        locator = ProjectLocator(
-                            str(project_spec.project_directory.absolute()),
-                            project_spec.project_name,
-                        )
-                    opened_project = project_manager.openProject(locator, True, False)
-                    front_end_tool.setActiveProject(opened_project)
-                    return opened_project
-
                 try:
-                    project = _run_on_swing(do_open)
+                    project = _run_on_swing(
+                        _open_gui_project,
+                        front_end_tool,
+                        project_spec,
+                    )
                 except Exception:
                     logger.exception(
                         "Failed to explicitly open GUI project %s; continuing to wait.",
@@ -129,7 +134,9 @@ class GuiPyGhidraContext(IndexingMixin):
                         return project
             time.sleep(interval)
 
-        raise RuntimeError("Timed out waiting for Ghidra GUI active project.")
+        raise RuntimeError(
+            f"Timed out waiting for Ghidra GUI active project: {project_spec.gpr_path}"
+        )
 
     def refresh_programs(self) -> None:
         active: dict[str, Any] = {}
@@ -183,22 +190,28 @@ class GuiPyGhidraContext(IndexingMixin):
             return results
 
     def open_program_in_gui(self, binary_name: str, *, current: bool = False) -> dict[str, Any]:
+        from java.util import List  # type: ignore
+
         from ghidra.app.services import ProgramManager
-        from ghidra.framework.model import DomainFile
 
         domain_file = self._find_domain_file(binary_name)
-        program_manager = self._get_primary_program_manager(required=False)
-        if program_manager is None:
-            from java.util import List  # type: ignore
+        primary_tool = self._get_primary_program_manager_tool(required=False)
+        program_manager = (
+            primary_tool.getService(ProgramManager) if primary_tool is not None else None
+        )
+        if program_manager is None or not self._tool_is_visible(primary_tool):
+            self.project.getToolServices().launchDefaultTool(List.of(domain_file))
+        else:
+            state = ProgramManager.OPEN_CURRENT if current else ProgramManager.OPEN_VISIBLE
 
-            tool = self.project.getToolServices().launchDefaultTool(List.of(domain_file))
-            if tool is None:
-                raise RuntimeError(f"Failed to launch a Ghidra tool for {binary_name}")
-            program_manager = self._get_primary_program_manager()
+            def open_program():
+                program_manager.openProgram(
+                    domain_file,
+                    domain_file.DEFAULT_VERSION,
+                    state,
+                )
 
-        assert program_manager is not None
-        state = ProgramManager.OPEN_CURRENT if current else ProgramManager.OPEN_VISIBLE
-        program_manager.openProgram(domain_file, DomainFile.DEFAULT_VERSION, state)
+            self.run_on_swing(open_program)
 
         expected_path = str(domain_file.getPathname())
         deadline = time.time() + 10
@@ -207,12 +220,17 @@ class GuiPyGhidraContext(IndexingMixin):
             with self._programs_lock:
                 program_info = self.programs.get(expected_path)
                 if program_info is not None:
+                    tool = self._find_tool_for_program(program_info.program)
+                    live_program_manager = tool.getService(ProgramManager)
                     self.schedule_indexing(expected_path)
                     return {
                         "name": program_info.name,
                         "path": expected_path,
                         "current": current
-                        or program_info.program == program_manager.getCurrentProgram(),
+                        or (
+                            live_program_manager is not None
+                            and program_info.program == live_program_manager.getCurrentProgram()
+                        ),
                         "analysis_complete": program_info.analysis_complete,
                     }
             time.sleep(0.1)
@@ -270,9 +288,20 @@ class GuiPyGhidraContext(IndexingMixin):
         return program_managers
 
     def _get_primary_program_manager(self, *, required: bool = True):
-        program_managers = self._get_program_managers()
-        if program_managers:
-            return program_managers[0]
+        primary_tool = self._get_primary_program_manager_tool(required=required)
+        if primary_tool is not None:
+            from ghidra.app.services import ProgramManager
+
+            return primary_tool.getService(ProgramManager)
+        return None
+
+    def _get_primary_program_manager_tool(self, *, required: bool = True):
+        from ghidra.app.services import ProgramManager
+
+        for tool in self.project.getToolServices().getRunningTools():
+            program_manager = tool.getService(ProgramManager)
+            if program_manager is not None:
+                return tool
         if required:
             raise RuntimeError("No Ghidra tool with ProgramManager is available.")
         return None
@@ -291,6 +320,30 @@ class GuiPyGhidraContext(IndexingMixin):
         if fallback_tool is not None:
             return fallback_tool
         raise RuntimeError("No Ghidra tool with ProgramManager is available.")
+
+    def _tool_is_visible(self, tool) -> bool:
+        if tool is None:
+            return False
+
+        def is_visible():
+            frame = tool.getToolFrame()
+            if frame is not None:
+                try:
+                    if frame.isVisible():
+                        return True
+                except Exception:
+                    pass
+
+            win_mgr = tool.getWindowManager()
+            if win_mgr is not None:
+                try:
+                    return bool(win_mgr.isVisible())
+                except Exception:
+                    return False
+
+            return False
+
+        return bool(self.run_on_swing(is_visible))
 
     def _find_domain_file(self, binary_name: str):
         matches = []
@@ -456,10 +509,10 @@ class GuiPyGhidraContext(IndexingMixin):
     def import_binary(
         self, binary_path: str | Path, relative_path: Path | None = None
     ) -> str | list[str]:
-        from ghidra.app.util.importer import ProgramLoader
-        from ghidra.util.task import TaskMonitor
         from java.io import File  # type: ignore
 
+        from ghidra.app.util.importer import ProgramLoader
+        from ghidra.util.task import TaskMonitor
         from pyghidra_mcp.context import PyGhidraContext
 
         binary_path = Path(binary_path)
