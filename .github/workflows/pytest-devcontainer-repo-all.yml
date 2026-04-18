@@ -286,7 +286,17 @@ jobs:
     - name: Run integration tests on macOS
       run: |
         mkdir -p junit
-        python -m pytest tests/integration/ --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
+        # Linux covers the full integration matrix. Keep macOS on a focused subset
+        # so hosted runners finish within the 120 minute job limit.
+        python -m pytest \
+          tests/integration/test_background_indexing.py \
+          tests/integration/test_decompile_function.py \
+          tests/integration/test_import_binary.py \
+          tests/integration/test_rename_variable.py \
+          tests/integration/test_stdio_client.py \
+          tests/integration/test_streamable_client.py \
+          --doctest-modules \
+          --junitxml=junit/integration-test-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python-macos.xml
 
     - name: Upload unit test results (macOS)
       if: ${{ always() }}
