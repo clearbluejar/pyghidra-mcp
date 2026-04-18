@@ -1,6 +1,5 @@
 import json
 import os
-import platform
 import tempfile
 
 import pytest
@@ -8,10 +7,6 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from pyghidra_mcp.context import PyGhidraContext
-
-
-def _helper_symbol_name() -> str:
-    return "_helper" if platform.system() == "Darwin" else "helper"
 
 
 @pytest.fixture(scope="module")
@@ -67,16 +62,20 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
-            symbols_result = await session.call_tool(
-                "search_symbols_by_name",
+            decompile_result = await session.call_tool(
+                "decompile_function",
                 {
                     "binary_name": binary_name,
-                    "query": f"^{_helper_symbol_name()}$",
-                    "functions_only": True,
+                    "name_or_address": "main",
+                    "include_callees": True,
                 },
             )
-            symbols_payload = json.loads(symbols_result.content[0].text)
-            helper_name = symbols_payload["symbols"][0]["name"]
+            decompile_payload = json.loads(decompile_result.content[0].text)
+            helper_name = next(
+                callee["name"]
+                for callee in decompile_payload["callees"]
+                if callee["name"].endswith("helper")
+            )
 
             rename_result = await session.call_tool(
                 "rename_variable",
@@ -115,16 +114,20 @@ async def test_set_variable_type_tool(variable_server_params, variable_test_bina
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
-            symbols_result = await session.call_tool(
-                "search_symbols_by_name",
+            decompile_result = await session.call_tool(
+                "decompile_function",
                 {
                     "binary_name": binary_name,
-                    "query": f"^{_helper_symbol_name()}$",
-                    "functions_only": True,
+                    "name_or_address": "main",
+                    "include_callees": True,
                 },
             )
-            symbols_payload = json.loads(symbols_result.content[0].text)
-            helper_name = symbols_payload["symbols"][0]["name"]
+            decompile_payload = json.loads(decompile_result.content[0].text)
+            helper_name = next(
+                callee["name"]
+                for callee in decompile_payload["callees"]
+                if callee["name"].endswith("helper")
+            )
 
             type_result = await session.call_tool(
                 "set_variable_type",
