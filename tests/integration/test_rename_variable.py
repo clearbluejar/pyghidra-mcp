@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import tempfile
 
 import pytest
@@ -7,6 +8,10 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from pyghidra_mcp.context import PyGhidraContext
+
+
+def _helper_symbol_name() -> str:
+    return "_helper" if platform.system() == "Darwin" else "helper"
 
 
 @pytest.fixture(scope="module")
@@ -66,7 +71,7 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
                 "search_symbols_by_name",
                 {
                     "binary_name": binary_name,
-                    "query": "^helper$",
+                    "query": f"^{_helper_symbol_name()}$",
                     "functions_only": True,
                 },
             )
@@ -88,15 +93,20 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
             assert rename_payload["old_name"] == "count"
             assert rename_payload["new_name"] == "item_count"
 
-            decompile_result = await session.call_tool(
-                "decompile_function",
+            type_result = await session.call_tool(
+                "set_variable_type",
                 {
                     "binary_name": binary_name,
-                    "name_or_address": helper_name,
+                    "function_name_or_address": helper_name,
+                    "variable_name": "item_count",
+                    "type_name": "long",
                 },
             )
-            decompile_payload = json.loads(decompile_result.content[0].text)
-            assert "item_count" in decompile_payload["code"]
+            type_payload = json.loads(type_result.content[0].text)
+            assert type_payload["function_name"] == helper_name
+            assert type_payload["variable_name"] == "item_count"
+            assert type_payload["old_type"] == "int"
+            assert type_payload["new_type"] == "long"
 
 
 @pytest.mark.asyncio
@@ -109,7 +119,7 @@ async def test_set_variable_type_tool(variable_server_params, variable_test_bina
                 "search_symbols_by_name",
                 {
                     "binary_name": binary_name,
-                    "query": "^helper$",
+                    "query": f"^{_helper_symbol_name()}$",
                     "functions_only": True,
                 },
             )
@@ -132,12 +142,17 @@ async def test_set_variable_type_tool(variable_server_params, variable_test_bina
             assert type_payload["old_type"] == "int"
             assert type_payload["new_type"] == "long"
 
-            decompile_result = await session.call_tool(
-                "decompile_function",
+            reset_result = await session.call_tool(
+                "set_variable_type",
                 {
                     "binary_name": binary_name,
-                    "name_or_address": helper_name,
+                    "function_name_or_address": helper_name,
+                    "variable_name": "count",
+                    "type_name": "int",
                 },
             )
-            decompile_payload = json.loads(decompile_result.content[0].text)
-            assert "long count" in decompile_payload["code"]
+            reset_payload = json.loads(reset_result.content[0].text)
+            assert reset_payload["function_name"] == helper_name
+            assert reset_payload["variable_name"] == "count"
+            assert reset_payload["old_type"] == "long"
+            assert reset_payload["new_type"] == "int"
