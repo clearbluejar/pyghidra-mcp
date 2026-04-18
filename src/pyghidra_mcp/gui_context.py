@@ -24,9 +24,8 @@ logger = logging.getLogger(__name__)
 
 def _run_on_swing(fn, *args, **kwargs):
     import jpype
-    from java.lang import Runnable  # type: ignore
-
     from ghidra.util import Swing
+    from java.lang import Runnable  # type: ignore
 
     result_box: list[Any] = [None]
     exc_box: list[BaseException | None] = [None]
@@ -196,9 +195,8 @@ class GuiPyGhidraContext(IndexingMixin):
         current: bool = False,
         new_window: bool = True,
     ) -> dict[str, Any]:
-        from java.util import List  # type: ignore
-
         from ghidra.app.services import ProgramManager
+        from java.util import List  # type: ignore
 
         domain_file = self._find_domain_file(binary_name)
         primary_tool = self._get_primary_program_manager_tool(required=False)
@@ -515,10 +513,10 @@ class GuiPyGhidraContext(IndexingMixin):
     def import_binary(
         self, binary_path: str | Path, relative_path: Path | None = None
     ) -> str | list[str]:
-        from java.io import File  # type: ignore
-
         from ghidra.app.util.importer import ProgramLoader
         from ghidra.util.task import TaskMonitor
+        from java.io import File  # type: ignore
+
         from pyghidra_mcp.context import PyGhidraContext
 
         binary_path = Path(binary_path)
