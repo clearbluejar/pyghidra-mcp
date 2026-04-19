@@ -9,6 +9,16 @@ from mcp.client.stdio import stdio_client
 from pyghidra_mcp.context import PyGhidraContext
 
 
+def _callee_name(callee):
+    if isinstance(callee, dict):
+        return callee.get("name", "")
+    return str(callee)
+
+
+def _find_helper_callee_name(callees) -> str:
+    return next(name for name in (_callee_name(c) for c in callees) if name.endswith("helper"))
+
+
 @pytest.fixture(scope="module")
 def variable_test_binary():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
@@ -71,11 +81,7 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
                 },
             )
             decompile_payload = json.loads(decompile_result.content[0].text)
-            helper_name = next(
-                callee["name"]
-                for callee in decompile_payload["callees"]
-                if callee["name"].endswith("helper")
-            )
+            helper_name = _find_helper_callee_name(decompile_payload["callees"])
 
             rename_result = await session.call_tool(
                 "rename_variable",
@@ -123,11 +129,7 @@ async def test_set_variable_type_tool(variable_server_params, variable_test_bina
                 },
             )
             decompile_payload = json.loads(decompile_result.content[0].text)
-            helper_name = next(
-                callee["name"]
-                for callee in decompile_payload["callees"]
-                if callee["name"].endswith("helper")
-            )
+            helper_name = _find_helper_callee_name(decompile_payload["callees"])
 
             type_result = await session.call_tool(
                 "set_variable_type",
