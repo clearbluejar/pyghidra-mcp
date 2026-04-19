@@ -25,6 +25,46 @@ def _find_helper_symbol_name(symbols) -> str:
     return next(name for name in (_symbol_name(s) for s in symbols) if name.endswith("helper"))
 
 
+def _find_helper_callee_name(callees) -> str:
+    return next(name for name in (_callee_name(c) for c in callees) if name.endswith("helper"))
+
+
+async def _resolve_helper_name(session: ClientSession, binary_name: str) -> str:
+    for target in ("main", "_main", "entry"):
+        try:
+            decompile_result = await session.call_tool(
+                "decompile_function",
+                {
+                    "binary_name": binary_name,
+                    "name_or_address": target,
+                    "include_callees": True,
+                },
+            )
+            decompile_payload = json.loads(decompile_result.content[0].text)
+            callees = decompile_payload.get("callees") or []
+            try:
+                return _find_helper_callee_name(callees)
+            except StopIteration:
+                pass
+        except Exception:
+            pass
+
+    symbols_result = await session.call_tool(
+        "search_symbols_by_name",
+        {
+            "binary_name": binary_name,
+            "query": "helper",
+            "functions_only": True,
+        },
+    )
+    symbols_payload = json.loads(symbols_result.content[0].text)
+    symbols = symbols_payload.get("symbols", [])
+    try:
+        return _find_helper_symbol_name(symbols)
+    except StopIteration as exc:
+        raise AssertionError(f"Unable to resolve helper function from symbols={symbols!r}") from exc
+
+
 @pytest.fixture(scope="module")
 def variable_test_binary():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False) as f:
@@ -78,16 +118,7 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
-            symbols_result = await session.call_tool(
-                "search_symbols_by_name",
-                {
-                    "binary_name": binary_name,
-                    "query": "helper",
-                    "functions_only": True,
-                },
-            )
-            symbols_payload = json.loads(symbols_result.content[0].text)
-            helper_name = _find_helper_symbol_name(symbols_payload["symbols"])
+            helper_name = await _resolve_helper_name(session, binary_name)
 
             rename_result = await session.call_tool(
                 "rename_variable",
@@ -126,16 +157,7 @@ async def test_set_variable_type_tool(variable_server_params, variable_test_bina
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
-            symbols_result = await session.call_tool(
-                "search_symbols_by_name",
-                {
-                    "binary_name": binary_name,
-                    "query": "helper",
-                    "functions_only": True,
-                },
-            )
-            symbols_payload = json.loads(symbols_result.content[0].text)
-            helper_name = _find_helper_symbol_name(symbols_payload["symbols"])
+            helper_name = await _resolve_helper_name(session, binary_name)
 
             type_result = await session.call_tool(
                 "set_variable_type",
