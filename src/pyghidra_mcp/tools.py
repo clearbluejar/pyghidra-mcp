@@ -293,8 +293,13 @@ class GhidraTools:
         with self.decompiler_pool.acquire() as decompiler:
             result: DecompileResults = decompiler.decompileFunction(func, timeout, monitor)
         if "" == result.getErrorMessage():
-            code = result.decompiledFunction.getC()
-            sig = result.decompiledFunction.getSignature()
+            decompiled = result.getDecompiledFunction()
+            if decompiled is None:
+                code = ""
+                sig = None
+            else:
+                code = decompiled.getC()
+                sig = decompiled.getSignature()
         else:
             code = result.getErrorMessage()
             sig = None
