@@ -9,60 +9,16 @@ from mcp.client.stdio import stdio_client
 from pyghidra_mcp.context import PyGhidraContext
 
 
-def _callee_name(callee):
-    if isinstance(callee, dict):
-        return callee.get("name", "")
-    return str(callee)
-
-
 def _symbol_name(symbol):
     if isinstance(symbol, dict):
         return symbol.get("name", "")
     return str(symbol)
 
 
-def _find_helper_symbol_name(symbols) -> str:
-    return next(name for name in (_symbol_name(s) for s in symbols) if name.endswith("helper"))
-
-
-def _find_helper_callee_name(callees) -> str:
-    return next(name for name in (_callee_name(c) for c in callees) if name.endswith("helper"))
-
-
-async def _resolve_helper_name(session: ClientSession, binary_name: str) -> str:
-    for target in ("main", "_main", "entry"):
-        try:
-            decompile_result = await session.call_tool(
-                "decompile_function",
-                {
-                    "binary_name": binary_name,
-                    "name_or_address": target,
-                    "include_callees": True,
-                },
-            )
-            decompile_payload = json.loads(decompile_result.content[0].text)
-            callees = decompile_payload.get("callees") or []
-            try:
-                return _find_helper_callee_name(callees)
-            except StopIteration:
-                pass
-        except Exception:
-            pass
-
-    symbols_result = await session.call_tool(
-        "search_symbols_by_name",
-        {
-            "binary_name": binary_name,
-            "query": "helper",
-            "functions_only": True,
-        },
+def _find_function_one_name(symbols) -> str:
+    return next(
+        name for name in (_symbol_name(s) for s in symbols) if name.endswith("function_one")
     )
-    symbols_payload = json.loads(symbols_result.content[0].text)
-    symbols = symbols_payload.get("symbols", [])
-    try:
-        return _find_helper_symbol_name(symbols)
-    except StopIteration as exc:
-        raise AssertionError(f"Unable to resolve helper function from symbols={symbols!r}") from exc
 
 
 @pytest.fixture(scope="module")
@@ -72,14 +28,19 @@ def variable_test_binary():
             """
 #include <stdio.h>
 
-int helper(int count) {
+__attribute__((noinline)) int function_one(int count) {
     int total = count + 1;
     printf("%d\\n", total);
     return total;
 }
 
+__attribute__((noinline)) void function_two(void) {
+    printf("Function Two");
+}
+
 int main(void) {
-    return helper(3);
+    function_two();
+    return function_one(3);
 }
 """
         )
@@ -113,24 +74,33 @@ def variable_server_params(variable_test_binary, ghidra_env, isolated_project_ro
 
 
 @pytest.mark.asyncio
-async def test_rename_variable_tool(variable_server_params, variable_test_binary):
+async def test_rename_variable_tool(variable_server_params, variable_test_binary, func_prefix):
     async with stdio_client(variable_server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
-            helper_name = await _resolve_helper_name(session, binary_name)
+            symbols_result = await session.call_tool(
+                "search_symbols_by_name",
+                {
+                    "binary_name": binary_name,
+                    "query": "function_one",
+                    "functions_only": True,
+                },
+            )
+            symbols_payload = json.loads(symbols_result.content[0].text)
+            function_name = _find_function_one_name(symbols_payload["symbols"])
 
             rename_result = await session.call_tool(
                 "rename_variable",
                 {
                     "binary_name": binary_name,
-                    "function_name_or_address": helper_name,
+                    "function_name_or_address": function_name,
                     "variable_name": "count",
                     "new_name": "item_count",
                 },
             )
             rename_payload = json.loads(rename_result.content[0].text)
-            assert rename_payload["function_name"] == helper_name
+            assert rename_payload["function_name"] == function_name
             assert rename_payload["variable_kind"] == "parameter"
             assert rename_payload["old_name"] == "count"
             assert rename_payload["new_name"] == "item_count"
@@ -139,37 +109,46 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
                 "set_variable_type",
                 {
                     "binary_name": binary_name,
-                    "function_name_or_address": helper_name,
+                    "function_name_or_address": function_name,
                     "variable_name": "item_count",
                     "type_name": "long",
                 },
             )
             type_payload = json.loads(type_result.content[0].text)
-            assert type_payload["function_name"] == helper_name
+            assert type_payload["function_name"] == function_name
             assert type_payload["variable_name"] == "item_count"
             assert type_payload["old_type"] == "int"
             assert type_payload["new_type"] == "long"
 
 
 @pytest.mark.asyncio
-async def test_set_variable_type_tool(variable_server_params, variable_test_binary):
+async def test_set_variable_type_tool(variable_server_params, variable_test_binary, func_prefix):
     async with stdio_client(variable_server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
-            helper_name = await _resolve_helper_name(session, binary_name)
+            symbols_result = await session.call_tool(
+                "search_symbols_by_name",
+                {
+                    "binary_name": binary_name,
+                    "query": "function_one",
+                    "functions_only": True,
+                },
+            )
+            symbols_payload = json.loads(symbols_result.content[0].text)
+            function_name = _find_function_one_name(symbols_payload["symbols"])
 
             type_result = await session.call_tool(
                 "set_variable_type",
                 {
                     "binary_name": binary_name,
-                    "function_name_or_address": helper_name,
+                    "function_name_or_address": function_name,
                     "variable_name": "count",
                     "type_name": "long",
                 },
             )
             type_payload = json.loads(type_result.content[0].text)
-            assert type_payload["function_name"] == helper_name
+            assert type_payload["function_name"] == function_name
             assert type_payload["variable_kind"] == "parameter"
             assert type_payload["variable_name"] == "count"
             assert type_payload["old_type"] == "int"
@@ -179,13 +158,13 @@ async def test_set_variable_type_tool(variable_server_params, variable_test_bina
                 "set_variable_type",
                 {
                     "binary_name": binary_name,
-                    "function_name_or_address": helper_name,
+                    "function_name_or_address": function_name,
                     "variable_name": "count",
                     "type_name": "int",
                 },
             )
             reset_payload = json.loads(reset_result.content[0].text)
-            assert reset_payload["function_name"] == helper_name
+            assert reset_payload["function_name"] == function_name
             assert reset_payload["variable_name"] == "count"
             assert reset_payload["old_type"] == "long"
             assert reset_payload["new_type"] == "int"
