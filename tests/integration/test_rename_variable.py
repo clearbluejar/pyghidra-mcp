@@ -9,16 +9,36 @@ from mcp.client.stdio import stdio_client
 from pyghidra_mcp.context import PyGhidraContext
 
 
-def _symbol_name(symbol):
-    if isinstance(symbol, dict):
-        return symbol.get("name", "")
-    return str(symbol)
+def _callee_name(callee):
+    if isinstance(callee, dict):
+        return callee.get("name", "")
+    return str(callee)
 
 
-def _find_function_one_name(symbols) -> str:
+def _find_function_one_name(callees) -> str:
     return next(
-        name for name in (_symbol_name(s) for s in symbols) if name.endswith("function_one")
+        name for name in (_callee_name(c) for c in callees) if name.endswith("function_one")
     )
+
+
+async def _resolve_function_one_name(session: ClientSession, binary_name: str) -> str:
+    for target in ("main", "_main", "entry"):
+        try:
+            decompile_result = await session.call_tool(
+                "decompile_function",
+                {
+                    "binary_name": binary_name,
+                    "name_or_address": target,
+                    "include_callees": True,
+                },
+            )
+            decompile_payload = json.loads(decompile_result.content[0].text)
+            callees = decompile_payload.get("callees") or []
+            return _find_function_one_name(callees)
+        except Exception:
+            pass
+
+    raise AssertionError("Unable to resolve function_one from entry/main callees")
 
 
 @pytest.fixture(scope="module")
@@ -30,7 +50,7 @@ def variable_test_binary():
 
 __attribute__((noinline)) int function_one(int count) {
     int total = count + 1;
-    printf("%d\\n", total);
+    printf("Function One");
     return total;
 }
 
@@ -74,21 +94,12 @@ def variable_server_params(variable_test_binary, ghidra_env, isolated_project_ro
 
 
 @pytest.mark.asyncio
-async def test_rename_variable_tool(variable_server_params, variable_test_binary, func_prefix):
+async def test_rename_variable_tool(variable_server_params, variable_test_binary):
     async with stdio_client(variable_server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
-            symbols_result = await session.call_tool(
-                "search_symbols_by_name",
-                {
-                    "binary_name": binary_name,
-                    "query": "function_one",
-                    "functions_only": True,
-                },
-            )
-            symbols_payload = json.loads(symbols_result.content[0].text)
-            function_name = _find_function_one_name(symbols_payload["symbols"])
+            function_name = await _resolve_function_one_name(session, binary_name)
 
             rename_result = await session.call_tool(
                 "rename_variable",
@@ -122,21 +133,12 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
 
 
 @pytest.mark.asyncio
-async def test_set_variable_type_tool(variable_server_params, variable_test_binary, func_prefix):
+async def test_set_variable_type_tool(variable_server_params, variable_test_binary):
     async with stdio_client(variable_server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
-            symbols_result = await session.call_tool(
-                "search_symbols_by_name",
-                {
-                    "binary_name": binary_name,
-                    "query": "function_one",
-                    "functions_only": True,
-                },
-            )
-            symbols_payload = json.loads(symbols_result.content[0].text)
-            function_name = _find_function_one_name(symbols_payload["symbols"])
+            function_name = await _resolve_function_one_name(session, binary_name)
 
             type_result = await session.call_tool(
                 "set_variable_type",
