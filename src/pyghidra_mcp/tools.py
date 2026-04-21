@@ -921,6 +921,48 @@ class GhidraTools:
         }
 
     @handle_exceptions
+    def set_function_prototype(
+        self,
+        function_name_or_address: str,
+        prototype: str,
+    ) -> dict:
+        from ghidra.app.cmd.function import ApplyFunctionSignatureCmd
+        from ghidra.app.util.parser import FunctionSignatureParser
+        from ghidra.program.model.symbol import SourceType
+        from ghidra.util.task import TaskMonitor
+
+        func = self.find_function(function_name_or_address)
+        function_name = str(func.getName())
+        function_address = str(func.getEntryPoint())
+        old_prototype = str(func.getSignature())
+
+        parser = FunctionSignatureParser(
+            self.program.getDataTypeManager(), typing.cast(typing.Any, None)
+        )
+        parsed_signature = parser.parse(func.getSignature(False), prototype)
+        cmd = ApplyFunctionSignatureCmd(
+            func.getEntryPoint(),
+            parsed_signature,
+            SourceType.USER_DEFINED,
+        )
+
+        with ghidra_transaction(
+            self.program,
+            f"pyghidra-mcp: set function prototype {function_name}",
+        ):
+            if not cmd.applyTo(self.program, TaskMonitor.DUMMY):
+                message = cmd.getStatusMsg() or f"Failed to apply function prototype: {prototype}"
+                raise ValueError(message)
+
+        self.invalidate_decompiler_cache()
+        return {
+            "function_name": function_name,
+            "function_address": function_address,
+            "old_prototype": old_prototype,
+            "new_prototype": str(func.getSignature()),
+        }
+
+    @handle_exceptions
     def set_comment(self, target: str, comment: str, comment_type: str) -> dict:
         try:
             from ghidra.program.model.listing import CommentType

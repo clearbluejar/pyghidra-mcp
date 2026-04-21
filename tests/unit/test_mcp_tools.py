@@ -11,6 +11,7 @@ from pyghidra_mcp.mcp_tools import (
     rename_variable,
     search_symbols_by_name,
     set_comment,
+    set_function_prototype,
     set_variable_type,
 )
 from pyghidra_mcp.models import ProgramInfo, SymbolInfo
@@ -140,6 +141,40 @@ def test_set_variable_type_uses_tool_path(monkeypatch):
     assert response.variable_name == "total"
     assert response.old_type == "int"
     assert response.new_type == "long"
+
+
+def test_set_function_prototype_uses_tool_path(monkeypatch):
+    pyghidra_context = Mock()
+    pyghidra_context.get_program_info.return_value = Mock()
+
+    fake_tools = Mock()
+    fake_tools.set_function_prototype.return_value = {
+        "function_name": "function_one",
+        "function_address": "100001000",
+        "old_prototype": "int function_one(int count)",
+        "new_prototype": "long function_one(long count)",
+    }
+
+    ctx = Mock()
+    ctx.request_context.lifespan_context = pyghidra_context
+
+    monkeypatch.setattr("pyghidra_mcp.mcp_tools.GhidraTools", lambda _program_info: fake_tools)
+
+    response = set_function_prototype(
+        binary_name="sample",
+        function_name_or_address="function_one",
+        prototype="long function_one(long count)",
+        ctx=ctx,
+    )
+
+    fake_tools.set_function_prototype.assert_called_once_with(
+        "function_one", "long function_one(long count)"
+    )
+    assert response.binary_name == "sample"
+    assert response.function_name == "function_one"
+    assert response.function_address == "100001000"
+    assert response.old_prototype == "int function_one(int count)"
+    assert response.new_prototype == "long function_one(long count)"
 
 
 @pytest.mark.asyncio

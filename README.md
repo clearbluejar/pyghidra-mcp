@@ -459,6 +459,8 @@ Per-item errors are returned inline (other targets still succeed):
 
 - `set_variable_type(binary_name: str, function_name_or_address: str, variable_name: str, type_name: str)`: Set the data type for a function parameter or local variable by exact name within a specific function. If the name is missing or ambiguous within that function, the tool returns an error instead of guessing. `type_name` is parsed using Ghidra's datatype parser against the program datatype manager.
 
+- `set_function_prototype(binary_name: str, function_name_or_address: str, prototype: str)`: Set a function prototype from a full signature string. The tool always runs the prototype through Ghidra's native signature parser and returns the underlying parser or apply error if the prototype is invalid.
+
 - `set_comment(binary_name: str, target: str, comment: str, comment_type: str)`: Set a function/decompiler comment or listing comment. Supported `comment_type` values are `decompiler`, `plate`, `pre`, `eol`, `post`, and `repeatable`.
 
 #### GUI Control Tools (`--gui` only)
@@ -466,7 +468,7 @@ Per-item errors are returned inline (other targets still succeed):
 These tools are only available when `pyghidra-mcp` is started with `--gui` and control what the GUI is showing rather than mutating project data directly:
 
 - `list_open_programs()`: List programs currently open in the Ghidra GUI.
-- `open_program_in_gui(binary_name: str)`: Open a project binary in CodeBrowser.
+- `open_program_in_gui(binary_name: str, new_window: bool = True)`: Open a project binary in CodeBrowser. By default this opens a new CodeBrowser window. Set `new_window=false` to reuse a visible CodeBrowser when possible.
 - `set_current_program(binary_name: str)`: Make an open program the active/current program in the primary GUI tool context.
 - `goto(binary_name: str, target: str, target_type: str)`: Navigate the Ghidra GUI to an address or function. `target_type` must be `address` or `function`.
 
