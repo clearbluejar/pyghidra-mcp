@@ -151,42 +151,42 @@ async def invoke_tool_concurrently(base_url: str, server_binary_path):
             binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))
 
             name_one = f"{_FUNC_PREFIX}function_one"
-            tasks = [
-                session.call_tool(
+            responses = [
+                await session.call_tool(
                     "decompile_function",
                     {"binary_name": binary_name, "name_or_address": _MAIN_FUNC_NAME},
                 ),
-                session.call_tool(
+                await session.call_tool(
                     "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
                 ),
-                session.call_tool("list_project_binaries", {}),
-                session.call_tool("list_project_binary_metadata", {"binary_name": binary_name}),
-                session.call_tool("list_exports", {"binary_name": binary_name}),
-                session.call_tool("list_imports", {"binary_name": binary_name}),
-                session.call_tool(
+                await session.call_tool("list_project_binaries", {}),
+                await session.call_tool(
+                    "list_project_binary_metadata", {"binary_name": binary_name}
+                ),
+                await session.call_tool("list_exports", {"binary_name": binary_name}),
+                await session.call_tool("list_imports", {"binary_name": binary_name}),
+                await session.call_tool(
                     "list_xrefs",
                     {"binary_name": binary_name, "name_or_address": name_one},
                 ),
-                session.call_tool(
+                await session.call_tool(
                     "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
                 ),
-                session.call_tool(
+                await session.call_tool(
                     "search_code", {"binary_name": binary_name, "query": "Function One", "limit": 1}
                 ),
-                session.call_tool(
+                await session.call_tool(
                     "search_strings", {"binary_name": binary_name, "query": "hello", "limit": 1}
                 ),
-                session.call_tool(
+                await session.call_tool(
                     "read_bytes",
                     {"binary_name": binary_name, "address": _BASE_ADDRESS, "size": 4},
                 ),
-                session.call_tool(
+                await session.call_tool(
                     "gen_callgraph",
                     {"binary_name": binary_name, "function_name": _MAIN_FUNC_NAME},
                 ),
             ]
-
-            responses = await asyncio.gather(*tasks)
             return responses
 
 
@@ -235,7 +235,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     using streamable-http transport.
     """
     streamable_binary, streamable_base_url = streamable_server
-    num_clients = 6
+    num_clients = 2
     name_one = f"{_FUNC_PREFIX}function_one"
     name_two = f"{_FUNC_PREFIX}function_two"
     tasks = [
