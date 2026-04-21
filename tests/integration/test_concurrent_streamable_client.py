@@ -216,6 +216,15 @@ async def invoke_mutation_tools(base_url: str, server_binary_path):
                     "comment_type": "decompiler",
                 },
             )
+            listing_comment_response = await session.call_tool(
+                "set_comment",
+                {
+                    "binary_name": binary_name,
+                    "target": new_name,
+                    "comment": "Listing comment via symbol resolution.",
+                    "comment_type": "plate",
+                },
+            )
             symbol_response = await session.call_tool(
                 "search_symbols_by_name",
                 {"binary_name": binary_name, "query": new_name},
@@ -225,7 +234,13 @@ async def invoke_mutation_tools(base_url: str, server_binary_path):
                 {"binary_name": binary_name, "name_or_address": new_name},
             )
 
-            return rename_response, comment_response, symbol_response, decompile_response
+            return (
+                rename_response,
+                comment_response,
+                listing_comment_response,
+                symbol_response,
+                decompile_response,
+            )
 
 
 @pytest.mark.asyncio
@@ -348,6 +363,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     (
         rename_response,
         comment_response,
+        listing_comment_response,
         symbol_response,
         decompile_response,
     ) = await invoke_mutation_tools(streamable_base_url, streamable_binary)
@@ -364,9 +380,15 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     assert comment.comment_type == "decompiler"
     assert comment.comment == "Renamed during concurrent streamable integration test."
 
+    listing_comment_result = json.loads(listing_comment_response.content[0].text)
+    listing_comment = CommentResponse(**listing_comment_result)
+    assert listing_comment.comment_type == "plate"
+    assert listing_comment.comment == "Listing comment via symbol resolution."
+
     symbol_result = json.loads(symbol_response.content[0].text)
     symbol_search = SymbolSearchResults(**symbol_result)
     assert any(renamed_name in symbol.name for symbol in symbol_search.symbols)
+    assert all(hasattr(symbol, "is_thunk") for symbol in symbol_search.symbols)
 
     decompile_result = json.loads(decompile_response.content[0].text)
     decompiled = DecompiledFunction(**decompile_result)
