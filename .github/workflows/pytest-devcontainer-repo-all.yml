@@ -19,6 +19,7 @@ on:
 jobs:
   test-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -46,6 +47,7 @@ jobs:
         imageTag: ${{ matrix.image }}
         push: never
         runCmd: |
+          set -o pipefail
           pip install --upgrade pip
           python -m venv .venv
           source .venv/bin/activate
@@ -59,16 +61,35 @@ jobs:
           # Install your package in editable mode with dev extras
           pip install -e .[dev]
 
+          mkdir -p junit
+
           # Run tests
-          python -m pytest tests/unit/ --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
-          python -m pytest tests/integration/ --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
+          python -m pytest \
+            tests/unit/ \
+            --doctest-modules \
+            -rA \
+            -vv \
+            --durations=20 \
+            --junitxml=junit/unit-test-results-${{ matrix.image }}.xml \
+            2>&1 | tee junit/unit-test-results-${{ matrix.image }}.log
+
+          python -m pytest \
+            tests/integration/ \
+            --doctest-modules \
+            -rA \
+            -vv \
+            --durations=20 \
+            --junitxml=junit/integration-test-results-${{ matrix.image }}.xml \
+            2>&1 | tee junit/integration-test-results-${{ matrix.image }}.log
 
     - name: Upload unit test results
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
         name: unit-test-results-${{ matrix.image }}
-        path: junit/unit-test-results-${{ matrix.image }}.xml
+        path: |
+          junit/unit-test-results-${{ matrix.image }}.xml
+          junit/unit-test-results-${{ matrix.image }}.log
         retention-days: 7
 
     - name: Upload integration test results
@@ -76,7 +97,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: integration-test-results-${{ matrix.image }}
-        path: junit/integration-test-results-${{ matrix.image }}.xml
+        path: |
+          junit/integration-test-results-${{ matrix.image }}.xml
+          junit/integration-test-results-${{ matrix.image }}.log
         retention-days: 7
 
   test-linux-gui:
