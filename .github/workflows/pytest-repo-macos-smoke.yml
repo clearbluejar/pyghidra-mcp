@@ -1,0 +1,169 @@
+# Fast macOS smoke coverage for repo changes.
+
+name: Pytest Local Repo macOS Smoke
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/pyghidra_mcp/**'
+      - 'tests/**'
+      - '.github/workflows/pytest-repo-macos-smoke.yml'
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  test-macos-smoke:
+    name: test-macos-smoke (${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ghidra_version: latest
+            python_version: "3.13"
+          - ghidra_version: "12.0"
+            python_version: "3.13"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python_version }}
+        cache: pip
+        cache-dependency-path: pyproject.toml
+
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "21"
+
+    - name: Resolve Ghidra release asset
+      id: ghidra-asset
+      env:
+        GHIDRA_VERSION: ${{ matrix.ghidra_version }}
+        GH_API_TOKEN: ${{ github.token }}
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        import re
+        import time
+        import urllib.error
+        import urllib.request
+
+        ghidra_version = os.environ["GHIDRA_VERSION"]
+        gh_api_token = os.environ.get("GH_API_TOKEN", "")
+        if ghidra_version == "latest":
+            api_url = "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest"
+        else:
+            api_url = (
+                "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/tags/"
+                f"Ghidra_{ghidra_version}_build"
+            )
+
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "pyghidra-mcp-ci",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if gh_api_token:
+            headers["Authorization"] = f"Bearer {gh_api_token}"
+
+        release_data = None
+        for attempt in range(5):
+            req = urllib.request.Request(api_url, headers=headers)
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    release_data = json.load(resp)
+                break
+            except urllib.error.HTTPError as err:
+                if err.code not in {403, 429, 500, 502, 503, 504} or attempt == 4:
+                    details = err.read().decode("utf-8", errors="replace")
+                    raise SystemExit(
+                        f"Failed to resolve Ghidra release asset for {ghidra_version}: "
+                        f"HTTP {err.code} {details}"
+                    )
+                time.sleep(min(30, 2 ** (attempt + 1)))
+
+        if release_data is None:
+            raise SystemExit(f"Unable to resolve Ghidra release asset for {ghidra_version}.")
+
+        asset = next(
+            (
+                candidate
+                for candidate in release_data.get("assets", [])
+                if re.match(r"ghidra_.*_PUBLIC_.*\.zip$", candidate["name"])
+            ),
+            None,
+        )
+
+        if asset is None:
+            raise SystemExit(f"No Ghidra public zip asset found for {ghidra_version}.")
+
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"asset_name={asset['name']}\n")
+            output.write(f"download_url={asset['browser_download_url']}\n")
+        PY
+
+    - name: Cache Ghidra
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ runner.temp }}/ghidra-download
+          ${{ runner.temp }}/ghidra-install
+        key: ${{ runner.os }}-ghidra-${{ matrix.ghidra_version }}-${{ steps.ghidra-asset.outputs.asset_name }}
+
+    - name: Install Ghidra
+      run: |
+        set -euxo pipefail
+        GHIDRA_DOWNLOAD_DIR="${RUNNER_TEMP}/ghidra-download"
+        GHIDRA_INSTALL_ROOT="${RUNNER_TEMP}/ghidra-install"
+
+        mkdir -p "${GHIDRA_DOWNLOAD_DIR}" "${GHIDRA_INSTALL_ROOT}"
+
+        GHIDRA_ZIP="${GHIDRA_DOWNLOAD_DIR}/${{ steps.ghidra-asset.outputs.asset_name }}"
+        if [ ! -f "${GHIDRA_ZIP}" ]; then
+          curl -fsSL "${{ steps.ghidra-asset.outputs.download_url }}" -o "${GHIDRA_ZIP}"
+        fi
+
+        GHIDRA_DIR="$(find "${GHIDRA_INSTALL_ROOT}" -maxdepth 1 -type d -name 'ghidra_*_PUBLIC*' | head -n1 || true)"
+        if [ -z "${GHIDRA_DIR}" ]; then
+          unzip -q "${GHIDRA_ZIP}" -d "${GHIDRA_INSTALL_ROOT}"
+          GHIDRA_DIR="$(find "${GHIDRA_INSTALL_ROOT}" -maxdepth 1 -type d -name 'ghidra_*_PUBLIC*' | head -n1)"
+        fi
+
+        xattr -dr com.apple.quarantine "${GHIDRA_DIR}" || true
+        echo "GHIDRA_INSTALL_DIR=${GHIDRA_DIR}" >> "${GITHUB_ENV}"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[dev]
+
+    - name: Run macOS smoke tests
+      run: |
+        mkdir -p junit
+        python -m pytest \
+          tests/unit/ \
+          tests/integration/test_background_indexing.py \
+          tests/integration/test_decompile_function.py \
+          tests/integration/test_import_binary.py \
+          tests/integration/test_rename_variable.py \
+          tests/integration/test_stdio_client.py \
+          tests/integration/test_streamable_client.py \
+          --doctest-modules \
+          --junitxml=junit/macos-smoke-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python.xml
+
+    - name: Upload macOS smoke test results
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-smoke-results-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python
+        path: junit/macos-smoke-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python.xml
+        retention-days: 7
