@@ -391,6 +391,33 @@ class GhidraTools:
     def _symbol_to_info(self, symbol, rm) -> SymbolInfo:
         """Convert a Ghidra Symbol to a SymbolInfo model."""
         ref_count = len(list(rm.getReferencesTo(symbol.getAddress())))
+        is_thunk = False
+        thunk_target = None
+
+        try:
+            func = self.program.getFunctionManager().getFunctionAt(symbol.getAddress())
+        except Exception:
+            func = None
+
+        if func is not None:
+            try:
+                is_thunk = bool(func.isThunk())
+            except Exception:
+                is_thunk = False
+
+            if is_thunk:
+                try:
+                    thunked = func.getThunkedFunction(True)
+                except TypeError:
+                    thunked = func.getThunkedFunction(False)
+                except Exception:
+                    thunked = None
+
+                if thunked is not None:
+                    thunk_target = (
+                        f"{thunked.getSymbol().getName(True)} @ {thunked.getEntryPoint()}"
+                    )
+
         return SymbolInfo(
             name=symbol.getName(),
             address=str(symbol.getAddress()),
@@ -399,6 +426,27 @@ class GhidraTools:
             source=str(symbol.getSource()),
             refcount=ref_count,
             external=symbol.isExternal(),
+            is_thunk=is_thunk,
+            thunk_target=thunk_target,
+        )
+
+    @classmethod
+    def _symbol_sort_key(cls, query: str, symbol, info: SymbolInfo) -> tuple:
+        names = {str(symbol.getName())}
+        try:
+            names.add(str(symbol.getName(True)))
+        except TypeError:
+            pass
+
+        query_lc = query.lower()
+        exact_name = any(name.lower() == query_lc for name in names)
+        return (
+            0 if exact_name else 1,
+            1 if info.is_thunk else 0,
+            1 if info.external else 0,
+            -info.refcount,
+            info.name.lower(),
+            info.address,
         )
 
     @handle_exceptions
@@ -422,11 +470,15 @@ class GhidraTools:
         else:
             symbols = self.get_all_symbols(True) if is_regex else self.find_symbols(query)
 
-        results = [
-            self._symbol_to_info(sym, rm)
-            for sym in symbols
-            if self._symbol_matches_query(query, sym)
-        ]
+        matches = []
+        for sym in symbols:
+            if not self._symbol_matches_query(query, sym):
+                continue
+            info = self._symbol_to_info(sym, rm)
+            matches.append((sym, info))
+
+        matches.sort(key=lambda item: self._symbol_sort_key(query, item[0], item[1]))
+        results = [info for _, info in matches]
         return results[offset : limit + offset]
 
     @handle_exceptions
@@ -1008,7 +1060,7 @@ class GhidraTools:
             allowed = ["decompiler", *listing_comment_types.keys()]
             raise ValueError(f"Invalid comment_type '{comment_type}'. Expected one of: {allowed}")
 
-        addr = self._parse_address(target)
+        addr = self._resolve_comment_target_address(target)
         with ghidra_transaction(
             self.program,
             f"pyghidra-mcp: set {normalized_type} comment @ {addr}",
@@ -1034,3 +1086,28 @@ class GhidraTools:
         if addr is None:
             raise ValueError(f"Invalid address: {address}")
         return addr
+
+    def _resolve_comment_target_address(self, target: str):
+        try:
+            return self._parse_address(target)
+        except Exception:
+            pass
+
+        if target.isdigit():
+            addr = self.program.getAddressFactory().getDefaultAddressSpace().getAddress(int(target))
+            if addr is not None:
+                return addr
+
+        try:
+            return self.find_symbol(target).getAddress()
+        except Exception:
+            pass
+
+        try:
+            return self.find_function(target).getEntryPoint()
+        except Exception:
+            pass
+
+        raise ValueError(
+            f"Could not resolve comment target '{target}' as an address, symbol, or function."
+        )
