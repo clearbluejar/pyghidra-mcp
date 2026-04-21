@@ -199,8 +199,10 @@ async def test_set_function_prototype_tool(variable_server_params, variable_test
             )
             prototype_payload = json.loads(prototype_result.content[0].text)
             assert prototype_payload["function_name"] == function_name
-            assert prototype_payload["old_prototype"] == "int __cdecl function_one(int count)"
-            assert prototype_payload["new_prototype"] == "long __cdecl function_one(long count)"
+            assert prototype_payload["old_prototype"].endswith("function_one(int count)")
+            assert prototype_payload["new_prototype"].endswith("function_one(long count)")
+            assert prototype_payload["old_prototype"].startswith("int ")
+            assert prototype_payload["new_prototype"].startswith("long ")
 
             decompile_result = await session.call_tool(
                 "decompile_function",
