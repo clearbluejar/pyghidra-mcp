@@ -1,12 +1,11 @@
 import json
 import os
+import sys
 import tempfile
 
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-
-from pyghidra_mcp.context import PyGhidraContext
 
 
 def _callee_name(callee):
@@ -22,23 +21,33 @@ def _find_function_one_name(callees) -> str:
 
 
 async def _resolve_function_one_name(session: ClientSession, binary_name: str) -> str:
-    for target in ("main", "_main", "entry"):
-        try:
-            decompile_result = await session.call_tool(
-                "decompile_function",
-                {
-                    "binary_name": binary_name,
-                    "name_or_address": target,
-                    "include_callees": True,
-                },
-            )
-            decompile_payload = json.loads(decompile_result.content[0].text)
-            callees = decompile_payload.get("callees") or []
-            return _find_function_one_name(callees)
-        except Exception:
-            pass
+    symbols_result = await session.call_tool(
+        "search_symbols_by_name",
+        {
+            "binary_name": binary_name,
+            "query": "function_one",
+            "functions_only": True,
+        },
+    )
+    symbols_payload = json.loads(symbols_result.content[0].text)
+    symbols = symbols_payload.get("symbols") or []
+    try:
+        return next(
+            symbol["name"]
+            for symbol in symbols
+            if isinstance(symbol, dict) and str(symbol.get("name", "")).endswith("function_one")
+        )
+    except StopIteration as exc:
+        raise AssertionError("Unable to resolve function_one by symbol search") from exc
 
-    raise AssertionError("Unable to resolve function_one from entry/main callees")
+
+async def _resolve_binary_name(session: ClientSession) -> str:
+    binaries_result = await session.call_tool("list_project_binaries", {})
+    binaries_payload = json.loads(binaries_result.content[0].text)
+    programs = binaries_payload.get("programs") or []
+    if len(programs) != 1:
+        raise AssertionError(f"Expected exactly one imported binary, got {programs}")
+    return programs[0]["name"]
 
 
 @pytest.fixture(scope="module")
@@ -78,7 +87,7 @@ int main(void) {
 @pytest.fixture(scope="module")
 def variable_server_params(variable_test_binary, ghidra_env, isolated_project_root):
     return StdioServerParameters(
-        command="python",
+        command=sys.executable,
         args=[
             "-m",
             "pyghidra_mcp",
@@ -98,7 +107,7 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
     async with stdio_client(variable_server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
+            binary_name = await _resolve_binary_name(session)
             function_name = await _resolve_function_one_name(session, binary_name)
 
             rename_result = await session.call_tool(
@@ -137,7 +146,7 @@ async def test_set_variable_type_tool(variable_server_params, variable_test_bina
     async with stdio_client(variable_server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            binary_name = PyGhidraContext._gen_unique_bin_name(variable_test_binary)
+            binary_name = await _resolve_binary_name(session)
             function_name = await _resolve_function_one_name(session, binary_name)
 
             type_result = await session.call_tool(
@@ -170,3 +179,57 @@ async def test_set_variable_type_tool(variable_server_params, variable_test_bina
             assert reset_payload["variable_name"] == "count"
             assert reset_payload["old_type"] == "long"
             assert reset_payload["new_type"] == "int"
+
+
+@pytest.mark.asyncio
+async def test_set_function_prototype_tool(variable_server_params, variable_test_binary):
+    async with stdio_client(variable_server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            binary_name = await _resolve_binary_name(session)
+            function_name = await _resolve_function_one_name(session, binary_name)
+
+            prototype_result = await session.call_tool(
+                "set_function_prototype",
+                {
+                    "binary_name": binary_name,
+                    "function_name_or_address": function_name,
+                    "prototype": "long function_one(long count)",
+                },
+            )
+            prototype_payload = json.loads(prototype_result.content[0].text)
+            assert prototype_payload["function_name"] == function_name
+            assert prototype_payload["old_prototype"] == "int __cdecl function_one(int count)"
+            assert prototype_payload["new_prototype"] == "long __cdecl function_one(long count)"
+
+            decompile_result = await session.call_tool(
+                "decompile_function",
+                {
+                    "binary_name": binary_name,
+                    "name_or_address": function_name,
+                },
+            )
+            decompile_payload = json.loads(decompile_result.content[0].text)
+            assert "long function_one(long count)" in decompile_payload["signature"]
+
+
+@pytest.mark.asyncio
+async def test_set_function_prototype_surfaces_parser_errors(
+    variable_server_params, variable_test_binary
+):
+    async with stdio_client(variable_server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            binary_name = await _resolve_binary_name(session)
+            function_name = await _resolve_function_one_name(session, binary_name)
+            result = await session.call_tool(
+                "set_function_prototype",
+                {
+                    "binary_name": binary_name,
+                    "function_name_or_address": function_name,
+                    "prototype": "long function_one(size_t count)",
+                },
+            )
+
+            assert result.isError is True
+            assert "Can't resolve datatype: size_t" in result.content[0].text

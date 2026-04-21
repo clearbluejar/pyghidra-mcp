@@ -53,6 +53,7 @@ def register_common_tools(server: FastMCP) -> None:
     server.tool()(mcp_tools.rename_function)
     server.tool()(mcp_tools.rename_variable)
     server.tool()(mcp_tools.set_variable_type)
+    server.tool()(mcp_tools.set_function_prototype)
     server.tool()(mcp_tools.set_comment)
     server.tool()(mcp_tools.delete_project_binary)
     server.tool()(mcp_tools.list_exports)

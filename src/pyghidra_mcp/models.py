@@ -94,6 +94,14 @@ class VariableTypeResponse(BaseModel):
     new_type: str
 
 
+class FunctionPrototypeResponse(BaseModel):
+    binary_name: str
+    function_name: str
+    function_address: str
+    old_prototype: str
+    new_prototype: str
+
+
 class CommentResponse(BaseModel):
     binary_name: str
     address: str
