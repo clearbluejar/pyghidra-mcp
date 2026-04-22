@@ -8,7 +8,7 @@ from pyghidra_mcp.context import PyGhidraContext
 
 
 @pytest.mark.asyncio
-async def test_decompile_function_tool(server_params, test_binary):
+async def test_decompile_function_tool(server_params, test_binary, main_func_name):
     """Test the decompile_function tool."""
 
     async with stdio_client(server_params) as (read, write):
@@ -16,29 +16,22 @@ async def test_decompile_function_tool(server_params, test_binary):
             # Initialize the connection
             await session.initialize()
 
-            # Call the decompile_function tool
-            try:
-                binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
-                results = await session.call_tool(
-                    "decompile_function", {"binary_name": binary_name, "name_or_address": "main"}
-                )
+            binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
+            results = await session.call_tool(
+                "decompile_function",
+                {"binary_name": binary_name, "name_or_address": main_func_name},
+            )
 
-                # Check that we got results
-                assert results is not None
-                assert results.content is not None
-                assert len(results.content) > 0
+            assert results is not None
+            assert results.content is not None
+            assert len(results.content) > 0
 
-                # FastMCP serializes each list item as a separate content block
-                text_content = results.content[0].text
-                assert text_content is not None
-                result_dict = json.loads(text_content)
-                assert isinstance(result_dict, dict)
-                assert "main" in json.dumps(result_dict)
-            except Exception as e:
-                # If we get an error, it might be because the function wasn't found
-                # or because of issues with the binary analysis
-                # We'll just check that we got a proper error response
-                assert e is not None
+            text_content = results.content[0].text
+            assert text_content is not None
+            result_dict = json.loads(text_content)
+            assert isinstance(result_dict, dict)
+            assert result_dict["code"] != ""
+            assert main_func_name in result_dict["name"]
 
 
 @pytest.mark.asyncio
