@@ -31,14 +31,39 @@ async def _resolve_function_one_name(session: ClientSession, binary_name: str) -
     )
     symbols_payload = json.loads(symbols_result.content[0].text)
     symbols = symbols_payload.get("symbols") or []
+    for symbol in symbols:
+        if isinstance(symbol, dict) and str(symbol.get("name", "")).endswith("function_one"):
+            return symbol["name"]
+
+    decompile_result = await session.call_tool(
+        "decompile_function",
+        {
+            "binary_name": binary_name,
+            "name_or_address": "main",
+            "include_callees": True,
+        },
+    )
+    decompile_payload = json.loads(decompile_result.content[0].text)
     try:
-        return next(
-            symbol["name"]
-            for symbol in symbols
-            if isinstance(symbol, dict) and str(symbol.get("name", "")).endswith("function_one")
-        )
-    except StopIteration as exc:
-        raise AssertionError("Unable to resolve function_one by symbol search") from exc
+        return _find_function_one_name(decompile_payload.get("callees") or [])
+    except StopIteration:
+        pass
+
+    decompile_result = await session.call_tool(
+        "decompile_function",
+        {
+            "binary_name": binary_name,
+            "name_or_address": "_main",
+            "include_callees": True,
+        },
+    )
+    decompile_payload = json.loads(decompile_result.content[0].text)
+    try:
+        return _find_function_one_name(decompile_payload.get("callees") or [])
+    except StopIteration:
+        pass
+
+    raise AssertionError("Unable to resolve function_one by symbol search or main callee discovery")
 
 
 async def _resolve_binary_name(session: ClientSession) -> str:
