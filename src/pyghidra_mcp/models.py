@@ -152,6 +152,8 @@ class SymbolInfo(BaseModel):
     source: str
     refcount: int
     external: bool
+    is_thunk: bool = False
+    thunk_target: str | None = None
 
 
 class SymbolSearchResults(BaseModel):

@@ -226,6 +226,7 @@ async def test_decompile_does_not_block_other_tool_calls(monkeypatch):
             source="USER_DEFINED",
             refcount=1,
             external=False,
+            is_thunk=False,
         )
     ]
 

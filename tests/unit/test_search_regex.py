@@ -30,6 +30,8 @@ def _make_mock_function(name, address="0x1000", qualified_name=None):
     func.getSymbol.return_value = sym
     func.getEntryPoint.return_value = address
     func.isExternal.return_value = False
+    func.isThunk.return_value = False
+    func.getThunkedFunction.return_value = None
     func.thunk = False
     return func
 
@@ -210,3 +212,37 @@ class TestSearchAllSymbols:
         tools = _make_tools(symbols=self._syms())
         tools.search_symbols_by_name("main")
         tools.find_symbols.assert_called_once()
+
+    def test_exact_non_thunk_symbol_ranks_before_thunk(self):
+        """Exact body matches should rank before thunk wrappers with the same name."""
+        rm = Mock()
+        rm.getReferencesTo.return_value = []
+
+        body_sym = _make_mock_symbol("safe_exec", "0x2000")
+        thunk_sym = _make_mock_symbol("safe_exec", "0x1000")
+
+        body_func = Mock()
+        body_func.isThunk.return_value = False
+        body_func.getThunkedFunction.return_value = None
+
+        thunk_target = Mock()
+        thunk_target.getSymbol.return_value.getName.return_value = "safe_exec"
+        thunk_target.getEntryPoint.return_value = "0x2000"
+        thunk_func = Mock()
+        thunk_func.isThunk.return_value = True
+        thunk_func.getThunkedFunction.return_value = thunk_target
+
+        tools = _make_tools(symbols=[thunk_sym, body_sym])
+        tools.program.getReferenceManager.return_value = rm
+        fm = tools.program.getFunctionManager.return_value
+        fm.getFunctionAt.side_effect = lambda addr: {
+            "0x1000": thunk_func,
+            "0x2000": body_func,
+        }.get(addr)
+
+        results = tools.search_symbols_by_name("safe_exec")
+
+        assert [s.address for s in results] == ["0x2000", "0x1000"]
+        assert results[0].is_thunk is False
+        assert results[1].is_thunk is True
+        assert results[1].thunk_target == "safe_exec @ 0x2000"
