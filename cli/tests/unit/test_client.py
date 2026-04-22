@@ -43,3 +43,15 @@ def test_binary_not_found_error_exception():
 
     with pytest.raises(BinaryNotFoundError):
         raise BinaryNotFoundError("Binary not found")
+
+
+def test_client_has_edit_methods():
+    """Test that edit-tool client methods exist."""
+    from pyghidra_mcp_cli.client import PyGhidraMcpClient
+
+    client = PyGhidraMcpClient()
+    assert callable(client.rename_function)
+    assert callable(client.rename_variable)
+    assert callable(client.set_variable_type)
+    assert callable(client.set_function_prototype)
+    assert callable(client.set_comment)

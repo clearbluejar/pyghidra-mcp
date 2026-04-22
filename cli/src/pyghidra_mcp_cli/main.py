@@ -26,7 +26,18 @@ Prerequisites:
 import click
 
 from . import __version__
-from .commands import callgraph, decompile, delete, import_cmd, metadata, read, search, xref
+from .commands import (
+    callgraph,
+    decompile,
+    delete,
+    import_cmd,
+    metadata,
+    read,
+    rename,
+    search,
+    set_cmd,
+    xref,
+)
 from .commands import list as list_mod
 
 SERVER_NOT_RUNNING_ERROR = """Error: Cannot connect to pyghidra-mcp server.
@@ -114,6 +125,13 @@ def cli(
         # Search for code patterns
         pyghidra-mcp-cli search code --binary myapp "AES key schedule" -l 5
 
+        # Rename a variable
+        pyghidra-mcp-cli rename variable --binary myapp main old_name new_name
+
+        # Set a function prototype
+        pyghidra-mcp-cli set function-prototype --binary myapp function_one \
+            "void function_one(int x)"
+
         # List imports
         pyghidra-mcp-cli list imports --binary myapp
 
@@ -146,6 +164,8 @@ def cli(
 cli.add_command(decompile.decompile)
 cli.add_command(search.search)
 cli.add_command(list_mod.list_cmd)
+cli.add_command(rename.rename)
+cli.add_command(set_cmd.set_cmd)
 cli.add_command(xref.xref)
 cli.add_command(read.read)
 cli.add_command(callgraph.callgraph)
