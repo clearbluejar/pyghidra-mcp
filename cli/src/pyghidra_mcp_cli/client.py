@@ -398,3 +398,103 @@ class PyGhidraMcpClient:
             {"binary_name": binary_name},
         )
         return self._extract_result(result)
+
+    async def rename_function(
+        self, binary_name: str, function_name_or_address: str, new_name: str
+    ) -> dict[str, Any]:
+        """Rename a function."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "rename_function",
+            {
+                "binary_name": binary_name,
+                "name_or_address": function_name_or_address,
+                "new_name": new_name,
+            },
+        )
+        return self._extract_result(result)
+
+    async def rename_variable(
+        self,
+        binary_name: str,
+        function_name_or_address: str,
+        variable_name: str,
+        new_name: str,
+    ) -> dict[str, Any]:
+        """Rename a parameter or local variable."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "rename_variable",
+            {
+                "binary_name": binary_name,
+                "function_name_or_address": function_name_or_address,
+                "variable_name": variable_name,
+                "new_name": new_name,
+            },
+        )
+        return self._extract_result(result)
+
+    async def set_variable_type(
+        self,
+        binary_name: str,
+        function_name_or_address: str,
+        variable_name: str,
+        type_name: str,
+    ) -> dict[str, Any]:
+        """Set a parameter or local variable type."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "set_variable_type",
+            {
+                "binary_name": binary_name,
+                "function_name_or_address": function_name_or_address,
+                "variable_name": variable_name,
+                "type_name": type_name,
+            },
+        )
+        return self._extract_result(result)
+
+    async def set_function_prototype(
+        self, binary_name: str, function_name_or_address: str, prototype: str
+    ) -> dict[str, Any]:
+        """Set a function prototype."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "set_function_prototype",
+            {
+                "binary_name": binary_name,
+                "function_name_or_address": function_name_or_address,
+                "prototype": prototype,
+            },
+        )
+        return self._extract_result(result)
+
+    async def set_comment(
+        self,
+        binary_name: str,
+        target: str,
+        comment: str,
+        comment_type: str = "decompiler",
+    ) -> dict[str, Any]:
+        """Set a decompiler or listing comment."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "set_comment",
+            {
+                "binary_name": binary_name,
+                "target": target,
+                "comment": comment,
+                "comment_type": comment_type,
+            },
+        )
+        return self._extract_result(result)

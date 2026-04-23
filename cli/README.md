@@ -80,6 +80,8 @@ Commands:
   decompile    Decompile a function
   search       Search symbols, code, strings
   list         List binaries, imports, exports
+  rename       Rename functions and variables
+  set          Set types, prototypes, and comments
   xref         List cross-references
   read         Read memory bytes
   callgraph    Generate call graphs
@@ -218,6 +220,42 @@ Show metadata for a binary.
 
 ```bash
 pyghidra-mcp-cli metadata --binary <binary_name>
+```
+
+### rename
+
+Rename functions and variables.
+
+**Rename a function:**
+```bash
+pyghidra-mcp-cli rename function --binary <binary_name> <function_name_or_address> <new_name>
+```
+
+**Rename a variable:**
+```bash
+pyghidra-mcp-cli rename variable --binary <binary_name> <function_name_or_address> <variable_name> <new_name>
+```
+
+### set
+
+Set types, prototypes, and comments.
+
+**Set a variable type:**
+```bash
+pyghidra-mcp-cli set variable-type --binary <binary_name> <function_name_or_address> <variable_name> <type_name>
+```
+
+**Set a function prototype:**
+```bash
+pyghidra-mcp-cli set function-prototype --binary <binary_name> <function_name_or_address> "<prototype>"
+```
+
+**Set a comment:**
+```bash
+pyghidra-mcp-cli set comment --binary <binary_name> <target> "<comment>" [options]
+
+Options:
+  -t, --type [decompiler|plate|pre|eol|post|repeatable]
 ```
 
 ## Examples
