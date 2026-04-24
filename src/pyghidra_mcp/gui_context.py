@@ -222,6 +222,81 @@ class GuiPyGhidraContext(IndexingMixin):
     def set_current_program(self, binary_name: str) -> dict[str, Any]:
         return self.open_program_in_gui(binary_name, current=True)
 
+    def get_active_gui_context(self) -> dict[str, Any]:
+        def do_get_context() -> dict[str, Any]:
+            program_manager = self._get_primary_program_manager(required=False)
+            current_program = program_manager.getCurrentProgram() if program_manager else None
+
+            tool = None
+            if current_program:
+                try:
+                    tool = self._find_tool_for_program(current_program)
+                except Exception as e:
+                    logger.debug("Could not find tool for active program: %s", e)
+
+            if not tool:
+                tools = self.project.getToolServices().getRunningTools()
+                if not tools:
+                    raise RuntimeError("No active Ghidra tools are currently running.")
+                tool = tools[0]
+
+            result: dict[str, Any] = {}
+            if current_program:
+                domain_file = current_program.getDomainFile()
+                result["active_program"] = (
+                    str(domain_file.getPathname()) if domain_file else str(current_program.getName())
+                )
+
+            wm = getattr(tool, "getWindowManager", lambda: None)()
+            if wm:
+                provider = getattr(wm, "getActiveComponentProvider", lambda: None)()
+                if provider:
+                    result["active_provider"] = str(provider.getName())
+
+            from ghidra.app.services import CodeViewerService, GoToService
+
+            cvs = tool.getService(CodeViewerService)
+            if cvs:
+                loc = cvs.getCurrentLocation()
+                if loc:
+                    result["active_address"] = str(loc.getAddress())
+                    if current_program:
+                        fm = current_program.getFunctionManager()
+                        func = fm.getFunctionContaining(loc.getAddress())
+                        if func:
+                            result["active_function"] = str(func.getName())
+
+                sel = cvs.getCurrentSelection()
+                if sel and not sel.isEmpty():
+                    result["selection"] = f"{sel.getMinAddress()} - {sel.getMaxAddress()}"
+
+            if "active_address" in result:
+                return result
+
+            # Fallback to GoToService if CodeViewer isn't providing a location
+            goto_service = tool.getService(GoToService)
+            if not goto_service:
+                raise RuntimeError("Both GoToService and CodeViewerService are unavailable.")
+                
+            nav = goto_service.getDefaultNavigatable()
+            if not nav:
+                raise RuntimeError("No default navigatable available in GoToService.")
+
+            loc = nav.getLocation()
+            if not loc:
+                raise RuntimeError("No location available from active navigatable.")
+
+            result["active_address"] = str(loc.getAddress())
+            if current_program:
+                fm = current_program.getFunctionManager()
+                func = fm.getFunctionContaining(loc.getAddress())
+                if func:
+                    result["active_function"] = str(func.getName())
+
+            return result
+
+        return self.run_on_swing(do_get_context)
+
     def run_on_swing(self, fn, *args, **kwargs):
         return _run_on_swing(fn, *args, **kwargs)
 
