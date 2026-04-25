@@ -33,6 +33,20 @@ This CLI connects to pyghidra-mcp **exclusively via HTTP** for the following rea
 - **Resource efficiency**: One Ghidra instance serves multiple CLI calls
 - **Simpler architecture**: CLI is purely a client, server handles all Ghidra lifecycle management
 
+## Setup Diagram
+
+```mermaid
+flowchart LR
+    User["Terminal user"] --> CLI["pyghidra-mcp-cli"]
+    CLI -->|"HTTP"| Server["pyghidra-mcp --transport streamable-http"]
+    Server --> Project["Ghidra project"]
+    CLI --> Common["list, search, decompile, xref, callgraph"]
+    CLI --> Edits["rename and set commands"]
+    CLI -.-> Gui["GUI commands require --gui: open, goto, list open-programs, set current-program"]
+    Server -.-> Ghidra["Optional Ghidra GUI / CodeBrowser"]
+    Gui -.-> Ghidra
+```
+
 ## Quick Start
 
 ### 1. Start the Server

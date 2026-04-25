@@ -43,60 +43,116 @@ Yes, the original [ghidra-mcp](https://github.com/LaurieWired/GhidraMCP) is fant
 
 This project provides a Python-first experience optimized for local development, headless environments, and testable workflows.
 
+## Setup Diagrams
+
+### Headless MCP Server
+
 ```mermaid
-graph TD
-    subgraph Clients
-        A[🤖 LLM / Agent]
-        B[💻 Local CLI User]
-        C[🔧 CI/CD Pipeline]
-    end
-
-    subgraph Startup Command
-        direction LR
-        cmd("`pyghidra-mcp --project-path /path/to/project --threaded /path/to/binary1`")
-    end
-
-    subgraph "pyghidra-mcp Server"
-        D[MCP Server]
-        E[pyghidra ]
-        F[Ghidra Headless]
-
-      subgraph "Ghidra Project Analysis"
-          G[Binary 1]
-          H[Binary 2]
-          I[...]
-      end
-    end
-
-
-
-    cmd --> D
-
-    A -- "MCP (stdio/http)" --> D
-    B -- "stdio/http" --> D
-    C -- "stdio/sse" --> D
-
-    D -- "Initializes" --> E
-    E -- "Controls" --> F
-
-    F -- "Analyzes Concurrently" --> G
-    F -- "Analyzes Concurrently" --> H
-    F -- "Analyzes Concurrently" --> I
-
-    subgraph "Exposed MCP API"
-        J[decompile_function]
-    end
-
-    D -- "Exposes Tools" --> J
-
-    J -- "Results" --> A
+flowchart LR
+    Client["MCP client or agent"] -->|"stdio or streamable-http"| Server["pyghidra-mcp"]
+    Input["Ghidra project or binary paths"] --> Server
+    Server --> Project["Ghidra project"]
+    Server --> Tools["analysis, search, project, and edit tools"]
+    Tools --> Client
 ```
+
+### GUI Setup
+
+```mermaid
+flowchart LR
+    Agent["MCP client or agent"] -->|"streamable-http"| Server["pyghidra-mcp --gui"]
+    Server --> JVM["shared pyghidra / JPype JVM"]
+    JVM --> GUI["Ghidra GUI and CodeBrowser"]
+    User["Reverse engineer"] --> GUI
+    Server --> GuiTools["open_program_in_gui, goto, list_open_programs, set_current_program"]
+    GuiTools --> GUI
+```
+
+### CLI Setup
+
+```mermaid
+flowchart LR
+    User["Terminal user"] --> CLI["pyghidra-mcp-cli"]
+    CLI -->|"HTTP"| Server["pyghidra-mcp --transport streamable-http"]
+    Server --> Project["Ghidra project"]
+    CLI --> Commands["decompile, search, list, rename, set, callgraph"]
+    CLI -.-> GuiCommands["GUI commands require --gui: open, goto, list open-programs, set current-program"]
+    Server -.-> GUI["Optional Ghidra GUI"]
+    GuiCommands -.-> GUI
+```
+
+<details>
+<summary>Detailed architecture and tool surface</summary>
+
+```mermaid
+flowchart TD
+    subgraph Clients
+        Agent["LLM / MCP host"]
+        Cli["pyghidra-mcp-cli"]
+        Automation["scripts and CI"]
+    end
+
+    subgraph Transports
+        Stdio["stdio"]
+        Http["streamable-http"]
+        Sse["sse legacy"]
+    end
+
+    subgraph Server["pyghidra-mcp server"]
+        FastMcp["FastMCP tool server"]
+        Context["PyGhidra context"]
+        Indexing["background analysis and Chroma indexing"]
+
+        subgraph Tools["MCP tools"]
+            Analysis["decompile, xrefs, bytes, callgraph"]
+            Search["symbols, strings, code"]
+            ProjectOps["import, delete, metadata, list binaries"]
+            Edits["rename function, rename variable, set type, set prototype, set comment"]
+            GuiOnly["GUI only: open program, goto, list open programs, set current program"]
+        end
+    end
+
+    subgraph GhidraRuntime["Ghidra runtime"]
+        PyGhidra["pyghidra"]
+        Jpype["JPype shared JVM"]
+        Project["Ghidra project"]
+        Programs["program databases"]
+        CodeBrowser["Ghidra GUI / CodeBrowser"]
+    end
+
+    Agent --> Stdio
+    Agent --> Http
+    Automation --> Stdio
+    Automation --> Http
+    Automation --> Sse
+    Cli --> Http
+
+    Stdio --> FastMcp
+    Http --> FastMcp
+    Sse --> FastMcp
+
+    FastMcp --> Context
+    Context --> PyGhidra
+    PyGhidra --> Jpype
+    Jpype --> Project
+    Project --> Programs
+    Context --> Indexing
+    Indexing --> Search
+
+    FastMcp --> Tools
+    Tools --> Context
+    GuiOnly -.-> CodeBrowser
+    Context -.-> CodeBrowser
+```
+
+</details>
 
 ## Contents
 
 - [PyGhidra-MCP - Ghidra Model Context Protocol Server](#pyghidra-mcp---ghidra-model-context-protocol-server)
     - [Overview](#overview)
   - [Yet another Ghidra MCP?](#yet-another-ghidra-mcp)
+  - [Setup Diagrams](#setup-diagrams)
   - [Contents](#contents)
   - [Getting started](#getting-started)
   - [Optimized for Agents](#optimized-for-agents)
