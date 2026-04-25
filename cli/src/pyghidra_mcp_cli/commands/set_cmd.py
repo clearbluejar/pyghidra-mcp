@@ -21,7 +21,7 @@ def binary_option(func):
 
 @click.group(name="set")
 def set_cmd() -> None:
-    """Set types, prototypes, and comments."""
+    """Set types, comments, and GUI state."""
     pass
 
 
@@ -122,6 +122,27 @@ def set_comment(
     async def run():
         async with client:
             result = await client.set_comment(binary_name, target, comment, comment_type)
+            format_output(result, ctx.obj["OUTPUT_FORMAT"], ctx.obj["VERBOSE"])
+
+    try:
+        from ..utils import run_async
+
+        run_async(run())
+    except (asyncio.exceptions.CancelledError, Exception) as e:
+        handle_command_error(e, ctx)
+
+
+@set_cmd.command(name="current-program")
+@binary_option
+@click.pass_context
+def set_current_program(ctx: click.Context, binary_name: str) -> None:
+    """Set the active Ghidra GUI program."""
+
+    client = PyGhidraMcpClient(host=ctx.obj["HOST"], port=ctx.obj["PORT"])
+
+    async def run():
+        async with client:
+            result = await client.set_current_program(binary_name)
             format_output(result, ctx.obj["OUTPUT_FORMAT"], ctx.obj["VERBOSE"])
 
     try:

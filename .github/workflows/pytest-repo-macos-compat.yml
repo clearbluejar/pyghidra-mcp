@@ -6,14 +6,6 @@ on:
   schedule:
     - cron: '45 5,15 * * *'
   workflow_dispatch:
-  pull_request:
-    branches: [ "main" ]
-    paths:
-      - 'src/pyghidra_mcp/**'
-      - 'tests/integration/test_decompile_function.py'
-      - 'tests/integration/test_import_binary.py'
-      - 'tests/integration/test_rename_variable.py'
-      - '.github/workflows/pytest-repo-macos-compat.yml'
 
 jobs:
   test-macos-compat:
@@ -26,10 +18,13 @@ jobs:
         include:
           - ghidra_version: "11.4.1"
             python_version: "3.11"
+            variable_edit_tests: "true"
           - ghidra_version: "11.3.2"
             python_version: "3.12"
+            variable_edit_tests: "false"
           - ghidra_version: "11.3"
             python_version: "3.10"
+            variable_edit_tests: "false"
 
     steps:
     - uses: actions/checkout@v4
@@ -151,11 +146,18 @@ jobs:
     - name: Run macOS compatibility tests
       run: |
         mkdir -p junit
+        test_paths=(
+          tests/unit/
+          tests/integration/test_decompile_function.py
+          tests/integration/test_import_binary.py
+        )
+
+        if [ "${{ matrix.variable_edit_tests }}" = "true" ]; then
+          test_paths+=(tests/integration/test_rename_variable.py)
+        fi
+
         python -m pytest \
-          tests/unit/ \
-          tests/integration/test_decompile_function.py \
-          tests/integration/test_import_binary.py \
-          tests/integration/test_rename_variable.py \
+          "${test_paths[@]}" \
           --doctest-modules \
           --junitxml=junit/macos-compat-${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python.xml
 

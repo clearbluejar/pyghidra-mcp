@@ -11,13 +11,20 @@ on:
       - '.github/workflows/pytest-repo-macos-smoke.yml'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'src/pyghidra_mcp/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - '.python-version'
+      - 'uv.lock'
+      - '.github/workflows/pytest-repo-macos-smoke.yml'
   workflow_dispatch:
 
 jobs:
   test-macos-smoke:
     name: test-macos-smoke (${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python)
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

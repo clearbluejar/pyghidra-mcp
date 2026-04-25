@@ -21,7 +21,7 @@ def binary_option(func):
 
 @click.group()
 def list_cmd() -> None:
-    """List binaries, functions, imports, exports."""
+    """List project and GUI state."""
     pass
 
 
@@ -46,6 +46,29 @@ def list_binaries(ctx: click.Context) -> None:
                     click.echo(f"  - {name}")
             else:
                 click.echo("No binaries found in project.")
+
+    try:
+        from ..utils import run_async
+
+        run_async(run())
+    except (asyncio.exceptions.CancelledError, Exception) as e:
+        handle_command_error(e, ctx)
+
+
+@list_cmd.command(name="open-programs")
+@click.pass_context
+def list_open_programs(ctx: click.Context) -> None:
+    """List programs open in the Ghidra GUI."""
+
+    client = PyGhidraMcpClient(
+        host=ctx.obj["HOST"],
+        port=ctx.obj["PORT"],
+    )
+
+    async def run():
+        async with client:
+            result = await client.list_open_programs()
+            format_output(result, ctx.obj["OUTPUT_FORMAT"], ctx.obj["VERBOSE"])
 
     try:
         from ..utils import run_async

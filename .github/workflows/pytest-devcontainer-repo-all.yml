@@ -12,6 +12,13 @@ on:
       - '.github/workflows/pytest-devcontainer-repo-all.yml'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'src/pyghidra_mcp/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - '.python-version'
+      - 'uv.lock'
+      - '.github/workflows/pytest-devcontainer-repo-all.yml'
   schedule:
     - cron: '30 5,15 * * *'
   workflow_dispatch:

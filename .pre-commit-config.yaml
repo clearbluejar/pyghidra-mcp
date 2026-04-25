@@ -19,7 +19,7 @@ repos:
         types: [python]
         files: ^src/
         pass_filenames: false
-        args: [run, pyright, src/]
+        args: [run, --python, "3.13", pyright, src/]
 
   # Unit tests are part of both local hooks and CI.
   - repo: local
@@ -30,7 +30,7 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
-        args: [run, pytest, tests/unit/, --doctest-modules]
+        args: [run, --python, "3.13", pytest, tests/unit/, --doctest-modules]
 
   # Keep pre-commit integration coverage to one lightweight smoke test.
   # Full integration coverage, including GUI paths, runs in GitHub Actions.
@@ -42,4 +42,11 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
-        args: [run, pytest, tests/integration/test_concurrent_streamable_client.py, --doctest-modules]
+        args: [
+          run,
+          --python,
+          "3.13",
+          pytest,
+          tests/integration/test_concurrent_streamable_client.py,
+          --doctest-modules,
+        ]
