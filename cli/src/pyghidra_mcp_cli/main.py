@@ -30,8 +30,10 @@ from .commands import (
     callgraph,
     decompile,
     delete,
+    goto,
     import_cmd,
     metadata,
+    open_cmd,
     read,
     rename,
     search,
@@ -100,58 +102,19 @@ def cli(
 ) -> None:
     """PyGhidra MCP Command-Line Client
 
-    A CLI tool to interact with pyghidra-mcp server for binary analysis.
+    Connect to a running pyghidra-mcp HTTP server for binary analysis.
 
-    This client connects to an existing pyghidra-mcp server via HTTP.
-    The server must be started separately before using this CLI.
+    Start the server separately before using this CLI.
 
-    Quick start:
-        # 1. Start the server (in another terminal)
-        pyghidra-mcp --transport streamable-http --project-path /path/to/project.gpr
-
-        # 2. Use the CLI
+    \b
+    Common commands:
         pyghidra-mcp-cli list binaries
-
-    Examples:
-        # List available binaries
-        pyghidra-mcp-cli list binaries
-
-        # Decompile a function
         pyghidra-mcp-cli decompile --binary myapp main
-
-        # Search for symbols
         pyghidra-mcp-cli search symbols --binary myapp malloc -l 20
-
-        # Search for code patterns
-        pyghidra-mcp-cli search code --binary myapp "AES key schedule" -l 5
-
-        # Rename a variable
         pyghidra-mcp-cli rename variable --binary myapp main old_name new_name
-
-        # Set a function prototype
-        pyghidra-mcp-cli set function-prototype --binary myapp function_one \
-            "void function_one(int x)"
-
-        # List imports
-        pyghidra-mcp-cli list imports --binary myapp
-
-        # Generate call graph
-        pyghidra-mcp-cli callgraph --binary myapp main
-
-        # Read bytes at address
-        pyghidra-mcp-cli read --binary myapp 0x1000 -s 64
-
-        # Show cross-references
-        pyghidra-mcp-cli xref --binary myapp 0x401000
-
-        # Import a binary
-        pyghidra-mcp-cli import /path/to/binary
-
-        # Delete a binary
-        pyghidra-mcp-cli delete --binary myapp
-
-        # Show binary metadata
-        pyghidra-mcp-cli metadata --binary myapp
+        pyghidra-mcp-cli set comment --binary myapp main "reviewed"
+        pyghidra-mcp-cli open program --binary myapp
+        pyghidra-mcp-cli goto --binary myapp main --type function
     """
     ctx.ensure_object(dict)
     ctx.obj["HOST"] = host
@@ -166,6 +129,8 @@ cli.add_command(search.search)
 cli.add_command(list_mod.list_cmd)
 cli.add_command(rename.rename)
 cli.add_command(set_cmd.set_cmd)
+cli.add_command(open_cmd.open_cmd)
+cli.add_command(goto.goto)
 cli.add_command(xref.xref)
 cli.add_command(read.read)
 cli.add_command(callgraph.callgraph)

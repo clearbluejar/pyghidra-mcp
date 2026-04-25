@@ -79,9 +79,11 @@ Options:
 Commands:
   decompile    Decompile a function
   search       Search symbols, code, strings
-  list         List binaries, imports, exports
+  list         List binaries, imports, exports, GUI programs
   rename       Rename functions and variables
   set          Set types, prototypes, and comments
+  open         Open GUI resources
+  goto         Navigate the Ghidra GUI
   xref         List cross-references
   read         Read memory bytes
   callgraph    Generate call graphs
@@ -141,6 +143,11 @@ List information about binaries.
 **List all binaries:**
 ```bash
 pyghidra-mcp-cli list binaries
+```
+
+**List GUI-open programs (`--gui` server only):**
+```bash
+pyghidra-mcp-cli list open-programs
 ```
 
 **List imports:**
@@ -256,6 +263,31 @@ pyghidra-mcp-cli set comment --binary <binary_name> <target> "<comment>" [option
 
 Options:
   -t, --type [decompiler|plate|pre|eol|post|repeatable]
+```
+
+**Set the current GUI program (`--gui` server only):**
+```bash
+pyghidra-mcp-cli set current-program --binary <binary_name>
+```
+
+### open
+
+Open GUI resources. These commands require the server to be running with `--gui`.
+
+**Open a program in CodeBrowser:**
+```bash
+pyghidra-mcp-cli open program --binary <binary_name> [options]
+
+Options:
+  --new-window / --reuse-window
+```
+
+### goto
+
+Navigate the Ghidra GUI. Requires the server to be running with `--gui`.
+
+```bash
+pyghidra-mcp-cli goto --binary <binary_name> <target> --type [address|function]
 ```
 
 ## Examples

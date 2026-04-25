@@ -187,6 +187,49 @@ class PyGhidraMcpClient:
         result = await self._session.call_tool("list_project_binaries", {})
         return self._extract_result(result)
 
+    async def list_open_programs(self) -> dict[str, Any]:
+        """List programs open in the Ghidra GUI."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool("list_open_programs", {})
+        return self._extract_result(result)
+
+    async def open_program_in_gui(
+        self, binary_name: str, new_window: bool = True
+    ) -> dict[str, Any]:
+        """Open a binary in the Ghidra GUI."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "open_program_in_gui",
+            {"binary_name": binary_name, "new_window": new_window},
+        )
+        return self._extract_result(result)
+
+    async def set_current_program(self, binary_name: str) -> dict[str, Any]:
+        """Set the current Ghidra GUI program."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "set_current_program",
+            {"binary_name": binary_name},
+        )
+        return self._extract_result(result)
+
+    async def goto(self, binary_name: str, target: str, target_type: str) -> dict[str, Any]:
+        """Navigate the Ghidra GUI."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "goto",
+            {"binary_name": binary_name, "target": target, "target_type": target_type},
+        )
+        return self._extract_result(result)
+
     async def decompile_function(
         self,
         binary_name: str,
