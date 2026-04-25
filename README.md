@@ -99,6 +99,7 @@ graph TD
   - [Yet another Ghidra MCP?](#yet-another-ghidra-mcp)
   - [Contents](#contents)
   - [Getting started](#getting-started)
+  - [Optimized for Agents](#optimized-for-agents)
   - [CLI Client](#cli-client)
   - [Project Creation, Management, and Opening Existing Projects](#project-creation-management-and-opening-existing-projects)
     - [Creating New Projects](#creating-new-projects)
@@ -175,6 +176,17 @@ Or, run as a [Docker container](https://ghcr.io/clearbluejar/pyghidra-mcp):
 ```bash
 docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
 ```
+
+## Optimized for Agents
+
+`pyghidra-mcp` keeps the MCP surface intentionally narrow so agent clients spend fewer tokens on tool discovery and argument selection.
+
+- **Short tool descriptions**: MCP tool docstrings are kept compact so FastMCP tool schemas stay small and cheap to send to models.
+- **Context discipline**: tools return focused structured data instead of dumping whole-program context by default. Decompilation, symbol search, and cross-reference results are shaped to support iterative analysis rather than one large response.
+- **GUI tools only when relevant**: GUI-only controls such as `open_program_in_gui`, `list_open_programs`, `set_current_program`, and `goto` are only exposed when the server is started with `--gui`.
+- **CLI is optional**: if MCP is not your preferred interface, `pyghidra-mcp-cli` provides a direct command-line client over HTTP with grouped commands for common edit and analysis workflows.
+
+This keeps the default server usable for LLM agents, IDE integrations, and automation without exposing unnecessary tool surface or GUI-only controls in headless sessions.
 
 ## CLI Client
 
