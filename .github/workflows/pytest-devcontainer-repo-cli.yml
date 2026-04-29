@@ -14,6 +14,16 @@ on:
       - '.github/workflows/pytest-devcontainer-repo-cli.yml'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'cli/src/pyghidra_mcp_cli/**'
+      - 'cli/tests/**'
+      - 'cli/pyproject.toml'
+      - 'cli/uv.lock'
+      - 'src/pyghidra_mcp/**'
+      - 'pyproject.toml'
+      - '.python-version'
+      - 'uv.lock'
+      - '.github/workflows/pytest-devcontainer-repo-cli.yml'
   schedule:
     - cron: '30 5,15 * * *'
   workflow_dispatch:
@@ -21,6 +31,7 @@ on:
 jobs:
   cli-test-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -90,17 +101,16 @@ jobs:
   cli-test-macos:
     name: cli-test-macos (${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python)
     runs-on: macos-latest
-    timeout-minutes: 120
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - ghidra_version: latest
-            python_version: "3.13"
           - ghidra_version: "12.0"
             python_version: "3.13"
-          # Ghidra 11.x excluded on macOS: JVM startup exceeds 240s timeout,
-          # causing "Server did not start in time" in every CI run.
+          # Keep macOS CLI coverage on one supported Ghidra release. The full
+          # version matrix already runs on Linux, and "latest" regularly times
+          # out on hosted macOS runners.
 
     steps:
     - uses: actions/checkout@v4

@@ -33,6 +33,20 @@ This CLI connects to pyghidra-mcp **exclusively via HTTP** for the following rea
 - **Resource efficiency**: One Ghidra instance serves multiple CLI calls
 - **Simpler architecture**: CLI is purely a client, server handles all Ghidra lifecycle management
 
+## Setup Diagram
+
+```mermaid
+flowchart LR
+    User["Terminal user"] --> CLI["pyghidra-mcp-cli"]
+    CLI -->|"HTTP"| Server["pyghidra-mcp --transport streamable-http"]
+    Server --> Project["Ghidra project"]
+    CLI --> Common["list, search, decompile, xref, callgraph"]
+    CLI --> Edits["rename and set commands"]
+    CLI -.-> Gui["GUI commands require --gui: open, goto, list open-programs, set current-program"]
+    Server -.-> Ghidra["Optional Ghidra GUI / CodeBrowser"]
+    Gui -.-> Ghidra
+```
+
 ## Quick Start
 
 ### 1. Start the Server
@@ -79,7 +93,11 @@ Options:
 Commands:
   decompile    Decompile a function
   search       Search symbols, code, strings
-  list         List binaries, imports, exports
+  list         List binaries, imports, exports, GUI programs
+  rename       Rename functions and variables
+  set          Set types, prototypes, and comments
+  open         Open GUI resources
+  goto         Navigate the Ghidra GUI
   xref         List cross-references
   read         Read memory bytes
   callgraph    Generate call graphs
@@ -139,6 +157,11 @@ List information about binaries.
 **List all binaries:**
 ```bash
 pyghidra-mcp-cli list binaries
+```
+
+**List GUI-open programs (`--gui` server only):**
+```bash
+pyghidra-mcp-cli list open-programs
 ```
 
 **List imports:**
@@ -218,6 +241,67 @@ Show metadata for a binary.
 
 ```bash
 pyghidra-mcp-cli metadata --binary <binary_name>
+```
+
+### rename
+
+Rename functions and variables.
+
+**Rename a function:**
+```bash
+pyghidra-mcp-cli rename function --binary <binary_name> <function_name_or_address> <new_name>
+```
+
+**Rename a variable:**
+```bash
+pyghidra-mcp-cli rename variable --binary <binary_name> <function_name_or_address> <variable_name> <new_name>
+```
+
+### set
+
+Set types, prototypes, and comments.
+
+**Set a variable type:**
+```bash
+pyghidra-mcp-cli set variable-type --binary <binary_name> <function_name_or_address> <variable_name> <type_name>
+```
+
+**Set a function prototype:**
+```bash
+pyghidra-mcp-cli set function-prototype --binary <binary_name> <function_name_or_address> "<prototype>"
+```
+
+**Set a comment:**
+```bash
+pyghidra-mcp-cli set comment --binary <binary_name> <target> "<comment>" [options]
+
+Options:
+  -t, --type [decompiler|plate|pre|eol|post|repeatable]
+```
+
+**Set the current GUI program (`--gui` server only):**
+```bash
+pyghidra-mcp-cli set current-program --binary <binary_name>
+```
+
+### open
+
+Open GUI resources. These commands require the server to be running with `--gui`.
+
+**Open a program in CodeBrowser:**
+```bash
+pyghidra-mcp-cli open program --binary <binary_name> [options]
+
+Options:
+  --new-window / --reuse-window
+```
+
+### goto
+
+Navigate the Ghidra GUI. Requires the server to be running with `--gui`.
+
+```bash
+pyghidra-mcp-cli goto --binary <binary_name> <target> --type [address|function]
 ```
 
 ## Examples

@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import multiprocessing
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +57,8 @@ class PyGhidraContext(IndexingMixin):
     """
     Manages a Ghidra project, including its creation, program imports, and cleanup.
     """
+
+    _analysis_bundle_host_lock = threading.RLock()
 
     def __init__(
         self,
@@ -687,60 +690,63 @@ class PyGhidraContext(IndexingMixin):
             or force_analysis
             or self.force_analysis
         ):
-            GhidraScriptUtil.acquireBundleHostReference()
+            with self._analysis_bundle_host_lock:
+                GhidraScriptUtil.acquireBundleHostReference()
 
-            if program and program.getFunctionManager().getFunctionCount() > 1000:
-                # Force Decomp Param ID is not set
-                if (
-                    self.program_options is not None
-                    and self.program_options.get("program_options", {})
-                    .get("Analyzers", {})
-                    .get("Decompiler Parameter ID")
-                    is None
-                ):
-                    self.set_analysis_option(program, "Decompiler Parameter ID", True)
+                if program and program.getFunctionManager().getFunctionCount() > 1000:
+                    # Force Decomp Param ID is not set
+                    if (
+                        self.program_options is not None
+                        and self.program_options.get("program_options", {})
+                        .get("Analyzers", {})
+                        .get("Decompiler Parameter ID")
+                        is None
+                    ):
+                        self.set_analysis_option(program, "Decompiler Parameter ID", True)
 
-            if self.program_options:
-                analyzer_options = self.program_options.get("program_options", {}).get(
-                    "Analyzers", {}
-                )
-                for k, v in analyzer_options.items():
-                    logger.info(f"Setting prog option:{k} with value:{v}")
-                    self.set_analysis_option(program, k, v)
+                if self.program_options:
+                    analyzer_options = self.program_options.get("program_options", {}).get(
+                        "Analyzers", {}
+                    )
+                    for k, v in analyzer_options.items():
+                        logger.info(f"Setting prog option:{k} with value:{v}")
+                        self.set_analysis_option(program, k, v)
 
-            if self.no_symbols:
-                logger.warn(f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}")
-                self.set_analysis_option(program, "PDB Universal", False)
+                if self.no_symbols:
+                    logger.warn(
+                        f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}"
+                    )
+                    self.set_analysis_option(program, "PDB Universal", False)
 
-            else:
-                # Configure symbols if enabled
-                if self.sym_file_path:
-                    logger.info(f"Setting PDB file: {self.sym_file_path}")
-                    set_pdb(program, self.sym_file_path)
                 else:
-                    logger.info(f"Setting up symbol server at {self.symbols_path}")
-                    setup_symbol_server(self.symbols_path)
-                    set_remote_pdbs(program, True)
+                    # Configure symbols if enabled
+                    if self.sym_file_path:
+                        logger.info(f"Setting PDB file: {self.sym_file_path}")
+                        set_pdb(program, self.sym_file_path)
+                    else:
+                        logger.info(f"Setting up symbol server at {self.symbols_path}")
+                        setup_symbol_server(self.symbols_path)
+                        set_remote_pdbs(program, True)
 
-                # Verify PDB loaded
-                pdb = get_pdb(program)
-                if pdb is None:
-                    logger.warn(f"Failed to find pdb for {program.name}")
-                else:
-                    logger.info(f"Loaded pdb: {pdb}")
+                    # Verify PDB loaded
+                    pdb = get_pdb(program)
+                    if pdb is None:
+                        logger.warn(f"Failed to find pdb for {program.name}")
+                    else:
+                        logger.info(f"Loaded pdb: {pdb}")
 
-            logger.info(f"Starting Ghidra analysis of {program}...")
-            try:
-                flat_api.analyzeAll(program)
-                if hasattr(GhidraProgramUtilities, "setAnalyzedFlag"):
-                    GhidraProgramUtilities.setAnalyzedFlag(program, True)
-                elif hasattr(GhidraProgramUtilities, "markProgramAnalyzed"):
-                    GhidraProgramUtilities.markProgramAnalyzed(program)
-                else:
-                    raise Exception("Missing set analyzed flag method!")
-            finally:
-                GhidraScriptUtil.releaseBundleHostReference()
-                self.project.save(program)
+                logger.info(f"Starting Ghidra analysis of {program}...")
+                try:
+                    flat_api.analyzeAll(program)
+                    if hasattr(GhidraProgramUtilities, "setAnalyzedFlag"):
+                        GhidraProgramUtilities.setAnalyzedFlag(program, True)
+                    elif hasattr(GhidraProgramUtilities, "markProgramAnalyzed"):
+                        GhidraProgramUtilities.markProgramAnalyzed(program)
+                    else:
+                        raise Exception("Missing set analyzed flag method!")
+                finally:
+                    GhidraScriptUtil.releaseBundleHostReference()
+                    self.project.save(program)
         else:
             logger.info(f"Analysis already complete.. skipping {program}!")
 

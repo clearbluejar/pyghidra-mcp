@@ -43,62 +43,119 @@ Yes, the original [ghidra-mcp](https://github.com/LaurieWired/GhidraMCP) is fant
 
 This project provides a Python-first experience optimized for local development, headless environments, and testable workflows.
 
+## Setup Diagrams
+
+### Headless MCP Server
+
 ```mermaid
-graph TD
-    subgraph Clients
-        A[🤖 LLM / Agent]
-        B[💻 Local CLI User]
-        C[🔧 CI/CD Pipeline]
-    end
-
-    subgraph Startup Command
-        direction LR
-        cmd("`pyghidra-mcp --project-path /path/to/project --threaded /path/to/binary1`")
-    end
-
-    subgraph "pyghidra-mcp Server"
-        D[MCP Server]
-        E[pyghidra ]
-        F[Ghidra Headless]
-
-      subgraph "Ghidra Project Analysis"
-          G[Binary 1]
-          H[Binary 2]
-          I[...]
-      end
-    end
-
-
-
-    cmd --> D
-
-    A -- "MCP (stdio/http)" --> D
-    B -- "stdio/http" --> D
-    C -- "stdio/sse" --> D
-
-    D -- "Initializes" --> E
-    E -- "Controls" --> F
-
-    F -- "Analyzes Concurrently" --> G
-    F -- "Analyzes Concurrently" --> H
-    F -- "Analyzes Concurrently" --> I
-
-    subgraph "Exposed MCP API"
-        J[decompile_function]
-    end
-
-    D -- "Exposes Tools" --> J
-
-    J -- "Results" --> A
+flowchart LR
+    Client["MCP client or agent"] -->|"stdio or streamable-http"| Server["pyghidra-mcp"]
+    Input["Ghidra project or binary paths"] --> Server
+    Server --> Project["Ghidra project"]
+    Server --> Tools["analysis, search, project, and edit tools"]
+    Tools --> Client
 ```
+
+### GUI Setup
+
+```mermaid
+flowchart LR
+    Agent["MCP client or agent"] -->|"streamable-http"| Server["pyghidra-mcp --gui"]
+    Server --> JVM["shared pyghidra / JPype JVM"]
+    JVM --> GUI["Ghidra GUI and CodeBrowser"]
+    User["Reverse engineer"] --> GUI
+    Server --> GuiTools["open_program_in_gui, goto, list_open_programs, set_current_program"]
+    GuiTools --> GUI
+```
+
+### CLI Setup
+
+```mermaid
+flowchart LR
+    User["Terminal user"] --> CLI["pyghidra-mcp-cli"]
+    CLI -->|"HTTP"| Server["pyghidra-mcp --transport streamable-http"]
+    Server --> Project["Ghidra project"]
+    CLI --> Commands["decompile, search, list, rename, set, callgraph"]
+    CLI -.-> GuiCommands["GUI commands require --gui: open, goto, list open-programs, set current-program"]
+    Server -.-> GUI["Optional Ghidra GUI"]
+    GuiCommands -.-> GUI
+```
+
+<details>
+<summary>Detailed architecture and tool surface</summary>
+
+```mermaid
+flowchart TD
+    subgraph Clients
+        Agent["LLM / MCP host"]
+        Cli["pyghidra-mcp-cli"]
+        Automation["scripts and CI"]
+    end
+
+    subgraph Transports
+        Stdio["stdio"]
+        Http["streamable-http"]
+        Sse["sse legacy"]
+    end
+
+    subgraph Server["pyghidra-mcp server"]
+        FastMcp["FastMCP tool server"]
+        Context["PyGhidra context"]
+        Indexing["background analysis and Chroma indexing"]
+
+        subgraph Tools["MCP tools"]
+            Analysis["decompile, xrefs, bytes, callgraph"]
+            Search["symbols, strings, code"]
+            ProjectOps["import, delete, metadata, list binaries"]
+            Edits["rename function, rename variable, set type, set prototype, set comment"]
+            GuiOnly["GUI only: open program, goto, list open programs, set current program"]
+        end
+    end
+
+    subgraph GhidraRuntime["Ghidra runtime"]
+        PyGhidra["pyghidra"]
+        Jpype["JPype shared JVM"]
+        Project["Ghidra project"]
+        Programs["program databases"]
+        CodeBrowser["Ghidra GUI / CodeBrowser"]
+    end
+
+    Agent --> Stdio
+    Agent --> Http
+    Automation --> Stdio
+    Automation --> Http
+    Automation --> Sse
+    Cli --> Http
+
+    Stdio --> FastMcp
+    Http --> FastMcp
+    Sse --> FastMcp
+
+    FastMcp --> Context
+    Context --> PyGhidra
+    PyGhidra --> Jpype
+    Jpype --> Project
+    Project --> Programs
+    Context --> Indexing
+    Indexing --> Search
+
+    FastMcp --> Tools
+    Tools --> Context
+    GuiOnly -.-> CodeBrowser
+    Context -.-> CodeBrowser
+```
+
+</details>
 
 ## Contents
 
 - [PyGhidra-MCP - Ghidra Model Context Protocol Server](#pyghidra-mcp---ghidra-model-context-protocol-server)
     - [Overview](#overview)
   - [Yet another Ghidra MCP?](#yet-another-ghidra-mcp)
+  - [Setup Diagrams](#setup-diagrams)
   - [Contents](#contents)
   - [Getting started](#getting-started)
+  - [Optimized for Agents](#optimized-for-agents)
   - [CLI Client](#cli-client)
   - [Project Creation, Management, and Opening Existing Projects](#project-creation-management-and-opening-existing-projects)
     - [Creating New Projects](#creating-new-projects)
@@ -175,6 +232,17 @@ Or, run as a [Docker container](https://ghcr.io/clearbluejar/pyghidra-mcp):
 ```bash
 docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
 ```
+
+## Optimized for Agents
+
+`pyghidra-mcp` keeps the MCP surface intentionally narrow so agent clients spend fewer tokens on tool discovery and argument selection.
+
+- **Short tool descriptions**: MCP tool docstrings are kept compact so FastMCP tool schemas stay small and cheap to send to models.
+- **Context discipline**: tools return focused structured data instead of dumping whole-program context by default. Decompilation, symbol search, and cross-reference results are shaped to support iterative analysis rather than one large response.
+- **GUI tools only when relevant**: GUI-only controls such as `open_program_in_gui`, `list_open_programs`, `set_current_program`, and `goto` are only exposed when the server is started with `--gui`.
+- **CLI is optional**: if MCP is not your preferred interface, `pyghidra-mcp-cli` provides a direct command-line client over HTTP with grouped commands for common edit and analysis workflows.
+
+This keeps the default server usable for LLM agents, IDE integrations, and automation without exposing unnecessary tool surface or GUI-only controls in headless sessions.
 
 ## CLI Client
 
@@ -459,6 +527,8 @@ Per-item errors are returned inline (other targets still succeed):
 
 - `set_variable_type(binary_name: str, function_name_or_address: str, variable_name: str, type_name: str)`: Set the data type for a function parameter or local variable by exact name within a specific function. If the name is missing or ambiguous within that function, the tool returns an error instead of guessing. `type_name` is parsed using Ghidra's datatype parser against the program datatype manager.
 
+- `set_function_prototype(binary_name: str, function_name_or_address: str, prototype: str)`: Set a function prototype from a full signature string. The tool always runs the prototype through Ghidra's native signature parser and returns the underlying parser or apply error if the prototype is invalid.
+
 - `set_comment(binary_name: str, target: str, comment: str, comment_type: str)`: Set a function/decompiler comment or listing comment. Supported `comment_type` values are `decompiler`, `plate`, `pre`, `eol`, `post`, and `repeatable`.
 
 #### GUI Control Tools (`--gui` only)
@@ -466,7 +536,7 @@ Per-item errors are returned inline (other targets still succeed):
 These tools are only available when `pyghidra-mcp` is started with `--gui` and control what the GUI is showing rather than mutating project data directly:
 
 - `list_open_programs()`: List programs currently open in the Ghidra GUI.
-- `open_program_in_gui(binary_name: str)`: Open a project binary in CodeBrowser.
+- `open_program_in_gui(binary_name: str, new_window: bool = True)`: Open a project binary in CodeBrowser. By default this opens a new CodeBrowser window. Set `new_window=false` to reuse a visible CodeBrowser when possible.
 - `set_current_program(binary_name: str)`: Make an open program the active/current program in the primary GUI tool context.
 - `goto(binary_name: str, target: str, target_type: str)`: Navigate the Ghidra GUI to an address or function. `target_type` must be `address` or `function`.
 

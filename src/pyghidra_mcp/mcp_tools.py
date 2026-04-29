@@ -24,6 +24,7 @@ from pyghidra_mcp.models import (
     CrossReferenceInfos,
     DecompiledFunction,
     ExportInfos,
+    FunctionPrototypeResponse,
     GotoResponse,
     GuiContextResponse,
     ImportInfos,
@@ -229,10 +230,19 @@ def list_open_programs(ctx: Context) -> OpenProgramInfos:
 
 
 @mcp_error_handler
-def open_program_in_gui(binary_name: str, ctx: Context) -> OpenProgramInfo:
-    """Open a project binary in the Ghidra GUI CodeBrowser."""
+def open_program_in_gui(
+    binary_name: str,
+    new_window: bool = True,
+    *,
+    ctx: Context,
+) -> OpenProgramInfo:
+    """Open a project binary in the Ghidra GUI CodeBrowser.
+
+    By default this launches a new CodeBrowser window for the binary. Set
+    `new_window=false` to reuse a visible CodeBrowser tool when possible.
+    """
     gui_context = _require_gui_context(ctx)
-    return OpenProgramInfo(**gui_context.open_program_in_gui(binary_name))
+    return OpenProgramInfo(**gui_context.open_program_in_gui(binary_name, new_window=new_window))
 
 
 @mcp_error_handler
@@ -268,7 +278,7 @@ def rename_function(
     new_name: str,
     ctx: Context,
 ) -> RenameResponse:
-    """Rename a function using a Ghidra transaction."""
+    """Rename a function."""
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
@@ -288,10 +298,7 @@ def rename_variable(
     new_name: str,
     ctx: Context,
 ) -> VariableRenameResponse:
-    """Rename a function parameter or local variable by exact name within a function.
-
-    Missing or ambiguous names return an error instead of guessing.
-    """
+    """Rename a parameter or local by exact name."""
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
@@ -311,10 +318,7 @@ def set_variable_type(
     type_name: str,
     ctx: Context,
 ) -> VariableTypeResponse:
-    """Set the data type for a function parameter or local variable by exact name.
-
-    Missing or ambiguous names return an error instead of guessing.
-    """
+    """Set a parameter or local type by exact name."""
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
@@ -327,6 +331,25 @@ def set_variable_type(
 
 
 @mcp_error_handler
+def set_function_prototype(
+    binary_name: str,
+    function_name_or_address: str,
+    prototype: str,
+    ctx: Context,
+) -> FunctionPrototypeResponse:
+    """Set a function prototype. Invalid input returns Ghidra's error."""
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.set_function_prototype(function_name_or_address, prototype),
+    )
+    result = cast(dict, result)
+    return FunctionPrototypeResponse(binary_name=binary_name, **result)
+
+
+@mcp_error_handler
 def set_comment(
     binary_name: str,
     target: str,
@@ -334,7 +357,7 @@ def set_comment(
     comment_type: Literal["decompiler", "plate", "pre", "eol", "post", "repeatable"],
     ctx: Context,
 ) -> CommentResponse:
-    """Set a comment in the decompiler or listing."""
+    """Set a decompiler or listing comment."""
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)

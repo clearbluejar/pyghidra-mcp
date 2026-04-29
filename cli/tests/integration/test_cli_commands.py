@@ -2,15 +2,16 @@
 
 import asyncio
 import os
+import re
 import shutil
+import socket
 import subprocess
+import sys
 import tempfile
 import time
 
 import aiohttp
 import pytest
-
-base_url = os.getenv("MCP_BASE_URL", "http://127.0.0.1:8000")
 
 
 @pytest.fixture(scope="session")
@@ -41,6 +42,14 @@ def test_dir():
     test_dir = tempfile.mkdtemp(prefix="pyghidra_cli_test_")
     yield test_dir
     shutil.rmtree(test_dir, ignore_errors=True)
+
+
+@pytest.fixture(scope="session")
+def server_port():
+    """Pick a free TCP port for the test server."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
 @pytest.fixture(scope="module")
@@ -78,15 +87,20 @@ int main() {
 
 
 @pytest.fixture(scope="module")
-def streamable_server(test_binary, test_dir, ghidra_env):
+def streamable_server(test_binary, test_dir, ghidra_env, server_port):
     """Fixture to start the pyghidra-mcp server in a separate process with isolated project."""
     project_dir = os.path.join(test_dir, "project.gpr")
+    base_url = f"http://127.0.0.1:{server_port}"
 
     proc = subprocess.Popen(
         [
             "pyghidra-mcp",
             "--transport",
             "streamable-http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(server_port),
             "--project-path",
             project_dir,
             test_binary,
@@ -121,7 +135,7 @@ def streamable_server(test_binary, test_dir, ghidra_env):
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
-                async with PyGhidraMcpClient(host="127.0.0.1", port=8000) as client:
+                async with PyGhidraMcpClient(host="127.0.0.1", port=server_port) as client:
                     result = await client.list_project_binaries()
                     programs = result.get("programs", [])
                     if programs and all(
@@ -153,11 +167,56 @@ def streamable_server(test_binary, test_dir, ghidra_env):
 
 
 @pytest.fixture
-def client():
+def client(server_port):
     """Create a PyGhidraMcpClient for testing."""
     from pyghidra_mcp_cli.client import PyGhidraMcpClient
 
-    return PyGhidraMcpClient(host="127.0.0.1", port=8000)
+    return PyGhidraMcpClient(host="127.0.0.1", port=server_port)
+
+
+def run_cli(server_port: int, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run the installed CLI against the test server."""
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pyghidra_mcp_cli.main",
+            "--port",
+            str(server_port),
+            "--format",
+            "json",
+            *args,
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+async def resolve_function_symbol(client, binary_name: str, query: str) -> dict:
+    """Resolve a function symbol in a cross-platform way."""
+    async with client:
+        result = await client.search_symbols(binary_name, query, functions_only=True, limit=25)
+        for symbol in result.get("symbols", []):
+            name = symbol.get("name", "")
+            if name.endswith(query):
+                return symbol
+    raise AssertionError(f"Unable to resolve function {query!r}")
+
+
+async def resolve_parameter_name(client, binary_name: str, function_name: str) -> str:
+    """Resolve the current decompiler parameter name for a function."""
+    async with client:
+        result = await client.decompile_function(binary_name, function_name)
+    header = result["code"].split("{", 1)[0]
+    match = re.search(r"\((.*?)\)", header, re.DOTALL)
+    if not match:
+        raise AssertionError(f"Unable to parse parameter list for {function_name!r}")
+    params = match.group(1).strip()
+    if not params or params == "void":
+        raise AssertionError(f"No parameter found for {function_name!r}")
+    first_param = params.split(",", 1)[0].strip()
+    return first_param.split()[-1].lstrip("*")
 
 
 @pytest.fixture
@@ -324,3 +383,71 @@ async def test_list_binary_metadata(client, binary_name):
         result = await client.list_project_binary_metadata(binary_name)
         assert isinstance(result, dict)
         assert len(result) > 0
+
+
+@pytest.mark.asyncio
+async def test_cli_set_function_prototype_command(client, binary_name, server_port):
+    """Test the grouped CLI set function-prototype command."""
+    function_one_name = (await resolve_function_symbol(client, binary_name, "function_one"))["name"]
+    completed = run_cli(
+        server_port,
+        "set",
+        "function-prototype",
+        "--binary",
+        binary_name,
+        function_one_name,
+        "void function_one(int count)",
+    )
+    assert '"new_prototype"' in completed.stdout
+    assert "function_one" in completed.stdout
+
+
+@pytest.mark.asyncio
+async def test_cli_set_comment_command(client, binary_name, server_port):
+    """Test the grouped CLI set comment command."""
+    function_one = await resolve_function_symbol(client, binary_name, "function_one")
+    decimal_address = str(int(function_one["address"], 16))
+    completed = run_cli(
+        server_port,
+        "set",
+        "comment",
+        "--binary",
+        binary_name,
+        "--type",
+        "plate",
+        decimal_address,
+        "CLI comment test",
+    )
+    assert '"comment_type"' in completed.stdout
+    assert '"plate"' in completed.stdout
+
+
+@pytest.mark.asyncio
+async def test_cli_rename_variable_command(client, binary_name, server_port):
+    """Test the grouped CLI rename variable command."""
+    function_one_name = (await resolve_function_symbol(client, binary_name, "function_one"))["name"]
+    run_cli(
+        server_port,
+        "set",
+        "function-prototype",
+        "--binary",
+        binary_name,
+        function_one_name,
+        "void function_one(int count)",
+    )
+    completed = run_cli(
+        server_port,
+        "rename",
+        "variable",
+        "--binary",
+        binary_name,
+        function_one_name,
+        "count",
+        "item_count",
+    )
+    assert '"new_name"' in completed.stdout
+    assert '"item_count"' in completed.stdout
+
+    async with client:
+        result = await client.decompile_function(binary_name, function_one_name)
+        assert "item_count" in result["code"]

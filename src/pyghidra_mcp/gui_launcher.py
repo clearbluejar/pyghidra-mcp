@@ -47,15 +47,15 @@ class GuiPyGhidraMcpLauncher(PyGhidraLauncher):
     def __init__(self, project_gpr_path: Path, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.add_vmargs("-DUSER_AGREEMENT=ACCEPT")
-        self.args = [str(project_gpr_path.absolute())]
+        self.project_gpr_path = project_gpr_path
+        self.args = []
         self._is_exiting = threading.Event()
         self._shutdown_requested = False
 
     def _launch(self) -> None:
         """Start the Ghidra GUI without blocking the caller."""
-        from java.lang import Runtime, Thread  # type: ignore
-
         from ghidra import Ghidra
+        from java.lang import Runtime, Thread  # type: ignore
 
         if sys.platform == "win32":
             appid = ctypes.c_wchar_p(self.app_info.name)

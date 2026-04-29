@@ -102,6 +102,14 @@ class VariableTypeResponse(BaseModel):
     new_type: str
 
 
+class FunctionPrototypeResponse(BaseModel):
+    binary_name: str
+    function_name: str
+    function_address: str
+    old_prototype: str
+    new_prototype: str
+
+
 class CommentResponse(BaseModel):
     binary_name: str
     address: str
@@ -152,6 +160,8 @@ class SymbolInfo(BaseModel):
     source: str
     refcount: int
     external: bool
+    is_thunk: bool = False
+    thunk_target: str | None = None
 
 
 class SymbolSearchResults(BaseModel):

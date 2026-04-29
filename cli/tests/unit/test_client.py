@@ -1,5 +1,7 @@
 """Unit tests for the pyghidra-mcp client."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 
@@ -43,3 +45,66 @@ def test_binary_not_found_error_exception():
 
     with pytest.raises(BinaryNotFoundError):
         raise BinaryNotFoundError("Binary not found")
+
+
+def test_client_has_edit_methods():
+    """Test that edit-tool client methods exist."""
+    from pyghidra_mcp_cli.client import PyGhidraMcpClient
+
+    client = PyGhidraMcpClient()
+    assert callable(client.rename_function)
+    assert callable(client.rename_variable)
+    assert callable(client.set_variable_type)
+    assert callable(client.set_function_prototype)
+    assert callable(client.set_comment)
+
+
+def test_client_has_gui_methods():
+    """Test that GUI-tool client methods exist."""
+    from pyghidra_mcp_cli.client import PyGhidraMcpClient
+
+    client = PyGhidraMcpClient()
+    assert callable(client.list_open_programs)
+    assert callable(client.open_program_in_gui)
+    assert callable(client.set_current_program)
+    assert callable(client.goto)
+
+
+class FakeMcpResult:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def model_dump(self):
+        return {"structuredContent": self.payload}
+
+
+@pytest.mark.asyncio
+async def test_gui_client_methods_call_expected_tools():
+    """Test GUI client wrappers call the expected MCP tools."""
+    from pyghidra_mcp_cli.client import PyGhidraMcpClient
+
+    client = PyGhidraMcpClient()
+    client._connected = True
+    client._session = AsyncMock()
+    client._session.call_tool.return_value = FakeMcpResult({"ok": True})
+
+    assert await client.list_open_programs() == {"ok": True}
+    client._session.call_tool.assert_awaited_with("list_open_programs", {})
+
+    await client.open_program_in_gui("sample", new_window=False)
+    client._session.call_tool.assert_awaited_with(
+        "open_program_in_gui",
+        {"binary_name": "sample", "new_window": False},
+    )
+
+    await client.set_current_program("sample")
+    client._session.call_tool.assert_awaited_with(
+        "set_current_program",
+        {"binary_name": "sample"},
+    )
+
+    await client.goto("sample", "entry", "function")
+    client._session.call_tool.assert_awaited_with(
+        "goto",
+        {"binary_name": "sample", "target": "entry", "target_type": "function"},
+    )

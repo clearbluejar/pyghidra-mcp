@@ -28,3 +28,5 @@ async def test_search_symbols_by_name(server_params, func_prefix):
             assert len(search_results.symbols) >= 2
             assert any(name_one in s.name for s in search_results.symbols)
             assert any(name_two in s.name for s in search_results.symbols)
+            assert all(hasattr(symbol, "is_thunk") for symbol in search_results.symbols)
+            assert all(symbol.is_thunk is False for symbol in search_results.symbols)

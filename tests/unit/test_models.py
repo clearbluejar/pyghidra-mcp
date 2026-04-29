@@ -191,6 +191,8 @@ def test_symbol_info_model():
         source="user",
         refcount=5,
         external=False,
+        is_thunk=True,
+        thunk_target="real_target @ 0x2000",
     )
     assert symbol.name == "test_symbol"
     assert symbol.address == "0x1234"
@@ -199,6 +201,8 @@ def test_symbol_info_model():
     assert symbol.source == "user"
     assert symbol.refcount == 5
     assert symbol.external is False
+    assert symbol.is_thunk is True
+    assert symbol.thunk_target == "real_target @ 0x2000"
 
 
 def test_symbol_search_results_model():
@@ -213,6 +217,7 @@ def test_symbol_search_results_model():
                 source="user",
                 refcount=5,
                 external=False,
+                is_thunk=False,
             ),
             SymbolInfo(
                 name="test_symbol2",
@@ -222,6 +227,7 @@ def test_symbol_search_results_model():
                 source="analysis",
                 refcount=1,
                 external=False,
+                is_thunk=False,
             ),
         ]
     )
