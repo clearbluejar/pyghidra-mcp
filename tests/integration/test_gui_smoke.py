@@ -218,12 +218,13 @@ async def test_gui_smoke(
                 assert comment_payload["comment_type"] == "decompiler"
                 assert comment_payload["comment"] == "GUI smoke test comment."
 
-                # Test get_gui_context after goto, which typically activates Listing and specific address
-                # Wait briefly for Swing UI to settle after goto
+                # Test get_gui_context after goto, which typically activates
+                # Listing and specific address. Wait briefly for Swing UI to settle after goto.
                 await asyncio.sleep(0.5)
                 context_result = await session.call_tool("get_gui_context", {})
                 context_payload = json.loads(context_result.content[0].text)
-                # The provider might be Listing, Decompiler, or CodeBrowser; importantly, an address should be detected.
+                # The provider might be Listing, Decompiler, or CodeBrowser.
+                # Importantly, an address should be detected.
                 assert context_payload.get("active_address") is not None
                 assert context_payload.get("active_program") is not None
                 assert context_payload.get("active_function") == main_func_name
