@@ -266,7 +266,7 @@ def goto(
 
 @mcp_error_handler
 def get_gui_context(ctx: Context) -> GuiContextResponse:
-    """Get the current active context in the Ghidra GUI (program, address, function, and focused pane)."""
+    """Get the current active user's location and metadata in the Ghidra GUI. Assume this is volatile and has changed since last call."""
     gui_context = _require_gui_context(ctx)
     return GuiContextResponse(**gui_context.get_active_gui_context())
 

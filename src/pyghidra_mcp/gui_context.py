@@ -275,45 +275,29 @@ class GuiPyGhidraContext(IndexingMixin):
                 if provider:
                     result["active_provider"] = str(provider.getName())
 
-            from ghidra.app.services import CodeViewerService, GoToService
+            from ghidra.app.services import CodeViewerService
 
             cvs = tool.getService(CodeViewerService)
-            if cvs:
-                loc = cvs.getCurrentLocation()
-                if loc:
-                    result["active_address"] = str(loc.getAddress())
-                    if current_program:
-                        fm = current_program.getFunctionManager()
-                        func = fm.getFunctionContaining(loc.getAddress())
-                        if func:
-                            result["active_function"] = str(func.getName())
-
-                sel = cvs.getCurrentSelection()
-                if sel and not sel.isEmpty():
-                    result["selection"] = f"{sel.getMinAddress()} - {sel.getMaxAddress()}"
-
-            if "active_address" in result:
+            if not cvs:
+                # If they aren't in a CodeBrowser-like tool, we just return empty context
                 return result
 
-            # Fallback to GoToService if CodeViewer isn't providing a location
-            goto_service = tool.getService(GoToService)
-            if not goto_service:
-                raise RuntimeError("Both GoToService and CodeViewerService are unavailable.")
+            loc = cvs.getCurrentLocation()
+            if loc:
+                result["active_address"] = str(loc.getAddress())
                 
-            nav = goto_service.getDefaultNavigatable()
-            if not nav:
-                raise RuntimeError("No default navigatable available in GoToService.")
+                # Get exact class name like MnemonicFieldLocation, OperandFieldLocation, etc.
+                result["location_type"] = type(loc).__name__
+                
+                if current_program:
+                    fm = current_program.getFunctionManager()
+                    func = fm.getFunctionContaining(loc.getAddress())
+                    if func:
+                        result["active_function"] = str(func.getName())
 
-            loc = nav.getLocation()
-            if not loc:
-                raise RuntimeError("No location available from active navigatable.")
-
-            result["active_address"] = str(loc.getAddress())
-            if current_program:
-                fm = current_program.getFunctionManager()
-                func = fm.getFunctionContaining(loc.getAddress())
-                if func:
-                    result["active_function"] = str(func.getName())
+            sel = cvs.getCurrentSelection()
+            if sel and not sel.isEmpty():
+                result["selection"] = f"{sel.getMinAddress()} - {sel.getMaxAddress()}"
 
             return result
 

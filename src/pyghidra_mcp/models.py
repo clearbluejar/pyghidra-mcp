@@ -74,6 +74,7 @@ class GuiContextResponse(BaseModel):
     active_address: str | None = None
     active_function: str | None = None
     selection: str | None = None
+    location_type: str | None = None
 
 
 class RenameResponse(BaseModel):
