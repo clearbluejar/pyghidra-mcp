@@ -223,7 +223,7 @@ Run the [Python package](https://pypi.org/p/pyghidra-mcp) as a CLI command using
 uvx pyghidra-mcp # Creates pyghidra_mcp_projects directory by default
 ```
 
-To launch and control a live Ghidra GUI from MCP, use `--gui` with `streamable-http` and an existing `.gpr` project:
+To launch and control a live Ghidra GUI from MCP, use `--gui` with `streamable-http`:
 
 ```bash
 uvx pyghidra-mcp \
@@ -231,7 +231,8 @@ uvx pyghidra-mcp \
   --transport streamable-http \
   --host 127.0.0.1 \
   --port 8000 \
-  --project-path /absolute/path/to/my_project.gpr
+  --project-path /absolute/path/to/ghidra-projects \
+  --project-name my_project
 ```
 
 > [!IMPORTANT]
@@ -371,7 +372,7 @@ pyghidra-mcp --project-path ~/existing/ghidra/my_research.gpr
 Use GUI mode when you want MCP actions to operate against the same live program objects that Ghidra is displaying.
 
 - `--gui` requires `--transport streamable-http` (or `--transport http` as an alias)
-- `--project-path` must resolve to an existing Ghidra project: pass a `.gpr` directly or pass a project directory with `--project-name`
+- `--project-path` can be a project directory plus `--project-name`, or an existing `.gpr` file. Missing projects are created automatically.
 - Ghidra is launched by `pyghidra-mcp`, which keeps GUI and MCP transactions in the same JVM
 - GUI-only tools are only exposed when running with `--gui`
 

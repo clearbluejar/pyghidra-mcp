@@ -4,5 +4,5 @@ A command-line client for the pyghidra-mcp server, providing an agent-friendly
 interface to interact with Ghidra binary analysis via CLI
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 __author__ = "clearbluejar"

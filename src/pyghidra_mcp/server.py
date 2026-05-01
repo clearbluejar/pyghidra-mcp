@@ -359,7 +359,7 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
     help="Location to store GZFs of analyzed binaries.",
 )
 @click.argument("input_paths", type=click.Path(exists=True), nargs=-1)
-def main(  # noqa: C901
+def main(
     transport: str,
     input_paths: list[Path],
     project_path: Path,
@@ -411,10 +411,6 @@ def main(  # noqa: C901
             raise click.UsageError("--gui requires --transport streamable-http or --transport http")
         if list_project_binaries or delete_project_binary:
             raise click.UsageError("GUI mode does not support project-management CLI actions yet")
-        if not project_spec.gpr_path.exists():
-            raise click.UsageError(
-                f"GUI mode currently requires an existing Ghidra project: {project_spec.gpr_path}"
-            )
 
         register_gui_tools(mcp)
         ensure_macos_framework_python()
