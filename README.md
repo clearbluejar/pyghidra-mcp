@@ -45,41 +45,55 @@ This project provides a Python-first experience optimized for local development,
 
 ## Setup Diagrams
 
-### Headless MCP Server
+### How the Pieces Connect
 
 ```mermaid
 flowchart LR
-    Client["MCP client or agent"] -->|"stdio or streamable-http"| Server["pyghidra-mcp"]
-    Input["Ghidra project or binary paths"] --> Server
-    Server --> Project["Ghidra project"]
-    Server --> Tools["analysis, search, project, and edit tools"]
-    Tools --> Client
+    subgraph Clients["Clients"]
+        Agent["MCP host / agent"]
+        Cli["pyghidra-mcp-cli"]
+        User["Ghidra user"]
+    end
+
+    subgraph Process["pyghidra-mcp process"]
+        Transport["stdio or streamable-http"]
+        Tools["MCP tools"]
+        Context["PyGhidra context"]
+    end
+
+    Project["Ghidra project<br/>.gpr / .rep"]
+    Artifacts["MCP artifacts<br/>ChromaDB + GZF cache"]
+    Gui["Ghidra GUI / CodeBrowser<br/>only with --gui"]
+
+    Agent -->|"stdio or HTTP"| Transport
+    Cli -->|"HTTP only"| Transport
+    Transport --> Tools
+    Tools --> Context
+    Context --> Project
+    Context --> Artifacts
+    Context -.-> Gui
+    User -.-> Gui
+    Gui -.-> Project
 ```
 
-### GUI Setup
+### Choosing a Mode
 
 ```mermaid
-flowchart LR
-    Agent["MCP client or agent"] -->|"streamable-http"| Server["pyghidra-mcp --gui"]
-    Server --> JVM["shared pyghidra / JPype JVM"]
-    JVM --> GUI["Ghidra GUI and CodeBrowser"]
-    User["Reverse engineer"] --> GUI
-    Server --> GuiTools["open_program_in_gui, goto, list_open_programs, set_current_program"]
-    GuiTools --> GUI
+flowchart TD
+    Start["What do you need?"]
+    Start --> Headless["Agent or automation only"]
+    Start --> GuiNeed["Live Ghidra GUI control"]
+    Start --> Terminal["Interactive terminal client"]
+
+    Headless --> Stdio["pyghidra-mcp -t stdio<br/>or -t streamable-http"]
+    GuiNeed --> GuiMode["pyghidra-mcp --gui<br/>--transport streamable-http<br/>--project-path project.gpr"]
+    Terminal --> HttpServer["Start pyghidra-mcp<br/>--transport streamable-http"]
+    HttpServer --> CliMode["Run pyghidra-mcp-cli commands"]
 ```
 
-### CLI Setup
-
-```mermaid
-flowchart LR
-    User["Terminal user"] --> CLI["pyghidra-mcp-cli"]
-    CLI -->|"HTTP"| Server["pyghidra-mcp --transport streamable-http"]
-    Server --> Project["Ghidra project"]
-    CLI --> Commands["decompile, search, list, rename, set, callgraph"]
-    CLI -.-> GuiCommands["GUI commands require --gui: open, goto, list open-programs, set current-program"]
-    Server -.-> GUI["Optional Ghidra GUI"]
-    GuiCommands -.-> GUI
-```
+- **Headless MCP**: use `stdio` for local MCP hosts, or `streamable-http` when several clients need the same long-running Ghidra project.
+- **GUI mode**: `pyghidra-mcp` launches Ghidra, opens the project, and exposes extra tools that steer the CodeBrowser in the same JVM.
+- **CLI client**: `pyghidra-mcp-cli` is an HTTP client. Start a `streamable-http` server first, then issue terminal commands against that running server.
 
 <details>
 <summary>Detailed architecture and tool surface</summary>
@@ -153,10 +167,14 @@ flowchart TD
     - [Overview](#overview)
   - [Yet another Ghidra MCP?](#yet-another-ghidra-mcp)
   - [Setup Diagrams](#setup-diagrams)
+    - [How the Pieces Connect](#how-the-pieces-connect)
+    - [Choosing a Mode](#choosing-a-mode)
   - [Contents](#contents)
   - [Getting started](#getting-started)
   - [Optimized for Agents](#optimized-for-agents)
   - [CLI Client](#cli-client)
+    - [Installation](#installation)
+    - [Quick Start with CLI](#quick-start-with-cli)
   - [Project Creation, Management, and Opening Existing Projects](#project-creation-management-and-opening-existing-projects)
     - [Creating New Projects](#creating-new-projects)
       - [Self-Contained Project Structure](#self-contained-project-structure)
@@ -165,26 +183,18 @@ flowchart TD
       - [Creating Multiple Related Projects](#creating-multiple-related-projects)
     - [Opening Existing Ghidra Projects](#opening-existing-ghidra-projects)
       - [Opening by .gpr File](#opening-by-gpr-file)
+    - [GUI Mode](#gui-mode)
+    - [Startup Defaults and Large Projects](#startup-defaults-and-large-projects)
   - [Development](#development)
     - [Setup](#setup)
     - [Testing and Quality](#testing-and-quality)
   - [API](#api)
     - [Tools](#tools)
-      - [Code Search](#code-search)
-      - [Cross-References](#cross-references)
-      - [Generate Call Graph](#generate-call-graph)
-      - [Decompile Function](#decompile-function)
-      - [Import Binary](#import-binary)
-      - [List Exports](#list-exports)
-      - [List Imports](#list-imports)
-      - [List Project Binaries](#list-project-binaries)
-      - [List Project Binary Metadata](#list-project-binary-metadata)
-      - [Delete Project Binary](#delete-project-binary)
-      - [Read Bytes](#read-bytes)
-      - [Search Strings](#search-strings)
-      - [Search Symbols](#search-symbols)
-    - [Prompts](#prompts)
-    - [Resources](#resources)
+      - [Batch Operations](#batch-operations)
+      - [Read / Analysis Tools](#read--analysis-tools)
+      - [Project Operations](#project-operations)
+      - [Edit / Mutation Tools](#edit--mutation-tools)
+      - [GUI Control Tools (`--gui` only)](#gui-control-tools---gui-only)
   - [Usage](#usage)
     - [Mapping Binaries with Docker](#mapping-binaries-with-docker)
     - [Using with OpenWeb-UI and MCPO](#using-with-openweb-ui-and-mcpo)
@@ -216,7 +226,7 @@ uvx pyghidra-mcp # Creates pyghidra_mcp_projects directory by default
 To launch and control a live Ghidra GUI from MCP, use `--gui` with `streamable-http` and an existing `.gpr` project:
 
 ```bash
-uv run pyghidra-mcp \
+uvx pyghidra-mcp \
   --gui \
   --transport streamable-http \
   --host 127.0.0.1 \
@@ -301,7 +311,7 @@ You can create new projects in several ways, depending on your workflow:
 
 ```bash
 # Create a new project with default settings
-pyghidra_mcp
+pyghidra-mcp
 
 # Creates: 
 $ tree pyghidra_mcp_projects/
@@ -317,7 +327,7 @@ pyghidra_mcp_projects/
 
 ```bash
 # Create project with custom name and location
-pyghidra_mcp --project-path ~/analysis/malware_study --project-name malware_analysis
+pyghidra-mcp --project-path ~/analysis/malware_study --project-name malware_analysis
 
 $ tree ~/analysis/ 
 /home/vscode/analysis/
@@ -336,10 +346,10 @@ $ tree ~/analysis/
 mkdir ~/reverse_engineering_workspace
 
 # Project for suspicious binaries
-pyghidra_mcp --project-path ~/reverse_engineering_workspace/suspicious_binaries --project-name suspicious_analysis
+pyghidra-mcp --project-path ~/reverse_engineering_workspace/suspicious_binaries --project-name suspicious_analysis
 
 # Project for packed malware  
-pyghidra_mcp --project-path ~/reverse_engineering_workspace/packed_malware --project-name packed_analysis
+pyghidra-mcp --project-path ~/reverse_engineering_workspace/packed_malware --project-name packed_analysis
 ```
 
 ### Opening Existing Ghidra Projects
@@ -350,7 +360,7 @@ If you have existing Ghidra projects (`.gpr` files), you can open them directly 
 
 ```bash
 # Open existing Ghidra project (project name derived from filename)
-pyghidra_mcp --project-path ~/existing/ghidra/my_research.gpr
+pyghidra-mcp --project-path ~/existing/ghidra/my_research.gpr
 
 # Result: ~/existing/ghidra/my_research-pyghidra-mcp/
 # └── chromadb/, gzfs/ (pyghidra-mcp additions)
@@ -360,8 +370,8 @@ pyghidra_mcp --project-path ~/existing/ghidra/my_research.gpr
 
 Use GUI mode when you want MCP actions to operate against the same live program objects that Ghidra is displaying.
 
-- `--gui` requires `--transport streamable-http`
-- `--project-path` must point to an existing `.gpr`
+- `--gui` requires `--transport streamable-http` (or `--transport http` as an alias)
+- `--project-path` must resolve to an existing Ghidra project: pass a `.gpr` directly or pass a project directory with `--project-name`
 - Ghidra is launched by `pyghidra-mcp`, which keeps GUI and MCP transactions in the same JVM
 - GUI-only tools are only exposed when running with `--gui`
 
@@ -427,7 +437,7 @@ This project uses a `Makefile` to streamline development and testing. `ruff` is 
     export GHIDRA_INSTALL_DIR="/path/to/ghidra/"
 
     # For Windows PowerShell
-    [System.Environment]::SetEnvironmentVariable('GHIDRA_INSTALL_DIR','C:\ghidra_10.2.3_PUBLIC_20230208\ghidra_10.2.3_PUBLIC')
+    [System.Environment]::SetEnvironmentVariable('GHIDRA_INSTALL_DIR','C:\path\to\ghidra')
     ```
 
 ### Testing and Quality
@@ -442,7 +452,7 @@ The `Makefile` provides several targets for testing and code quality:
 - `make test-integration-gui`: Run GUI integration tests. Requires a working Ghidra install and GUI support.
 - `make lint`: Check code style with `ruff`.
 - `make format`: Format code with `ruff`.
-- `make typecheck`: Run type checking with `ruff`.
+- `make typecheck`: Run lightweight static checks with `ruff`.
 - `make check`: Run all quality checks.
 - `make dev`: Run the development workflow (format and check).
 - `make build`: Build distribution packages.
@@ -451,8 +461,9 @@ The `Makefile` provides several targets for testing and code quality:
 Recommended split:
 
 - pre-commit: `ruff`, `pyright`, unit tests, and one lightweight integration smoke test
-- GitHub Actions: full headless integration coverage plus the supported Linux GUI lane under `Xvfb`
-- local/manual: macOS GUI validation and any heavier environment-specific debugging
+- GitHub Actions: full Linux headless integration coverage, Linux GUI under `Xvfb`, CLI coverage, and current macOS smoke tests
+- scheduled CI: older macOS / Ghidra compatibility coverage
+- local/manual: heavier environment-specific GUI debugging and release sanity checks
 
 ## API
 
@@ -491,11 +502,11 @@ Per-item errors are returned inline (other targets still succeed):
 
 #### Read / Analysis Tools
 
-- `search_code(binary_name: str, query: str, limit: int = 5)`: Search for code within a binary by similarity using vector embeddings.
+- `search_code(binary_name: str, query: str, limit: int = 5, offset: int = 0, search_mode: str = "semantic", include_full_code: bool = True, preview_length: int = 500, similarity_threshold: float = 0.0)`: Search decompiled pseudo-C using semantic vector search or literal matching.
 
 - `list_xrefs(binary_name: str, name_or_address: str | list[str])`: List cross-references to function(s), symbol(s), or address(es). Accepts a single target or a list for batch lookup.
 
-- `gen_callgraph(binary_name: str, function_name_or_address: str, direction: str = "calling", display_type: str = "flow", include_refs: bool = True, max_depth: int | None = None, max_run_time: int = 60, condense_threshold: int = 50, top_layers: int = 5, bottom_layers: int = 5)`: Generates a MermaidJS call graph for a specified function. Supports both "calling" (functions called by the target) and "called" (functions that call the target) directions with multiple visualization types.
+- `gen_callgraph(binary_name: str, function_name: str, direction: str = "calling", display_type: str = "flow", condense_threshold: int = 50, top_layers: int = 3, bottom_layers: int = 3, max_run_time: int = 120)`: Generates a MermaidJS call graph for a specified function. Supports both "calling" (functions called by the target) and "called" (functions that call the target) directions with multiple visualization types.
 
 - `decompile_function(binary_name: str, name_or_address: str | list[str], include_callees: bool = False, include_strings: bool = False, include_xrefs: bool = False, timeout_sec: int = 30)`: Decompile function(s) by name or address. Accepts a single target or a list for batch decompilation. Rich response flags attach callees, strings, and/or xrefs to each result. `timeout_sec` applies per target and bounds each decompilation attempt independently.
 
@@ -503,9 +514,9 @@ Per-item errors are returned inline (other targets still succeed):
 
 - `list_imports(binary_name: str, query: str = ".*", offset: int = 0, limit: int = 25)`: Lists all imported functions and symbols for a specified binary (regex supported for query).
 
-- `read_bytes(binary_name: str, address: str, size: int = 32)`: Reads raw bytes from memory at a specified address. Returns raw hex data. Useful for inspecting memory contents, data structures, or confirming analysis findings.
+- `read_bytes(binary_name: str, address: str, size: int = 32)`: Reads raw bytes from memory at a specified address. Hex addresses may include or omit the `0x` prefix.
 
-- `search_strings(binary_name: str, query: str, limit: int = 100)`: Searches for strings within a binary by name.
+- `search_strings(binary_name: str, query: str, limit: int = 100)`: Searches strings within a binary.
 
 - `search_symbols_by_name(binary_name: str, query: str, functions_only: bool = False, offset: int = 0, limit: int = 25)`: Search for symbols within a binary by name. Supports regex patterns (e.g. `^main$`, `func.*one`) with case-insensitive matching, or plain substring queries. Set `functions_only=True` to exclude labels, variables, and other non-function symbols.
 
@@ -529,7 +540,7 @@ Per-item errors are returned inline (other targets still succeed):
 
 - `set_function_prototype(binary_name: str, function_name_or_address: str, prototype: str)`: Set a function prototype from a full signature string. The tool always runs the prototype through Ghidra's native signature parser and returns the underlying parser or apply error if the prototype is invalid.
 
-- `set_comment(binary_name: str, target: str, comment: str, comment_type: str)`: Set a function/decompiler comment or listing comment. Supported `comment_type` values are `decompiler`, `plate`, `pre`, `eol`, `post`, and `repeatable`.
+- `set_comment(binary_name: str, target: str, comment: str, comment_type: str)`: Set a function/decompiler comment or listing comment. Listing comment targets can be addresses, symbols, or functions. Supported `comment_type` values are `decompiler`, `plate`, `pre`, `eol`, `post`, and `repeatable`.
 
 #### GUI Control Tools (`--gui` only)
 
@@ -539,18 +550,6 @@ These tools are only available when `pyghidra-mcp` is started with `--gui` and c
 - `open_program_in_gui(binary_name: str, new_window: bool = True)`: Open a project binary in CodeBrowser. By default this opens a new CodeBrowser window. Set `new_window=false` to reuse a visible CodeBrowser when possible.
 - `set_current_program(binary_name: str)`: Make an open program the active/current program in the primary GUI tool context.
 - `goto(binary_name: str, target: str, target_type: str)`: Navigate the Ghidra GUI to an address or function. `target_type` must be `address` or `function`.
-
-### Prompts
-
-Reusable prompts to standardize common LLM interactions.
-
-- `write_ghidra_script`: Return a prompt to help write a Ghidra script.
-
-### Resources
-
-Expose data and content to LLMs
-
-- `ghidra://program/{program_name}/function/{function_name}/decompiled`: Decompiled code of a specific function.
 
 ## Usage
 
@@ -562,53 +561,41 @@ Usage: pyghidra-mcp [OPTIONS] [INPUT_PATHS]...
 
   PyGhidra Command-Line MCP server
 
-  - input_paths: Path to one or more binaries to import, analyze, and expose with pyghidra-mcp
-  - transport: Supports stdio, streamable-http, and sse transports.
-  For stdio, it will read from stdin and write to stdout.
-  For streamable-http and sse, it will start an HTTP server on the specified port (default 8000).
-
 Options:
-  -v, --version                     Show version and exit.
-  -t, --transport [stdio|streamable-http|sse]
-                                    Transport protocol to use: stdio,
-                                    streamable-http, or sse (legacy).
-  --project-path PATH               Location on disk which points to the Ghidra
-                                    project to use. Can be an existing file.
-                                    [default: pyghidra_mcp_projects]
-  --project-name TEXT               Name for the project (used for Ghidra project
-                                    files). Ignored when using .gpr files.
-                                    [default: my_project]
-  --gui / --no-gui                  Launch and control a live Ghidra GUI for the
-                                    provided project. Requires streamable-http
-                                    and an existing .gpr project.
-                                    [default: no-gui]
-  -p, --port INTEGER                Port to listen on for HTTP-based transports
-                                    (streamable-http, sse). [default: 8000]
-  -o, --host TEXT                   Host to listen on for HTTP-based transports
-                                    (streamable-http, sse). [default: 127.0.0.1]
-  --threaded / --no-threaded        Allow threaded analysis. Disable for debug.
-                                    [default: threaded]
-  --force-analysis / --no-force-analysis
-                                    Force a new binary analysis each run.
-                                    [default: no-force-analysis]
-  --verbose-analysis / --no-verbose-analysis
-                                    Verbose logging for analysis step.
-                                    [default: no-verbose-analysis]
-  --no-symbols / --with-symbols     Turn off symbols for analysis.
-                                    [default: no-symbols]
-  --gdt PATH                        Path to a GDT file for analysis. Can be
-                                    specified multiple times.
-  --program-options PATH            Path to a JSON file containing program
-                                    options (custom analyzer settings).
-  --gzfs-path PATH                  Location to store GZFs of analyzed
-                                    binaries.
-  --max-workers INTEGER             Number of workers for threaded analysis.
-                                    Defaults to CPU count. [default: 0]
+  -v, --version                       Show version and exit.
+  -t, --transport [stdio|streamable-http|sse|http]
+                                      Transport protocol. SSE is deprecated;
+                                      use streamable-http instead. [default: stdio]
+  -p, --port INTEGER                  Port for HTTP-based transports. [default: 8000]
+  -o, --host TEXT                     Host for HTTP-based transports. [default: 127.0.0.1]
+  --project-path PATH                 Directory for a pyghidra-mcp project or an
+                                      existing Ghidra .gpr file. [default: pyghidra_mcp_projects]
+  --project-name TEXT                 Ghidra project name. Ignored for .gpr paths.
+                                      [default: my_project]
+  --threaded / --no-threaded          Allow threaded analysis. [default: threaded]
+  --max-workers INTEGER               Number of analysis workers; 0 means CPU count.
+                                      [default: 0]
   --wait-for-analysis / --no-wait-for-analysis
-                                    Wait for initial project analysis to
-                                    complete before starting the server.
-                                    [default: no-wait-for-analysis]
-  -h, --help                        Show this message and exit.
+                                      Wait for initial analysis before starting.
+                                      [default: no-wait-for-analysis]
+  --gui / --no-gui                    Launch Ghidra GUI in-process and serve MCP
+                                      against GUI-open programs. Cannot attach to
+                                      an already-running external Ghidra process.
+                                      [default: no-gui]
+  --list-project-binaries             List ingested project binaries and exit.
+  --delete-project-binary TEXT        Delete a project binary by name and exit.
+  --force-analysis / --no-force-analysis
+                                      Force a new binary analysis each run.
+                                      [default: no-force-analysis]
+  --verbose-analysis / --no-verbose-analysis
+                                      Verbose logging for analysis. [default: no-verbose-analysis]
+  --no-symbols / --with-symbols       Turn off symbols for analysis. [default: with-symbols]
+  --sym-file-path PATH                Single PDB symbol file for one binary.
+  -s, --symbols-path PATH             Local symbols directory.
+  --gdt PATH                          Path to GDT files. May be specified multiple times.
+  --program-options PATH              JSON file with Ghidra program options.
+  --gzfs-path PATH                    Location to store GZFs of analyzed binaries.
+  -h, --help                          Show this message and exit.
 ```
 
 ### Mapping Binaries with Docker
@@ -649,7 +636,7 @@ uvx mcpo -- \
 You can combine mcpo with Docker:
 
 ```bash
-uvx mcpo -- docker run  ghcr.io/clearbluejar/pyghidra-mcp /bin/ls
+uvx mcpo -- docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp /bin/ls
 ```
 
 ### Standard Input/Output (stdio)
@@ -666,19 +653,19 @@ By default, the Python package will run in `stdio` mode. Because it's using the 
 
 #### Docker
 
-This server is published to Github's Container Registry ([ghcr.io/clearbluejar/pyghidra-mcp](http://ghcr.io/clearbluejar/pyghidra-mcp))
+This server is published to GitHub's Container Registry ([ghcr.io/clearbluejar/pyghidra-mcp](http://ghcr.io/clearbluejar/pyghidra-mcp))
 
 ```
 docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
 ```
 
-By default, the Docker container is in `SSE` mode, so you will have to include `-t stdio` after the image name and run with `-i` to run in [interactive](https://docs.docker.com/reference/cli/docker/container/run/#interactive) mode.
+By default, the Docker container starts the `streamable-http` server, so include `-t stdio` after the image name and run with `-i` for [interactive](https://docs.docker.com/reference/cli/docker/container/run/#interactive) stdio mode.
 
 ### Streamable HTTP
 
 Streamable HTTP enables streaming responses over JSON RPC via HTTP POST requests. See the [spec](https://modelcontextprotocol.io/specification/draft/basic/transports#streamable-http) for more details.
 
-By default, the server listens on [127.0.0.1:8000/mcp](https://127.0.0.1/mcp) for client connections. To change any of this, set [FASTMCP_*](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/server/fastmcp/server.py#L78) environment variables. _The server must be running for clients to connect to it._
+By default, the server listens on [http://127.0.0.1:8000/mcp](http://127.0.0.1:8000/mcp) for client connections. Use `--host` / `--port` or the `MCP_HOST` / `MCP_PORT` environment variables to change the bind address. _The server must be running for clients to connect to it._
 
 #### Python
 
@@ -706,11 +693,11 @@ docker run -p 8000:8000 ghcr.io/clearbluejar/pyghidra-mcp
 ### Server-sent events (SSE)
 
 > [!WARNING]
-> The MCP communiity considers this a legacy transport portcol and is really intended for backwards compatibility. [Streamable HTTP](#streamable-http) is the recommended replacement.
+> The MCP community considers this a legacy transport protocol intended for backwards compatibility. [Streamable HTTP](#streamable-http) is the recommended replacement.
 
 SSE transport enables server-to-client streaming with Server-Send Events for client-to-server and server-to-client communication. See the [spec](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse) for more details.
 
-By default, the server listens on [127.0.0.1:8000/sse](https://127.0.0.1/sse) for client connections. To change any of this, set [FASTMCP_*](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/server/fastmcp/server.py#L78) environment variables. _The server must be running for clients to connect to it._
+By default, the server listens on [http://127.0.0.1:8000/sse](http://127.0.0.1:8000/sse) for client connections. Use `--host` / `--port` or the `MCP_HOST` / `MCP_PORT` environment variables to change the bind address. _The server must be running for clients to connect to it._
 
 #### Python
 
