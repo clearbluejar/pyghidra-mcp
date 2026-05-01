@@ -68,6 +68,15 @@ class GotoResponse(BaseModel):
     success: bool
 
 
+class GuiContextResponse(BaseModel):
+    active_program: str | None = None
+    active_provider: str | None = None
+    active_address: str | None = None
+    active_function: str | None = None
+    selection: str | None = None
+    location_type: str | None = None
+
+
 class RenameResponse(BaseModel):
     binary_name: str
     address: str

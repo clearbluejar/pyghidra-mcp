@@ -26,6 +26,7 @@ from pyghidra_mcp.models import (
     ExportInfos,
     FunctionPrototypeResponse,
     GotoResponse,
+    GuiContextResponse,
     ImportInfos,
     ImportRequestResult,
     OpenProgramInfo,
@@ -260,6 +261,16 @@ def goto(
     """Navigate the Ghidra GUI CodeBrowser to an address or function."""
     gui_context = _require_gui_context(ctx)
     return GotoResponse(**gui_context.goto(binary_name, target, target_type))
+
+
+@mcp_error_handler
+def get_gui_context(ctx: Context) -> GuiContextResponse:
+    """Get the current active user's location and metadata in the Ghidra GUI.
+
+    Assume this is volatile and has changed since last call.
+    """
+    gui_context = _require_gui_context(ctx)
+    return GuiContextResponse(**gui_context.get_active_gui_context())
 
 
 @mcp_error_handler
