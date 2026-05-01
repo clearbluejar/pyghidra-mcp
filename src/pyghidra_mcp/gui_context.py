@@ -60,7 +60,6 @@ def _open_gui_project(front_end_tool, project_spec):
         opened_project = project_manager.openProject(locator, True, False)
     else:
         opened_project = project_manager.createProject(locator, None, True)
-    front_end_tool.setActiveProject(opened_project)
     return opened_project
 
 
@@ -203,25 +202,45 @@ class GuiPyGhidraContext(IndexingMixin):
         from java.util import List  # type: ignore
 
         domain_file = self._find_domain_file(binary_name)
-        primary_tool = self._get_primary_program_manager_tool(required=False)
-        program_manager = (
-            primary_tool.getService(ProgramManager) if primary_tool is not None else None
-        )
-        if new_window or program_manager is None or not self._tool_is_visible(primary_tool):
-            self.project.getToolServices().launchDefaultTool(List.of(domain_file))
-        else:
+        expected_path = str(domain_file.getPathname())
+
+        existing_program = self._get_open_program_info(expected_path)
+        if existing_program is not None:
+            tool = self._find_tool_for_program(existing_program.program)
+            program_manager = tool.getService(ProgramManager)
+            if program_manager is None:
+                raise RuntimeError("No ProgramManager is available for the open program.")
+
             state = ProgramManager.OPEN_CURRENT if current else ProgramManager.OPEN_VISIBLE
 
-            def open_program():
-                program_manager.openProgram(
-                    domain_file,
-                    domain_file.DEFAULT_VERSION,
-                    state,
-                )
+            def show_existing_program():
+                tool.setVisible(True)
+                program_manager.openProgram(existing_program.program, state)
 
-            self.run_on_swing(open_program)
+            self.run_on_swing(show_existing_program)
+        else:
+            prepared_program = self._prepare_domain_file_for_gui_open(domain_file)
+            primary_tool = self._get_primary_program_manager_tool(required=False)
+            program_manager = (
+                primary_tool.getService(ProgramManager) if primary_tool is not None else None
+            )
+            try:
+                if new_window or program_manager is None or not self._tool_is_visible(primary_tool):
+                    self.project.getToolServices().launchDefaultTool(List.of(domain_file))
+                else:
+                    state = ProgramManager.OPEN_CURRENT if current else ProgramManager.OPEN_VISIBLE
 
-        expected_path = str(domain_file.getPathname())
+                    def open_program():
+                        program_manager.openProgram(
+                            domain_file,
+                            domain_file.DEFAULT_VERSION,
+                            state,
+                        )
+
+                    self.run_on_swing(open_program)
+            finally:
+                self._release_prepared_program(prepared_program)
+
         deadline = time.time() + 10
         while time.time() < deadline:
             self.refresh_programs()
@@ -247,7 +266,12 @@ class GuiPyGhidraContext(IndexingMixin):
         raise RuntimeError(f"Timed out waiting for GUI to open program {expected_path}")
 
     def set_current_program(self, binary_name: str) -> dict[str, Any]:
-        return self.open_program_in_gui(binary_name, current=True)
+        return self.open_program_in_gui(binary_name, current=True, new_window=False)
+
+    def _get_open_program_info(self, path: str) -> ProgramInfo | None:
+        self.refresh_programs()
+        with self._programs_lock:
+            return self.programs.get(path)
 
     def run_on_swing(self, fn, *args, **kwargs):
         return _run_on_swing(fn, *args, **kwargs)
@@ -612,17 +636,48 @@ class GuiPyGhidraContext(IndexingMixin):
     def _is_binary_file(path: Path) -> bool:
         return is_ghidra_importable(path)
 
+    def _prepare_domain_file_for_gui_open(self, domain_file):
+        from ghidra.util.task import TaskMonitor
+
+        consumer = self._get_gui_program_consumer()
+        program = domain_file.getOpenedDomainObject(consumer)
+        opened_here = program is None
+        if opened_here:
+            program = domain_file.getDomainObject(consumer, True, False, TaskMonitor.DUMMY)
+
+        try:
+            prompt_flag_changed = self._mark_program_not_to_ask_to_analyze(program)
+            if opened_here and prompt_flag_changed:
+                program.save("pyghidra-mcp: suppress GUI analysis prompt", TaskMonitor.DUMMY)
+        except Exception:
+            program.release(consumer)
+            raise
+        return program
+
+    def _release_prepared_program(self, program) -> None:
+        program.release(self._get_gui_program_consumer())
+
+    def _get_gui_program_consumer(self):
+        consumer = getattr(self, "_gui_program_consumer", None)
+        if consumer is None:
+            from java.lang import Object  # type: ignore
+
+            consumer = Object()
+            self._gui_program_consumer = consumer
+        return consumer
+
     @staticmethod
-    def _mark_program_not_to_ask_to_analyze(program) -> None:
+    def _mark_program_not_to_ask_to_analyze(program) -> bool:
         from ghidra.program.util import GhidraProgramUtilities
 
         if GhidraProgramUtilities.shouldAskToAnalyze(program):
             GhidraProgramUtilities.markProgramNotToAskToAnalyze(program)
+            return True
+        return False
 
     def _start_gui_analysis_if_needed(self, program) -> None:
-        from ghidra.app.plugin.core.analysis import AutoAnalysisManager
+        from ghidra.app.plugin.core.analysis import AnalysisBackgroundCommand, AutoAnalysisManager
         from ghidra.program.util import GhidraProgramUtilities
-        from ghidra.util.task import TaskMonitor
 
         is_analyzed = getattr(GhidraProgramUtilities, "isAnalyzed", None)
         if callable(is_analyzed) and is_analyzed(program):
@@ -630,8 +685,17 @@ class GuiPyGhidraContext(IndexingMixin):
 
         self._mark_program_not_to_ask_to_analyze(program)
         analysis_manager = AutoAnalysisManager.getAnalysisManager(program)
-        if not analysis_manager.isAnalyzing():
-            analysis_manager.startAnalysis(TaskMonitor.DUMMY)
+        if analysis_manager.isAnalyzing():
+            return
+
+        analysis_manager.initializeOptions()
+        restrict_set: Any = None
+        analysis_manager.reAnalyzeAll(restrict_set)
+        tool = self._find_tool_for_program(program)
+        tool.executeBackgroundCommand(
+            AnalysisBackgroundCommand(analysis_manager, True),
+            program,
+        )
 
     @staticmethod
     def _import_done_callback(future: concurrent.futures.Future) -> None:

@@ -227,7 +227,7 @@ def test_wait_for_gui_ready_opens_requested_project_when_frontend_is_idle(monkey
     gui_context_module._run_on_swing.assert_called_once()
     project_manager.openProject.assert_called_once_with(locator, True, False)
     project_manager.createProject.assert_not_called()
-    front_end_tool.setActiveProject.assert_called_once_with(opened_project)
+    front_end_tool.setActiveProject.assert_not_called()
 
 
 def test_wait_for_gui_ready_creates_requested_project_when_missing(monkeypatch, tmp_path):
@@ -275,7 +275,7 @@ def test_wait_for_gui_ready_creates_requested_project_when_missing(monkeypatch, 
     gui_context_module._run_on_swing.assert_called_once()
     project_manager.createProject.assert_called_once_with(locator, None, True)
     project_manager.openProject.assert_not_called()
-    front_end_tool.setActiveProject.assert_called_once_with(created_project)
+    front_end_tool.setActiveProject.assert_not_called()
 
 
 def test_wait_for_gui_ready_tolerates_frontend_not_running_yet(monkeypatch, tmp_path):
@@ -313,6 +313,9 @@ def test_open_program_in_gui_default_launches_new_window():
             getPathname=Mock(return_value="/prog"),
         )
     )
+    prepared_program = Mock()
+    context._prepare_domain_file_for_gui_open = Mock(return_value=prepared_program)
+    context._release_prepared_program = Mock()
     hidden_tool = Mock(
         getService=Mock(
             return_value=Mock(
@@ -327,7 +330,6 @@ def test_open_program_in_gui_default_launches_new_window():
         ]
     )
     context._tool_is_visible = Mock(return_value=False)
-    context.refresh_programs = Mock()
     context.schedule_indexing = Mock()
     context._start_gui_analysis_if_needed = Mock()
     context.run_on_swing = Mock(side_effect=lambda fn, *args, **kwargs: fn(*args, **kwargs))
@@ -335,20 +337,27 @@ def test_open_program_in_gui_default_launches_new_window():
     tool = Mock(getService=Mock(return_value=program_manager))
     context._find_tool_for_program = Mock(return_value=tool)
     context._programs_lock = threading.RLock()
-    context.programs = {
-        "/prog": ProgramInfo(
-            name="prog",
-            program=Mock(),
-            flat_api=None,
-            decompiler_pool=Mock(),
-            metadata={},
-            ghidra_analysis_complete=True,
-        )
-    }
+    program_info = ProgramInfo(
+        name="prog",
+        program=Mock(),
+        flat_api=None,
+        decompiler_pool=Mock(),
+        metadata={},
+        ghidra_analysis_complete=True,
+    )
+    context.programs = {}
+
+    def refresh_programs():
+        if tool_services.launchDefaultTool.called:
+            context.programs["/prog"] = program_info
+
+    context.refresh_programs = Mock(side_effect=refresh_programs)
 
     result = context.open_program_in_gui("/prog")
 
     tool_services.launchDefaultTool.assert_called_once()
+    context._prepare_domain_file_for_gui_open.assert_called_once()
+    context._release_prepared_program.assert_called_once_with(prepared_program)
     context._start_gui_analysis_if_needed.assert_called_once()
     assert result["path"] == "/prog"
 
@@ -364,39 +373,49 @@ def test_open_program_in_gui_new_window_launches_default_tool():
             getPathname=Mock(return_value="/prog"),
         )
     )
+    prepared_program = Mock()
+    context._prepare_domain_file_for_gui_open = Mock(return_value=prepared_program)
+    context._release_prepared_program = Mock()
     program_manager = Mock(getCurrentProgram=Mock(return_value=Mock()), openProgram=Mock())
     primary_tool = Mock(getService=Mock(return_value=program_manager))
     context._get_primary_program_manager_tool = Mock(return_value=primary_tool)
     context._tool_is_visible = Mock(return_value=True)
-    context.refresh_programs = Mock()
     context.schedule_indexing = Mock()
     context._start_gui_analysis_if_needed = Mock()
     context.run_on_swing = Mock(side_effect=lambda fn, *args, **kwargs: fn(*args, **kwargs))
     tool = Mock(getService=Mock(return_value=program_manager))
     context._find_tool_for_program = Mock(return_value=tool)
     context._programs_lock = threading.RLock()
-    context.programs = {
-        "/prog": ProgramInfo(
-            name="prog",
-            program=Mock(),
-            flat_api=None,
-            decompiler_pool=Mock(),
-            metadata={},
-            ghidra_analysis_complete=True,
-        )
-    }
+    program_info = ProgramInfo(
+        name="prog",
+        program=Mock(),
+        flat_api=None,
+        decompiler_pool=Mock(),
+        metadata={},
+        ghidra_analysis_complete=True,
+    )
+    context.programs = {}
+
+    def refresh_programs():
+        if tool_services.launchDefaultTool.called:
+            context.programs["/prog"] = program_info
+
+    context.refresh_programs = Mock(side_effect=refresh_programs)
 
     result = context.open_program_in_gui("/prog", new_window=True)
 
     tool_services.launchDefaultTool.assert_called_once()
     program_manager.openProgram.assert_not_called()
+    context._prepare_domain_file_for_gui_open.assert_called_once()
+    context._release_prepared_program.assert_called_once_with(prepared_program)
     context._start_gui_analysis_if_needed.assert_called_once()
     assert result["path"] == "/prog"
 
 
-def test_open_program_in_gui_reuses_visible_tool_when_requested():
+def test_open_program_in_gui_reuses_already_open_program():
     sys.modules["ghidra.app.services"] = Mock(ProgramManager=Mock(OPEN_CURRENT=1, OPEN_VISIBLE=2))
     sys.modules["ghidra.framework.model"] = Mock(DomainFile=Mock(DEFAULT_VERSION=1))
+    sys.modules["java.util"] = Mock(List=Mock(of=Mock(side_effect=lambda value: [value])))
 
     context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
     tool_services = Mock(launchDefaultTool=Mock(return_value=Mock()))
@@ -405,6 +424,9 @@ def test_open_program_in_gui_reuses_visible_tool_when_requested():
         getPathname=Mock(return_value="/prog"),
     )
     context._find_domain_file = Mock(return_value=domain_file)
+    prepared_program = Mock()
+    context._prepare_domain_file_for_gui_open = Mock(return_value=prepared_program)
+    context._release_prepared_program = Mock()
     program_manager = Mock(getCurrentProgram=Mock(return_value="program"), openProgram=Mock())
     primary_tool = Mock(getService=Mock(return_value=program_manager))
     context._get_primary_program_manager_tool = Mock(return_value=primary_tool)
@@ -427,10 +449,63 @@ def test_open_program_in_gui_reuses_visible_tool_when_requested():
         )
     }
 
+    result = context.open_program_in_gui("/prog", new_window=True)
+
+    tool_services.launchDefaultTool.assert_not_called()
+    program_manager.openProgram.assert_called_once_with("program", 2)
+    tool.setVisible.assert_called_once_with(True)
+    context._prepare_domain_file_for_gui_open.assert_not_called()
+    context._release_prepared_program.assert_not_called()
+    context._start_gui_analysis_if_needed.assert_called_once_with("program")
+    assert result["path"] == "/prog"
+
+
+def test_open_program_in_gui_reuses_visible_tool_when_requested():
+    sys.modules["ghidra.app.services"] = Mock(ProgramManager=Mock(OPEN_CURRENT=1, OPEN_VISIBLE=2))
+    sys.modules["ghidra.framework.model"] = Mock(DomainFile=Mock(DEFAULT_VERSION=1))
+    sys.modules["java.util"] = Mock(List=Mock(of=Mock(side_effect=lambda value: [value])))
+
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    tool_services = Mock(launchDefaultTool=Mock(return_value=Mock()))
+    context.project = Mock(getToolServices=Mock(return_value=tool_services))
+    domain_file = Mock(getPathname=Mock(return_value="/prog"))
+    domain_file.DEFAULT_VERSION = 1
+    context._find_domain_file = Mock(return_value=domain_file)
+    prepared_program = Mock()
+    context._prepare_domain_file_for_gui_open = Mock(return_value=prepared_program)
+    context._release_prepared_program = Mock()
+    program_manager = Mock(getCurrentProgram=Mock(return_value="program"), openProgram=Mock())
+    primary_tool = Mock(getService=Mock(return_value=program_manager))
+    context._get_primary_program_manager_tool = Mock(return_value=primary_tool)
+    context._tool_is_visible = Mock(return_value=True)
+    context._programs_lock = threading.RLock()
+    context.schedule_indexing = Mock()
+    context._start_gui_analysis_if_needed = Mock()
+    context.run_on_swing = Mock(side_effect=lambda fn, *args, **kwargs: fn(*args, **kwargs))
+    tool = Mock(getService=Mock(return_value=program_manager))
+    context._find_tool_for_program = Mock(return_value=tool)
+    program_info = ProgramInfo(
+        name="prog",
+        program="program",
+        flat_api=None,
+        decompiler_pool=Mock(),
+        metadata={},
+        ghidra_analysis_complete=True,
+    )
+    context.programs = {}
+
+    def refresh_programs():
+        if program_manager.openProgram.called:
+            context.programs["/prog"] = program_info
+
+    context.refresh_programs = Mock(side_effect=refresh_programs)
+
     result = context.open_program_in_gui("/prog", new_window=False)
 
     tool_services.launchDefaultTool.assert_not_called()
-    program_manager.openProgram.assert_called_once()
+    program_manager.openProgram.assert_called_once_with(domain_file, 1, 2)
+    context._prepare_domain_file_for_gui_open.assert_called_once_with(domain_file)
+    context._release_prepared_program.assert_called_once_with(prepared_program)
     context._start_gui_analysis_if_needed.assert_called_once_with("program")
     assert result["path"] == "/prog"
 
@@ -450,6 +525,9 @@ def test_open_program_in_gui_raises_clear_error_when_no_program_manager_after_la
             getPathname=Mock(return_value="/prog"),
         )
     )
+    prepared_program = Mock()
+    context._prepare_domain_file_for_gui_open = Mock(return_value=prepared_program)
+    context._release_prepared_program = Mock()
     context.refresh_programs = Mock()
     context._programs_lock = threading.RLock()
     context.programs = {}
@@ -457,6 +535,22 @@ def test_open_program_in_gui_raises_clear_error_when_no_program_manager_after_la
 
     with pytest.raises(RuntimeError, match="Timed out waiting for GUI to open program"):
         context.open_program_in_gui("/prog")
+
+    context._release_prepared_program.assert_called_once_with(prepared_program)
+
+
+def test_set_current_program_reuses_existing_window():
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    context.open_program_in_gui = Mock(return_value={"path": "/prog", "current": True})
+
+    result = context.set_current_program("/prog")
+
+    context.open_program_in_gui.assert_called_once_with(
+        "/prog",
+        current=True,
+        new_window=False,
+    )
+    assert result["current"] is True
 
 
 def test_tool_is_visible_prefers_frame_visibility():
@@ -468,6 +562,80 @@ def test_tool_is_visible_prefers_frame_visibility():
     )
 
     assert context._tool_is_visible(tool) is True
+
+
+def test_prepare_domain_file_for_gui_open_marks_and_saves_closed_program(monkeypatch):
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    task_monitor = Mock(DUMMY="dummy-monitor")
+    program = Mock()
+    context._get_gui_program_consumer = Mock(return_value="consumer")
+    domain_file = Mock(
+        getOpenedDomainObject=Mock(return_value=None),
+        getDomainObject=Mock(return_value=program),
+    )
+    context._mark_program_not_to_ask_to_analyze = Mock(return_value=True)
+    monkeypatch.setitem(sys.modules, "ghidra.util.task", Mock(TaskMonitor=task_monitor))
+
+    prepared = context._prepare_domain_file_for_gui_open(domain_file)
+
+    assert prepared is program
+    domain_file.getOpenedDomainObject.assert_called_once_with("consumer")
+    domain_file.getDomainObject.assert_called_once_with("consumer", True, False, "dummy-monitor")
+    context._mark_program_not_to_ask_to_analyze.assert_called_once_with(program)
+    program.save.assert_called_once_with(
+        "pyghidra-mcp: suppress GUI analysis prompt",
+        "dummy-monitor",
+    )
+    program.release.assert_not_called()
+
+
+def test_prepare_domain_file_for_gui_open_does_not_save_when_prompt_flag_unchanged(
+    monkeypatch,
+):
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    task_monitor = Mock(DUMMY="dummy-monitor")
+    program = Mock()
+    context._get_gui_program_consumer = Mock(return_value="consumer")
+    domain_file = Mock(
+        getOpenedDomainObject=Mock(return_value=None),
+        getDomainObject=Mock(return_value=program),
+    )
+    context._mark_program_not_to_ask_to_analyze = Mock(return_value=False)
+    monkeypatch.setitem(sys.modules, "ghidra.util.task", Mock(TaskMonitor=task_monitor))
+
+    prepared = context._prepare_domain_file_for_gui_open(domain_file)
+
+    assert prepared is program
+    program.save.assert_not_called()
+    program.release.assert_not_called()
+
+
+def test_prepare_domain_file_for_gui_open_releases_program_on_error(monkeypatch):
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    task_monitor = Mock(DUMMY="dummy-monitor")
+    program = Mock()
+    context._get_gui_program_consumer = Mock(return_value="consumer")
+    domain_file = Mock(
+        getOpenedDomainObject=Mock(return_value=None),
+        getDomainObject=Mock(return_value=program),
+    )
+    context._mark_program_not_to_ask_to_analyze = Mock(side_effect=RuntimeError("boom"))
+    monkeypatch.setitem(sys.modules, "ghidra.util.task", Mock(TaskMonitor=task_monitor))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        context._prepare_domain_file_for_gui_open(domain_file)
+
+    program.release.assert_called_once_with("consumer")
+
+
+def test_release_prepared_program_uses_gui_consumer():
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    program = Mock()
+    context._get_gui_program_consumer = Mock(return_value="consumer")
+
+    context._release_prepared_program(program)
+
+    program.release.assert_called_once_with("consumer")
 
 
 def test_mark_program_not_to_ask_to_analyze_only_when_needed(monkeypatch):
@@ -482,10 +650,32 @@ def test_mark_program_not_to_ask_to_analyze_only_when_needed(monkeypatch):
         Mock(GhidraProgramUtilities=utilities),
     )
 
-    GuiPyGhidraContext._mark_program_not_to_ask_to_analyze(program)
+    changed = GuiPyGhidraContext._mark_program_not_to_ask_to_analyze(program)
 
     utilities.shouldAskToAnalyze.assert_called_once_with(program)
     utilities.markProgramNotToAskToAnalyze.assert_called_once_with(program)
+    assert changed is True
+
+
+def test_mark_program_not_to_ask_to_analyze_returns_false_when_already_suppressed(
+    monkeypatch,
+):
+    program = Mock()
+    utilities = Mock(
+        shouldAskToAnalyze=Mock(return_value=False),
+        markProgramNotToAskToAnalyze=Mock(),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "ghidra.program.util",
+        Mock(GhidraProgramUtilities=utilities),
+    )
+
+    changed = GuiPyGhidraContext._mark_program_not_to_ask_to_analyze(program)
+
+    utilities.shouldAskToAnalyze.assert_called_once_with(program)
+    utilities.markProgramNotToAskToAnalyze.assert_not_called()
+    assert changed is False
 
 
 def test_is_program_analysis_complete_requires_analyzed_flag(monkeypatch):
@@ -553,10 +743,14 @@ def test_start_gui_analysis_marks_no_prompt_and_starts_background_analysis(monke
     utilities = Mock(isAnalyzed=Mock(return_value=False))
     analysis_manager = Mock(
         isAnalyzing=Mock(return_value=False),
-        startAnalysis=Mock(),
+        initializeOptions=Mock(),
+        reAnalyzeAll=Mock(),
     )
     auto_analysis_manager = Mock(getAnalysisManager=Mock(return_value=analysis_manager))
-    task_monitor = Mock(DUMMY="dummy-monitor")
+    background_command = Mock()
+    analysis_background_command = Mock(return_value=background_command)
+    tool = Mock(executeBackgroundCommand=Mock())
+    context._find_tool_for_program = Mock(return_value=tool)
     context._mark_program_not_to_ask_to_analyze = Mock()
     monkeypatch.setitem(
         sys.modules,
@@ -566,16 +760,50 @@ def test_start_gui_analysis_marks_no_prompt_and_starts_background_analysis(monke
     monkeypatch.setitem(
         sys.modules,
         "ghidra.app.plugin.core.analysis",
-        Mock(AutoAnalysisManager=auto_analysis_manager),
+        Mock(
+            AnalysisBackgroundCommand=analysis_background_command,
+            AutoAnalysisManager=auto_analysis_manager,
+        ),
     )
-    monkeypatch.setitem(sys.modules, "ghidra.util.task", Mock(TaskMonitor=task_monitor))
 
     context._start_gui_analysis_if_needed(program)
 
     utilities.isAnalyzed.assert_called_once_with(program)
     context._mark_program_not_to_ask_to_analyze.assert_called_once_with(program)
     auto_analysis_manager.getAnalysisManager.assert_called_once_with(program)
-    analysis_manager.startAnalysis.assert_called_once_with("dummy-monitor")
+    analysis_manager.initializeOptions.assert_called_once_with()
+    analysis_manager.reAnalyzeAll.assert_called_once_with(None)
+    context._find_tool_for_program.assert_called_once_with(program)
+    analysis_background_command.assert_called_once_with(analysis_manager, True)
+    tool.executeBackgroundCommand.assert_called_once_with(background_command, program)
+
+
+def test_start_gui_analysis_skips_when_analysis_is_already_running(monkeypatch):
+    context = GuiPyGhidraContext.__new__(GuiPyGhidraContext)
+    program = Mock()
+    utilities = Mock(isAnalyzed=Mock(return_value=False))
+    analysis_manager = Mock(isAnalyzing=Mock(return_value=True))
+    auto_analysis_manager = Mock(getAnalysisManager=Mock(return_value=analysis_manager))
+    context._mark_program_not_to_ask_to_analyze = Mock()
+    context._find_tool_for_program = Mock()
+    monkeypatch.setitem(
+        sys.modules,
+        "ghidra.program.util",
+        Mock(GhidraProgramUtilities=utilities),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "ghidra.app.plugin.core.analysis",
+        Mock(AnalysisBackgroundCommand=Mock(), AutoAnalysisManager=auto_analysis_manager),
+    )
+
+    context._start_gui_analysis_if_needed(program)
+
+    context._mark_program_not_to_ask_to_analyze.assert_called_once_with(program)
+    auto_analysis_manager.getAnalysisManager.assert_called_once_with(program)
+    analysis_manager.initializeOptions.assert_not_called()
+    analysis_manager.reAnalyzeAll.assert_not_called()
+    context._find_tool_for_program.assert_not_called()
 
 
 def test_start_gui_analysis_skips_analyzed_program(monkeypatch):
@@ -592,9 +820,8 @@ def test_start_gui_analysis_skips_analyzed_program(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
         "ghidra.app.plugin.core.analysis",
-        Mock(AutoAnalysisManager=auto_analysis_manager),
+        Mock(AnalysisBackgroundCommand=Mock(), AutoAnalysisManager=auto_analysis_manager),
     )
-    monkeypatch.setitem(sys.modules, "ghidra.util.task", Mock(TaskMonitor=Mock()))
 
     context._start_gui_analysis_if_needed(program)
 

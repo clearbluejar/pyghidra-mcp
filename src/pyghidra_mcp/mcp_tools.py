@@ -237,8 +237,7 @@ def open_program_in_gui(
 ) -> OpenProgramInfo:
     """Open a project binary in the Ghidra GUI CodeBrowser.
 
-    By default this launches a new CodeBrowser window for the binary. Set
-    `new_window=false` to reuse a visible CodeBrowser tool when possible.
+    Defaults to a new CodeBrowser unless the binary is already open.
     """
     gui_context = _require_gui_context(ctx)
     return OpenProgramInfo(**gui_context.open_program_in_gui(binary_name, new_window=new_window))
