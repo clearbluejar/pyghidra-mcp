@@ -1,6 +1,6 @@
 [project]
 name = "pyghidra-mcp-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Command-line client for pyghidra-mcp server"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,7 @@ dev = [
     "ruff>=0.11.4",
     "pyright>=1.1.0",
     "tomli>=2.0.1",
-    "pyghidra-mcp>=0.1.14",
+    "pyghidra-mcp>=0.2.0",
     "pre-commit>=3.0.0",
 ]
 
@@ -42,6 +42,9 @@ packages = [
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+
+[tool.uv.sources]
+pyghidra-mcp = { path = "..", editable = true }
 
 [tool.ruff.lint]
 select = [
