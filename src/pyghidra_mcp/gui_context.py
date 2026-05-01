@@ -50,12 +50,16 @@ def _open_gui_project(front_end_tool, project_spec):
     if active_project is not None:
         return active_project
 
+    project_spec.project_directory.mkdir(exist_ok=True, parents=True)
     project_manager = front_end_tool.getProjectManager()
     locator = ProjectLocator(
         str(project_spec.project_directory.absolute()),
         project_spec.project_name,
     )
-    opened_project = project_manager.openProject(locator, True, False)
+    if locator.exists():
+        opened_project = project_manager.openProject(locator, True, False)
+    else:
+        opened_project = project_manager.createProject(locator, None, True)
     front_end_tool.setActiveProject(opened_project)
     return opened_project
 
@@ -226,6 +230,7 @@ class GuiPyGhidraContext(IndexingMixin):
                 if program_info is not None:
                     tool = self._find_tool_for_program(program_info.program)
                     live_program_manager = tool.getService(ProgramManager)
+                    self._start_gui_analysis_if_needed(program_info.program)
                     self.schedule_indexing(expected_path)
                     return {
                         "name": program_info.name,
@@ -546,6 +551,8 @@ class GuiPyGhidraContext(IndexingMixin):
                 .monitor(TaskMonitor.DUMMY)
                 .load()
             )
+            loaded_program = load_results.getPrimaryDomainObject()
+            self._mark_program_not_to_ask_to_analyze(loaded_program)
             domain_file = load_results.getPrimary().save(TaskMonitor.DUMMY)
         finally:
             if load_results is not None:
@@ -604,6 +611,27 @@ class GuiPyGhidraContext(IndexingMixin):
     @staticmethod
     def _is_binary_file(path: Path) -> bool:
         return is_ghidra_importable(path)
+
+    @staticmethod
+    def _mark_program_not_to_ask_to_analyze(program) -> None:
+        from ghidra.program.util import GhidraProgramUtilities
+
+        if GhidraProgramUtilities.shouldAskToAnalyze(program):
+            GhidraProgramUtilities.markProgramNotToAskToAnalyze(program)
+
+    def _start_gui_analysis_if_needed(self, program) -> None:
+        from ghidra.app.plugin.core.analysis import AutoAnalysisManager
+        from ghidra.program.util import GhidraProgramUtilities
+        from ghidra.util.task import TaskMonitor
+
+        is_analyzed = getattr(GhidraProgramUtilities, "isAnalyzed", None)
+        if callable(is_analyzed) and is_analyzed(program):
+            return
+
+        self._mark_program_not_to_ask_to_analyze(program)
+        analysis_manager = AutoAnalysisManager.getAnalysisManager(program)
+        if not analysis_manager.isAnalyzing():
+            analysis_manager.startAnalysis(TaskMonitor.DUMMY)
 
     @staticmethod
     def _import_done_callback(future: concurrent.futures.Future) -> None:
@@ -668,10 +696,14 @@ class GuiPyGhidraContext(IndexingMixin):
 
     @staticmethod
     def _is_program_analysis_complete(program) -> bool:
+        from ghidra.app.plugin.core.analysis import AutoAnalysisManager
         from ghidra.program.util import GhidraProgramUtilities
 
         try:
-            return not bool(GhidraProgramUtilities.shouldAskToAnalyze(program))
+            if not bool(GhidraProgramUtilities.isAnalyzed(program)):
+                return False
+            analysis_manager = AutoAnalysisManager.getAnalysisManager(program)
+            return not bool(analysis_manager.isAnalyzing())
         except Exception:
             logger.debug("Could not determine GUI program analysis state", exc_info=True)
             return False
