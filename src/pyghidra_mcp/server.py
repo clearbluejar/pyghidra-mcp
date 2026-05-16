@@ -195,11 +195,137 @@ def init_gui_context(
     return mcp
 
 
-def run_mcp_server(mcp: FastMCP, transport: str) -> None:
+class _CORSMiddleware:
+    """ASGI middleware that handles CORS without relying on Starlette's CORSMiddleware.
+
+    Starlette's CORSMiddleware returns 400 when an origin is not in its allowlist,
+    and only intercepts OPTIONS when Access-Control-Request-Method is present.
+    This middleware short-circuits ALL OPTIONS requests before they can reach the
+    MCP transport (which returns 405 for OPTIONS, triggering a browser CORS error).
+    """
+
+    _CORS_REQUEST_HEADERS = "access-control-request-headers"
+    _CORS_ALLOW_METHODS = "GET, POST, DELETE, OPTIONS"
+    # mcp-session-id is set by the server on the initialize response and must
+    # be exposed so browser JS can read it and include it in subsequent requests.
+    _CORS_EXPOSE_HEADERS = "mcp-session-id"
+
+    def __init__(self, app, allow_origins: list[str]) -> None:
+        self.app = app
+        self.allow_all = "*" in allow_origins
+        self.explicit_origins: set[str] = set() if self.allow_all else set(allow_origins)
+
+    def _origin_allowed(self, origin: str) -> bool:
+        if self.allow_all:
+            return True
+        return origin in self.explicit_origins
+
+    def _cors_headers(self, origin: str) -> dict[str, str]:
+        if self.allow_all:
+            return {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": self._CORS_ALLOW_METHODS,
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Expose-Headers": self._CORS_EXPOSE_HEADERS,
+                "Access-Control-Max-Age": "600",
+            }
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Methods": self._CORS_ALLOW_METHODS,
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Expose-Headers": self._CORS_EXPOSE_HEADERS,
+            "Access-Control-Max-Age": "600",
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+
+    async def __call__(self, scope, receive, send) -> None:
+        from starlette.datastructures import Headers, MutableHeaders
+        from starlette.responses import Response
+
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        origin = headers.get("origin")
+
+        if not origin or not self._origin_allowed(origin):
+            await self.app(scope, receive, send)
+            return
+
+        cors_headers = self._cors_headers(origin)
+
+        # Short-circuit ALL OPTIONS requests before they reach the MCP transport.
+        # Starlette's CORSMiddleware only does this when Access-Control-Request-Method
+        # is present; without that header, OPTIONS falls into the MCP transport which
+        # returns 405 — a non-2xx preflight response the browser treats as CORS failure.
+        if scope["method"] == "OPTIONS":
+            requested_headers = headers.get(self._CORS_REQUEST_HEADERS)
+            if requested_headers:
+                cors_headers["Access-Control-Allow-Headers"] = requested_headers
+            response = Response(status_code=200, headers=cors_headers)
+            await response(scope, receive, send)
+            return
+
+        async def send_with_cors(message):
+            if message["type"] == "http.response.start":
+                mutable = MutableHeaders(scope=message)
+                for key, value in cors_headers.items():
+                    mutable[key] = value
+            await send(message)
+
+        await self.app(scope, receive, send_with_cors)
+
+
+async def _run_http_async(mcp: FastMCP, app_getter, cors_origins: list[str]) -> None:
+    import uvicorn
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    allow_all = "*" in cors_origins
+
+    # FastMCP's DNS-rebinding protection validates Origin independently inside the
+    # MCP transport layer and blocks cross-origin requests with 403 even after the
+    # CORS preflight succeeds.  Pydantic's BaseSettings silently discards in-place
+    # mutations on nested models (re-reads return the original validated copy), so
+    # we must REPLACE the field entirely to make the change stick.
+    current = mcp.settings.transport_security
+    if allow_all:
+        mcp.settings.transport_security = None  # None → protection disabled
+    elif current is not None:
+        merged_origins = list(current.allowed_origins) + [
+            o for o in cors_origins if o not in current.allowed_origins
+        ]
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=current.enable_dns_rebinding_protection,
+            allowed_hosts=list(current.allowed_hosts),
+            allowed_origins=merged_origins,
+        )
+    logger.info(f"CORS enabled for origins: {cors_origins}")
+
+    app = app_getter()
+    app = _CORSMiddleware(app, cors_origins)
+    config = uvicorn.Config(
+        app,
+        host=mcp.settings.host,
+        port=mcp.settings.port,
+        log_level=mcp.settings.log_level.lower(),
+    )
+    await uvicorn.Server(config).serve()
+
+
+def run_mcp_server(mcp: FastMCP, transport: str, cors_origins: list[str] | None = None) -> None:
+    # Strip shell quotes that Windows passes literally (e.g. --cors-origin '*' → "'*'").
+    origins = [o.strip("'\"") for o in (cors_origins or [])]
     if transport == "stdio":
         mcp.run(transport="stdio")
     elif transport in ["streamable-http", "http"]:
-        mcp.run(transport="streamable-http")
+        if origins:
+            import anyio
+
+            anyio.run(_run_http_async, mcp, mcp.streamable_http_app, origins)
+        else:
+            mcp.run(transport="streamable-http")
     elif transport == "sse":
         import warnings
 
@@ -209,7 +335,12 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
             DeprecationWarning,
             stacklevel=1,
         )
-        mcp.run(transport="sse")
+        if origins:
+            import anyio
+
+            anyio.run(_run_http_async, mcp, mcp.sse_app, origins)
+        else:
+            mcp.run(transport="sse")
     else:
         raise ValueError(f"Invalid transport: {transport}")
 
@@ -253,6 +384,17 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
     envvar="MCP_HOST",
     show_default=True,
     help="Host to listen on for HTTP-based transports.",
+)
+@optgroup.option(
+    "--cors-origin",
+    "cors_origins",
+    type=str,
+    multiple=True,
+    envvar="MCP_CORS_ORIGINS",
+    help=(
+        "Allowed CORS origin(s) for HTTP transports (can be repeated). "
+        "Use '*' to allow all origins. Example: --cors-origin http://localhost:3000"
+    ),
 )
 @optgroup.option(
     "--project-path",
@@ -366,6 +508,7 @@ def main(
     project_name: str,
     port: int,
     host: str,
+    cors_origins: tuple[str, ...],
     threaded: bool,
     force_analysis: bool,
     verbose_analysis: bool,
@@ -421,7 +564,7 @@ def main(
         def gui_server_thread() -> None:
             try:
                 init_gui_context(mcp=mcp, project_spec=project_spec, input_paths=input_paths)
-                run_mcp_server(mcp, transport)
+                run_mcp_server(mcp, transport, list(cors_origins))
             except BaseException as exc:
                 gui_server_error.append(exc)
                 logger.exception("GUI MCP server failed during startup or runtime.")
@@ -468,7 +611,7 @@ def main(
     )
 
     try:
-        run_mcp_server(mcp, transport)
+        run_mcp_server(mcp, transport, list(cors_origins))
     finally:
         mcp._pyghidra_context.close()  # type: ignore
 
