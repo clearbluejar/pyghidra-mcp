@@ -300,7 +300,7 @@ pyghidra-mcp-cli search symbols --binary ls printf -l 10
 > The CLI connects to pyghidra-mcp via HTTP to avoid the 10-60 second startup overhead of spawning a new Ghidra process for each command. See the [CLI README](./cli/README.md) for complete documentation.
 
 ## Install for NixOS
-If you are using NixOS, both `ghidra-mcp` and `ghidra-mcp-cli` can be installed by home-manager.
+If you are using NixOS, both `ghidra-mcp` and `ghidra-mcp-cli` can be installed by home-manager. (Currently tested in x86-64.)
 
 - Add flake input
 Add this to your flake.nix input:
