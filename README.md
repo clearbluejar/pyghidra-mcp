@@ -303,6 +303,7 @@ pyghidra-mcp-cli search symbols --binary ls printf -l 10
 If you are using NixOS, both `ghidra-mcp` and `ghidra-mcp-cli` can be installed by home-manager. (Currently tested in x86-64.)
 
 - Add flake input
+
 Add this to your flake.nix input:
 ```nix
 pyghidra-mcp.url =  "github:clearbluejar/pyghidra-mcp";
@@ -310,6 +311,7 @@ pyghidra-mcp.url =  "github:clearbluejar/pyghidra-mcp";
 Please don't set `pyghidra-mcp.inputs.nixpkgs.follows = "nixpkgs";`, since dependency `pyghidra` is only included in `nixos-unstable` up to now.
 
 - Install by home-manager
+
 In your home-manager config, add:
 ```nix
   home.packages = with pkgs; [
