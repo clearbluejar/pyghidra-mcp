@@ -97,8 +97,24 @@
               pyghidra-mcp-cli
             ];
         };
-        pyghidra-mcp = pyghidra-mcp;
-        pyghidra-mcp-cli = pyghidra-mcp-cli;
+        inherit pyghidra-mcp pyghidra-mcp-cli;
+      };
+      # for nix run
+      apps.${system} = {
+        default = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/pyghidra-mcp";
+        };
+
+        pyghidra-mcp = {
+          type = "app";
+          program = "${self.packages.${system}.pyghidra-mcp}/bin/pyghidra-mcp";
+        };
+
+        pyghidra-mcp-cli = {
+          type = "app";
+          program = "${self.packages.${system}.pyghidra-mcp-cli}/bin/pyghidra-mcp-cli";
+        };
       };
     };
 }

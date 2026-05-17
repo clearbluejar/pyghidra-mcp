@@ -175,6 +175,7 @@ flowchart TD
   - [CLI Client](#cli-client)
     - [Installation](#installation)
     - [Quick Start with CLI](#quick-start-with-cli)
+  - [Install for NixOS](#install-for-nixos)
   - [Project Creation, Management, and Opening Existing Projects](#project-creation-management-and-opening-existing-projects)
     - [Creating New Projects](#creating-new-projects)
       - [Self-Contained Project Structure](#self-contained-project-structure)
@@ -297,6 +298,35 @@ pyghidra-mcp-cli search symbols --binary ls printf -l 10
 
 > [!NOTE]
 > The CLI connects to pyghidra-mcp via HTTP to avoid the 10-60 second startup overhead of spawning a new Ghidra process for each command. See the [CLI README](./cli/README.md) for complete documentation.
+
+## Install for NixOS
+If you are using NixOS, both `ghidra-mcp` and `ghidra-mcp-cli` can be installed by home-manager.
+
+- Add flake input
+Add this to your flake.nix input:
+```nix
+pyghidra-mcp.url =  "github:clearbluejar/pyghidra-mcp";
+```
+Please don't set `pyghidra-mcp.inputs.nixpkgs.follows = "nixpkgs";`, since dependency `pyghidra` is only included in `nixos-unstable` up to now.
+
+- Install by home-manager
+In your home-manager config, add:
+```nix
+  home.packages = with pkgs; [
+    # Need ghidra 12.0. So please use unstable-url to install updated ghidra.
+    inputs.nixpkgs-unstable.legacyPackages.${pkgs.system}.ghidra
+    inputs.pyghidra-mcp.packages.${pkgs.system}.default
+  ];
+```
+**NOTE**: pyghidra 3.0 needs Ghidra 12.0
+
+Check after rebuilding:
+```
+[<you>@nixos:~]$ which pyghidra-mcp
+/home/<you>/.nix-profile/bin/pyghidra-mcp
+[<you>@nixos:~]$ which pyghidra-mcp-cli
+/home/<you>/.nix-profile/bin/pyghidra-mcp-cli
+```
 
 ## Project Creation, Management, and Opening Existing Projects
 
