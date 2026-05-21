@@ -569,26 +569,28 @@ class GhidraTools:
 
     def _search_code_literal(
         self,
-        literal_results: typing.Any,
+        query: str,
         limit: int,
         offset: int,
         include_full_code: bool,
         preview_length: int,
     ) -> list[CodeSearchResult]:
+        assert self.program_info.code_collection is not None
         search_results: list[CodeSearchResult] = []
+
+        # Apply offset and limit
+        literal_results = self.program_info.code_collection.get(
+            where_document={"$contains": query},
+            include=["documents", "metadatas"],
+            limit=limit,
+            offset=offset,
+        )
         if literal_results and literal_results.get("documents"):
-            # Apply offset and limit
             docs = literal_results["documents"] or []
-            metadatas = literal_results["metadatas"] or []
+            metadatas = literal_results.get("metadatas") or []
 
-            # Paginate
-            start_idx = offset
-            end_idx = offset + limit
-            paginated_docs = docs[start_idx:end_idx]
-            paginated_meta = metadatas[start_idx:end_idx] if metadatas else []
-
-            for i, doc in enumerate(paginated_docs):
-                metadata = paginated_meta[i] if i < len(paginated_meta) else {}
+            for i, doc in enumerate(docs):
+                metadata = metadatas[i] if i < len(metadatas) else {}
                 code = doc
                 preview = None
 
@@ -720,10 +722,15 @@ class GhidraTools:
                 "Code indexing is not complete for this binary. Please try again later."
             )
 
-        # ALWAYS get literal count (reuse for literal mode search)
-        literal_results = self.program_info.code_collection.get(where_document={"$contains": query})
+        # ALWAYS get literal count
+        literal_results = self.program_info.code_collection.get(
+            where_document={"$contains": query},
+            include=[],
+        )
         literal_total = (
-            len(literal_results["ids"]) if literal_results and literal_results.get("ids") else 0
+            len(literal_results["ids"])
+            if literal_results and literal_results.get("ids")
+            else 0
         )
 
         # Total functions in collection (absolute total)
@@ -740,7 +747,7 @@ class GhidraTools:
 
         if search_mode == SearchMode.LITERAL:
             search_results = self._search_code_literal(
-                literal_results, limit, offset, include_full_code, preview_length
+                query, limit, offset, include_full_code, preview_length
             )
         else:
             search_results, estimated_total = self._search_code_semantic(
