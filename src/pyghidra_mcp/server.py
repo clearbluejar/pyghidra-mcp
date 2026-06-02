@@ -13,6 +13,7 @@ import pyghidra
 from click_option_group import optgroup
 from mcp.server import Server
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from pyghidra_mcp import __version__, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
@@ -255,6 +256,13 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
     help="Host to listen on for HTTP-based transports.",
 )
 @optgroup.option(
+    "-ah",
+    "--allowed-host",
+    type=str,
+    help="Allowed host header",
+    multiple=True,
+)
+@optgroup.option(
     "--project-path",
     type=click.Path(path_type=Path),
     default=Path("pyghidra_mcp_projects"),
@@ -366,6 +374,7 @@ def main(
     project_name: str,
     port: int,
     host: str,
+    allowed_host: list[str],
     threaded: bool,
     force_analysis: bool,
     verbose_analysis: bool,
@@ -403,6 +412,11 @@ def main(
     pyghidra_mcp_dir = project_spec.pyghidra_mcp_dir
     mcp.settings.port = port
     mcp.settings.host = host
+    if allowed_host:
+        logger.info(f"Using allowed hosts {allowed_host}")
+        mcp.settings.transport_security = TransportSecuritySettings(allowed_hosts=allowed_host)
+    else:
+        logger.warning("No allowed hosts specififed")
 
     if gui:
         if transport == "stdio":
