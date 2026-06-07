@@ -32,6 +32,7 @@ from pyghidra_mcp.models import (
     OpenProgramInfos,
     ProgramInfos,
     RenameResponse,
+    SaveRequestResult,
     SearchMode,
     StringSearchResults,
     SymbolSearchResults,
@@ -488,3 +489,13 @@ def import_binary(binary_path: str, ctx: Context) -> ImportRequestResult:
     """Import a binary into the project from a file path."""
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     return pyghidra_context.import_binary_backgrounded(binary_path)
+
+@mcp_error_handler
+def save(ctx: Context) -> SaveRequestResult:
+    '''Save all programs.'''
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    for _program_name, program_info in pyghidra_context.programs.items():
+        program = program_info.program
+        pyghidra_context.project.save(program)
+
+    return SaveRequestResult()
