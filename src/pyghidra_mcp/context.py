@@ -160,6 +160,8 @@ class PyGhidraContext(IndexingMixin):
         for _program_name, program_info in self.programs.items():
             self._dispose_decompiler(program_info)
             program = program_info.program
+            if save:
+                self.project.save(program)
             self.project.close(program)
 
         self.project.close()
