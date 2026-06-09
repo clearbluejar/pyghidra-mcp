@@ -23,6 +23,7 @@ from pyghidra_mcp.models import (
     CommentResponse,
     CrossReferenceInfos,
     DecompiledFunction,
+    DisassembleResult,
     ExportInfos,
     FunctionPrototypeResponse,
     GotoResponse,
@@ -464,6 +465,23 @@ def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> 
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
     return tools.read_bytes(address=address, size=size)
+
+
+@mcp_error_handler
+def disassemble(binary_name: str, ctx: Context, address: str, count: int = 20) -> DisassembleResult:
+    """Disassemble instructions at an address. Returns up to `count` instructions (max 200).
+
+    Hex format supported (0x prefix optional). Useful for inspecting raw assembly
+    at any address without needing to know the function name or entry point.
+    """
+    if count <= 0:
+        raise ValueError("count must be > 0")
+    if count > 200:
+        raise ValueError("count must be <= 200")
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    return tools.disassemble(address=address, count=count)
 
 
 @mcp_error_handler

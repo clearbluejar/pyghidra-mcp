@@ -215,6 +215,19 @@ class BytesReadResult(BaseModel):
     data: str = Field(..., description="hex string")
 
 
+class DisassembledInstruction(BaseModel):
+    address: str
+    bytes: str = Field(..., description="hex string")
+    mnemonic: str
+    operands: str
+
+
+class DisassembleResult(BaseModel):
+    address: str
+    count: int
+    instructions: list[DisassembledInstruction]
+
+
 class CallGraphDirection(str, Enum):
     """Represents the direction of the call graph."""
 

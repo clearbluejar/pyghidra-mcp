@@ -20,6 +20,8 @@ from pyghidra_mcp.models import (
     CodeSearchResults,
     CrossReferenceInfo,
     DecompiledFunction,
+    DisassembledInstruction,
+    DisassembleResult,
     ExportInfo,
     ImportInfo,
     SearchMode,
@@ -134,6 +136,8 @@ class GhidraTools:
             addr = af.getAddress(name_or_address)
             if addr:
                 func = fm.getFunctionAt(addr)
+                if func is None:
+                    func = fm.getFunctionContaining(addr)
                 if func:
                     return [func]
         except Exception:
@@ -831,6 +835,42 @@ class GhidraTools:
             size=len(data),
             data=data.hex(),
         )
+
+    @handle_exceptions
+    def disassemble(self, address: str, count: int = 20) -> "DisassembleResult":
+        """Disassembles instructions starting at an address."""
+        af = self.program.getAddressFactory()
+        try:
+            addr_str = address[2:] if address.lower().startswith("0x") else address
+            addr = af.getAddress(addr_str)
+            if addr is None:
+                raise ValueError(f"Invalid address: {address}")
+        except Exception as e:
+            raise ValueError(f"Invalid address format '{address}': {e}") from e
+
+        if not self.program.getMemory().contains(addr):
+            raise ValueError(f"Address {address} is not in mapped memory")
+
+        listing = self.program.getListing()
+        insns = []
+        for insn in listing.getInstructions(addr, True):
+            if len(insns) >= count:
+                break
+            raw = bytes([b & 0xFF for b in insn.getBytes()])
+            operand_parts = []
+            for i in range(insn.getNumOperands()):
+                rep = insn.getDefaultOperandRepresentation(i)
+                if rep:
+                    operand_parts.append(str(rep))
+            insns.append(
+                DisassembledInstruction(
+                    address=str(insn.getAddress()),
+                    bytes=raw.hex(),
+                    mnemonic=str(insn.getMnemonicString()),
+                    operands=",".join(operand_parts),
+                )
+            )
+        return DisassembleResult(address=str(addr), count=len(insns), instructions=insns)
 
     @handle_exceptions
     def gen_callgraph(
