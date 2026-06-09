@@ -1,4 +1,4 @@
-__version__ = "0.1.14"
+__version__ = "0.2.2"
 __author__ = "clearbluejar"
 
 
