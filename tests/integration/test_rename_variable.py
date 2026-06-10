@@ -154,6 +154,38 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
             assert type_payload["old_type"] == "int"
             assert type_payload["new_type"] == "long"
 
+            # Revert the type change so later tests see the original state
+            revert_type_result = await session.call_tool(
+                "set_variable_type",
+                {
+                    "binary_name": binary_name,
+                    "function_name_or_address": function_name,
+                    "variable_name": "item_count",
+                    "type_name": "int",
+                },
+            )
+            revert_type_payload = json.loads(revert_type_result.content[0].text)
+            assert revert_type_payload["function_name"] == function_name
+            assert revert_type_payload["variable_name"] == "item_count"
+            assert revert_type_payload["old_type"] == "long"
+            assert revert_type_payload["new_type"] == "int"
+
+            # Rename the parameter back to its original name so other tests are unaffected
+            rename_back = await session.call_tool(
+                "rename_variable",
+                {
+                    "binary_name": binary_name,
+                    "function_name_or_address": function_name,
+                    "variable_name": "item_count",
+                    "new_name": "count",
+                },
+            )
+            rename_back_payload = json.loads(rename_back.content[0].text)
+            assert rename_back_payload["function_name"] == function_name
+            assert rename_back_payload["variable_kind"] == "parameter"
+            assert rename_back_payload["old_name"] == "item_count"
+            assert rename_back_payload["new_name"] == "count"
+
 
 @pytest.mark.asyncio
 async def test_set_variable_type_tool(variable_server_params, variable_test_binary):
@@ -227,6 +259,30 @@ async def test_set_function_prototype_tool(variable_server_params, variable_test
             )
             decompile_payload = json.loads(decompile_result.content[0].text)
             assert "long function_one(long count)" in decompile_payload["signature"]
+
+            # Revert prototype change so other tests see original signature
+            revert_proto_result = await session.call_tool(
+                "set_function_prototype",
+                {
+                    "binary_name": binary_name,
+                    "function_name_or_address": function_name,
+                    "prototype": "int function_one(int count)",
+                },
+            )
+            revert_proto_payload = json.loads(revert_proto_result.content[0].text)
+            assert revert_proto_payload["function_name"] == function_name
+            assert revert_proto_payload["old_prototype"].startswith("long ")
+            assert revert_proto_payload["new_prototype"].startswith("int ")
+
+            decompile_result = await session.call_tool(
+                "decompile_function",
+                {
+                    "binary_name": binary_name,
+                    "name_or_address": function_name,
+                },
+            )
+            decompile_payload = json.loads(decompile_result.content[0].text)
+            assert "int function_one(int count)" in decompile_payload["signature"]
 
 
 @pytest.mark.asyncio
