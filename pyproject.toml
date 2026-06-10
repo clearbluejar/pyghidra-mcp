@@ -11,6 +11,7 @@ dependencies = [
     "pyghidra>=2.2.1",
     "chromadb>=1.3.5",
     "ghidrecomp>=0.5.8",
+    "pycparser>=2.22",
 ]
 authors = [
     { name = "clearbluejar", email = "3752074+clearbluejar@users.noreply.github.com" },

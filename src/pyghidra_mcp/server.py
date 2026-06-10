@@ -54,6 +54,8 @@ def register_common_tools(server: FastMCP) -> None:
     server.tool()(mcp_tools.rename_variable)
     server.tool()(mcp_tools.set_variable_type)
     server.tool()(mcp_tools.set_function_prototype)
+    server.tool()(mcp_tools.set_function_return_type)
+    server.tool()(mcp_tools.set_data_type_at_address)
     server.tool()(mcp_tools.set_comment)
     server.tool()(mcp_tools.delete_project_binary)
     server.tool()(mcp_tools.list_exports)
@@ -62,6 +64,9 @@ def register_common_tools(server: FastMCP) -> None:
     server.tool()(mcp_tools.search_strings)
     server.tool()(mcp_tools.read_bytes)
     server.tool()(mcp_tools.gen_callgraph)
+    server.tool()(mcp_tools.import_header_types)
+    server.tool()(mcp_tools.list_data_types)
+    server.tool()(mcp_tools.describe_data_type)
     server.tool()(mcp_tools.import_binary)
 
 
