@@ -82,28 +82,34 @@ class GhidraTools:
         self,
         function_name_or_address: str,
         variable_name: str,
+        variable_kind: typing.Literal["parameter", "local"] | None = None,
     ) -> tuple["Function", str, typing.Any]:
         func = self.find_function(function_name_or_address)
         function_name = str(func.getName())
 
         matches: list[tuple[str, typing.Any]] = []
-        for param in func.getParameters():
-            if str(param.getName()) == variable_name:
-                matches.append(("parameter", param))
-        for local in func.getLocalVariables():
-            if str(local.getName()) == variable_name:
-                matches.append(("local", local))
+        if variable_kind in {None, "parameter"}:
+            for param in func.getParameters():
+                if str(param.getName()) == variable_name:
+                    matches.append(("parameter", param))
+        if variable_kind in {None, "local"}:
+            for local in func.getLocalVariables():
+                if str(local.getName()) == variable_name:
+                    matches.append(("local", local))
 
         if not matches:
-            raise ValueError(f"Variable '{variable_name}' not found in function '{function_name}'.")
+            qualifier = f" {variable_kind}" if variable_kind else ""
+            raise ValueError(
+                f"Variable{qualifier} '{variable_name}' not found in function '{function_name}'."
+            )
         if len(matches) > 1:
             kinds = ", ".join(kind for kind, _ in matches)
             raise ValueError(
                 f"Ambiguous variable '{variable_name}' in function '{function_name}' ({kinds})."
             )
 
-        variable_kind, variable = matches[0]
-        return func, variable_kind, variable
+        resolved_variable_kind, variable = matches[0]
+        return func, resolved_variable_kind, variable
 
     def _parse_data_type(self, type_name: str):
         from ghidra.util.data import DataTypeParser  # type: ignore
@@ -112,6 +118,122 @@ class GhidraTools:
         dtm = self.program.getDataTypeManager()
         parser = DataTypeParser(dtm, dtm, typing.cast(typing.Any, None), AllowedDataTypes.DYNAMIC)
         return parser.parse(type_name)
+
+    def _iter_values(self, values):
+        if hasattr(values, "hasNext") and hasattr(values, "next"):
+            while values.hasNext():
+                yield values.next()
+            return
+        yield from values
+
+    def _data_type_path(self, data_type) -> str:
+        return str(data_type.getPathName())
+
+    def _data_type_category_path(self, data_type) -> str:
+        return str(data_type.getCategoryPath().getPath())
+
+    def _data_type_kind(self, data_type) -> str:
+        class_name = data_type.__class__.__name__.lower()
+        if "typedef" in class_name or (
+            hasattr(data_type, "getBaseDataType") and not hasattr(data_type, "getDefinedComponents")
+        ):
+            return "typedef"
+        if "structure" in class_name or class_name.startswith("struct"):
+            return "structure"
+        if "union" in class_name:
+            return "union"
+        if hasattr(data_type, "getDefinedComponents"):
+            return "composite"
+        if "enum" in class_name:
+            return "enum"
+        if "pointer" in class_name:
+            return "pointer"
+        if "array" in class_name:
+            return "array"
+        if "functiondefinition" in class_name or "functiondef" in class_name:
+            return "function_definition"
+        return class_name
+
+    def _data_type_size(self, data_type) -> int:
+        return int(data_type.getLength())
+
+    def _data_type_aligned_size(self, data_type) -> int:
+        aligned_length = getattr(data_type, "getAlignedLength", None)
+        if callable(aligned_length):
+            return int(aligned_length())
+        return self._data_type_size(data_type)
+
+    def _unwrap_typedef(self, data_type):
+        if self._data_type_kind(data_type) != "typedef":
+            return None
+        base_type = getattr(data_type, "getBaseDataType", None)
+        if callable(base_type):
+            return base_type()
+        data_type_getter = getattr(data_type, "getDataType", None)
+        if callable(data_type_getter):
+            return data_type_getter()
+        return None
+
+    def _serialize_data_type_field(self, component) -> dict:
+        field_type = component.getDataType()
+        field_name = component.getFieldName()
+        default_field_name = getattr(component, "getDefaultFieldName", None)
+        if field_name is None and callable(default_field_name):
+            field_name = default_field_name()
+        comment = component.getComment()
+        return {
+            "ordinal": int(component.getOrdinal()),
+            "offset": int(component.getOffset()),
+            "length": int(component.getLength()),
+            "field_name": "" if field_name is None else str(field_name),
+            "type_name": str(field_type.getDisplayName()),
+            "type_path": self._data_type_path(field_type),
+            "comment": None if comment is None else str(comment),
+        }
+
+    def _serialize_data_type_reference(self, data_type) -> dict:
+        return {
+            "name": str(data_type.getName()),
+            "display_name": str(data_type.getDisplayName()),
+            "path": self._data_type_path(data_type),
+            "category_path": self._data_type_category_path(data_type),
+            "kind": self._data_type_kind(data_type),
+            "size": self._data_type_size(data_type),
+        }
+
+    def _resolve_data_type(self, data_type_name_or_path: str):
+        dtm = self.program.getDataTypeManager()
+        all_data_types = list(self._iter_values(dtm.getAllDataTypes()))
+
+        if data_type_name_or_path.startswith("/"):
+            for data_type in all_data_types:
+                if self._data_type_path(data_type) == data_type_name_or_path:
+                    return data_type
+            raise ValueError(f"Data type '{data_type_name_or_path}' not found.")
+
+        matches = [
+            data_type
+            for data_type in all_data_types
+            if str(data_type.getName()) == data_type_name_or_path
+        ]
+        if not matches:
+            raise ValueError(f"Data type '{data_type_name_or_path}' not found.")
+        if len(matches) > 1:
+            candidates = ", ".join(sorted(self._data_type_path(data_type) for data_type in matches))
+            raise ValueError(
+                f"Ambiguous data type '{data_type_name_or_path}'. Matching paths: {candidates}"
+            )
+        return matches[0]
+
+    def _resolve_or_parse_data_type(self, type_name_or_path: str):
+        if type_name_or_path.startswith("/"):
+            return self._resolve_data_type(type_name_or_path)
+        try:
+            return self._resolve_data_type(type_name_or_path)
+        except ValueError as exact_error:
+            if "Ambiguous data type" in str(exact_error):
+                raise
+            return self._parse_data_type(type_name_or_path)
 
     def _lookup_functions(
         self,
@@ -945,31 +1067,36 @@ class GhidraTools:
         function_name_or_address: str,
         variable_name: str,
         type_name: str,
+        variable_kind: typing.Literal["parameter", "local"] | None = None,
     ) -> dict:
         from ghidra.program.model.symbol import SourceType
 
-        func, variable_kind, variable = self._resolve_function_variable(
-            function_name_or_address, variable_name
+        func, resolved_variable_kind, variable = self._resolve_function_variable(
+            function_name_or_address, variable_name, variable_kind
         )
         function_name = str(func.getName())
         function_address = str(func.getEntryPoint())
-        old_type = str(variable.getDataType().getDisplayName())
-        data_type = self._parse_data_type(type_name)
+        old_data_type = variable.getDataType()
+        old_type = str(old_data_type.getDisplayName())
+        data_type = self._resolve_or_parse_data_type(type_name)
 
         with ghidra_transaction(
             self.program,
-            f"pyghidra-mcp: set {variable_kind} type {variable_name} -> {type_name}",
+            f"pyghidra-mcp: set {resolved_variable_kind} type {variable_name} -> {type_name}",
         ):
             variable.setDataType(data_type, SourceType.USER_DEFINED)
 
         self.invalidate_decompiler_cache()
+        new_data_type = variable.getDataType()
         return {
             "function_name": function_name,
             "function_address": function_address,
-            "variable_kind": variable_kind,
+            "variable_kind": resolved_variable_kind,
             "variable_name": str(variable.getName()),
             "old_type": old_type,
-            "new_type": str(variable.getDataType().getDisplayName()),
+            "old_type_path": self._data_type_path(old_data_type),
+            "new_type": str(new_data_type.getDisplayName()),
+            "new_type_path": self._data_type_path(new_data_type),
         }
 
     @handle_exceptions
@@ -1012,6 +1139,104 @@ class GhidraTools:
             "function_address": function_address,
             "old_prototype": old_prototype,
             "new_prototype": str(func.getSignature()),
+        }
+
+    @handle_exceptions
+    def set_function_return_type(
+        self,
+        function_name_or_address: str,
+        type_name_or_path: str,
+    ) -> dict:
+        from ghidra.program.model.symbol import SourceType
+
+        func = self.find_function(function_name_or_address)
+        function_name = str(func.getName())
+        function_address = str(func.getEntryPoint())
+        old_return_type = func.getReturnType()
+        new_return_type = self._resolve_or_parse_data_type(type_name_or_path)
+
+        with ghidra_transaction(
+            self.program,
+            f"pyghidra-mcp: set function return type {function_name} -> {type_name_or_path}",
+        ):
+            func.setReturnType(new_return_type, SourceType.USER_DEFINED)
+
+        self.invalidate_decompiler_cache()
+        applied_return_type = func.getReturnType()
+        return {
+            "function_name": function_name,
+            "function_address": function_address,
+            "old_return_type": str(old_return_type.getDisplayName()),
+            "old_return_type_path": self._data_type_path(old_return_type),
+            "new_return_type": str(applied_return_type.getDisplayName()),
+            "new_return_type_path": self._data_type_path(applied_return_type),
+        }
+
+    def _address_add(self, address, offset: int):
+        add_no_wrap = getattr(address, "addNoWrap", None)
+        if callable(add_no_wrap):
+            return add_no_wrap(offset)
+        return address.add(offset)
+
+    def _validate_data_range(self, mem, start_addr, end_addr, requested_address: str) -> None:
+        if not mem.contains(start_addr):
+            raise ValueError(f"Address {requested_address} is not in mapped memory")
+        if not mem.contains(end_addr):
+            raise ValueError(f"Data type range {start_addr}..{end_addr} is not fully mapped")
+
+        get_block = getattr(mem, "getBlock", None)
+        if not callable(get_block):
+            return
+        start_block = get_block(start_addr)
+        end_block = get_block(end_addr)
+        if start_block is None or end_block is None:
+            raise ValueError(f"Data type range {start_addr}..{end_addr} is not fully mapped")
+        if start_block != end_block:
+            raise ValueError(f"Data type range {start_addr}..{end_addr} crosses memory blocks")
+
+    @handle_exceptions
+    def set_data_type_at_address(
+        self,
+        address: str,
+        type_name_or_path: str,
+        clear_existing: bool = True,
+    ) -> dict:
+        addr = self._parse_address(address)
+        mem = self.program.getMemory()
+        listing = self.program.getListing()
+        old_data = listing.getDefinedDataAt(addr)
+        old_data_type = old_data.getDataType() if old_data is not None else None
+        data_type = self._resolve_or_parse_data_type(type_name_or_path)
+        length = self._data_type_size(data_type)
+        if length <= 0:
+            length = int(self.program.getDefaultPointerSize())
+        if length <= 0:
+            raise ValueError(f"Data type '{type_name_or_path}' has non-positive length {length}")
+        try:
+            end_addr = self._address_add(addr, length - 1)
+        except Exception as exc:
+            raise ValueError(
+                f"Data type '{type_name_or_path}' of length {length} does not fit at address {addr}"
+            ) from exc
+        self._validate_data_range(mem, addr, end_addr, address)
+
+        with ghidra_transaction(
+            self.program,
+            f"pyghidra-mcp: set data type at {addr} -> {type_name_or_path}",
+        ):
+            if clear_existing:
+                listing.clearCodeUnits(addr, end_addr, False)
+            data = listing.createData(addr, data_type)
+
+        self.invalidate_decompiler_cache()
+        new_data_type = data.getDataType()
+        return {
+            "address": str(addr),
+            "old_type": None if old_data_type is None else str(old_data_type.getDisplayName()),
+            "old_type_path": None if old_data_type is None else self._data_type_path(old_data_type),
+            "new_type": str(new_data_type.getDisplayName()),
+            "new_type_path": self._data_type_path(new_data_type),
+            "length": int(data.getLength()),
         }
 
     @handle_exceptions
@@ -1072,6 +1297,206 @@ class GhidraTools:
             "address": str(addr),
             "comment": comment,
             "comment_type": normalized_type,
+        }
+
+    def _is_builtin_data_type(self, data_type) -> bool:
+        category_path = self._data_type_category_path(data_type).lower()
+        return category_path in {"/builtin", "/builtins", "/built-in"} or category_path.startswith(
+            ("/builtin/", "/builtins/", "/built-in/")
+        )
+
+    def _data_type_in_category_subtree(self, data_type, root: str) -> bool:
+        path = self._data_type_category_path(data_type)
+        return path == root or path.startswith(f"{root}/")
+
+    def _include_data_type_by_default(self, data_type, include_builtins: bool) -> bool:
+        from pyghidra_mcp.header_import import CANONICAL_CATEGORY_ROOT
+
+        if self._data_type_in_category_subtree(data_type, CANONICAL_CATEGORY_ROOT):
+            return True
+        if include_builtins:
+            return True
+        category_path = self._data_type_category_path(data_type)
+        return category_path not in {"", "/"} and not self._is_builtin_data_type(data_type)
+
+    def _data_type_matches_query(self, data_type, query: str) -> bool:
+        searchable = (
+            str(data_type.getName()),
+            str(data_type.getDisplayName()),
+            self._data_type_path(data_type),
+        )
+        return any(self._matches_query(query, value) for value in searchable)
+
+    @handle_exceptions
+    def list_data_types(
+        self,
+        query: str = ".*",
+        category_path: str | None = None,
+        include_builtins: bool = False,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> dict:
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        if limit < 0:
+            raise ValueError("limit must be >= 0")
+
+        matches = []
+        for data_type in self._iter_values(self.program.getDataTypeManager().getAllDataTypes()):
+            if category_path is not None and not self._data_type_in_category_subtree(
+                data_type, category_path
+            ):
+                continue
+            if category_path is None and not self._include_data_type_by_default(
+                data_type, include_builtins
+            ):
+                continue
+            if not self._data_type_matches_query(data_type, query):
+                continue
+            matches.append(data_type)
+
+        matches.sort(key=lambda data_type: self._data_type_path(data_type).lower())
+        paged_matches = matches[offset : offset + limit]
+        return {
+            "data_types": [
+                self._serialize_data_type_reference(data_type) for data_type in paged_matches
+            ],
+            "total_matches": len(matches),
+        }
+
+    @handle_exceptions
+    def describe_data_type(self, data_type_name_or_path: str) -> dict:
+        if not data_type_name_or_path:
+            raise ValueError("data_type_name_or_path is required.")
+
+        data_type = self._resolve_data_type(data_type_name_or_path)
+        kind = self._data_type_kind(data_type)
+        base_type = self._unwrap_typedef(data_type)
+        effective_type = base_type or data_type
+        fields: list[dict] = []
+
+        if hasattr(effective_type, "getDefinedComponents"):
+            fields = [
+                self._serialize_data_type_field(component)
+                for component in effective_type.getDefinedComponents()
+            ]
+
+        response = {
+            "requested_name_or_path": data_type_name_or_path,
+            "name": str(data_type.getName()),
+            "display_name": str(data_type.getDisplayName()),
+            "path": self._data_type_path(data_type),
+            "category_path": self._data_type_category_path(data_type),
+            "kind": kind,
+            "size": self._data_type_size(data_type),
+            "aligned_size": self._data_type_aligned_size(data_type),
+            "description": str(data_type.getDescription()) if data_type.getDescription() else None,
+            "base_type_name": None,
+            "base_type_path": None,
+            "base_type_kind": None,
+            "fields": fields,
+        }
+
+        if base_type is not None:
+            response.update(
+                {
+                    "base_type_name": str(base_type.getDisplayName()),
+                    "base_type_path": self._data_type_path(base_type),
+                    "base_type_kind": self._data_type_kind(base_type),
+                }
+            )
+
+        return response
+
+    @handle_exceptions
+    def import_header_types(
+        self,
+        header_path: str | None = None,
+        validate_only: bool = False,
+        *,
+        header_content: str | None = None,
+        header_name: str | None = None,
+        include_files: dict[str, str] | None = None,
+        header_files: list[dict[str, str]] | None = None,
+    ) -> dict:
+        from pyghidra_mcp.header_import import CANONICAL_CATEGORY_ROOT, apply_header_import_plan
+        from pyghidra_mcp.header_import.planning import (
+            build_header_import_plan,
+            build_header_import_plan_from_files,
+            build_header_import_plan_from_source,
+            translate_header_path,
+        )
+
+        mode_count = sum(
+            mode_enabled
+            for mode_enabled in (
+                header_path is not None,
+                header_content is not None,
+                header_files is not None,
+            )
+        )
+        if mode_count != 1:
+            raise ValueError("Use exactly one of header_path, header_content, or header_files")
+
+        if header_files is not None:
+            if header_name is not None or include_files is not None:
+                raise ValueError(
+                    "header_files cannot be combined with header_name or include_files"
+                )
+            plan = build_header_import_plan_from_files(header_files)
+        elif header_content is not None:
+            plan = build_header_import_plan_from_source(
+                header_content,
+                header_name=header_name or "input.h",
+                include_files=include_files,
+            )
+        else:
+            if not header_path:
+                raise ValueError("header_path is required")
+            plan = build_header_import_plan(translate_header_path(header_path))
+        diagnostics = [
+            {
+                "severity": diagnostic.severity,
+                "message": diagnostic.message,
+                "location": diagnostic.location,
+            }
+            for diagnostic in plan.diagnostics
+        ]
+
+        if validate_only:
+            return {
+                "header_path": str(plan.header_path),
+                "category_root": CANONICAL_CATEGORY_ROOT,
+                "validate_only": True,
+                "resolved_local_includes": [str(path) for path in plan.resolved_local_includes],
+                "resolved_system_includes": list(plan.resolved_system_includes),
+                "created_types": [],
+                "updated_types": [],
+                "created_type_refs": [],
+                "updated_type_refs": [],
+                "diagnostics": diagnostics,
+            }
+
+        with ghidra_transaction(self.program, "Import header types"):
+            apply_result = apply_header_import_plan(self.program, plan)
+        self.invalidate_decompiler_cache()
+
+        def serialize_paths(paths: tuple[str, ...]) -> list[dict]:
+            return [
+                self._serialize_data_type_reference(self._resolve_data_type(path)) for path in paths
+            ]
+
+        return {
+            "header_path": str(plan.header_path),
+            "category_root": apply_result.category_root,
+            "validate_only": False,
+            "resolved_local_includes": [str(path) for path in plan.resolved_local_includes],
+            "resolved_system_includes": list(plan.resolved_system_includes),
+            "created_types": list(apply_result.created_types),
+            "updated_types": list(apply_result.updated_types),
+            "created_type_refs": serialize_paths(apply_result.created_type_paths),
+            "updated_type_refs": serialize_paths(apply_result.updated_type_paths),
+            "diagnostics": diagnostics,
         }
 
     def invalidate_decompiler_cache(self) -> None:

@@ -32,6 +32,7 @@ async def test_stdio_client_list_tools(server_params):
             # Check that we have at least the decompile_function tool
             assert any(tool.name == "decompile_function" for tool in tools.tools)
             assert any(tool.name == "list_project_binaries" for tool in tools.tools)
+            assert any(tool.name == "describe_data_type" for tool in tools.tools)
 
 
 @pytest.mark.asyncio

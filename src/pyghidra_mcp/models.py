@@ -62,6 +62,67 @@ class ImportRequestResult(BaseModel):
     message: str
 
 
+class HeaderImportDiagnostic(BaseModel):
+    severity: str
+    message: str
+    location: str | None = None
+
+
+class DataTypeReference(BaseModel):
+    name: str
+    display_name: str
+    path: str
+    category_path: str
+    kind: str
+    size: int
+
+
+class DataTypeSearchResults(BaseModel):
+    data_types: list[DataTypeReference]
+    total_matches: int
+
+
+class HeaderImportResponse(BaseModel):
+    binary_name: str
+    header_path: str
+    category_root: str
+    validate_only: bool = False
+    resolved_local_includes: list[str]
+    resolved_system_includes: list[str]
+    created_types: list[str]
+    updated_types: list[str]
+    created_type_refs: list[DataTypeReference] = Field(default_factory=list)
+    updated_type_refs: list[DataTypeReference] = Field(default_factory=list)
+    diagnostics: list[HeaderImportDiagnostic]
+
+
+class DataTypeFieldInfo(BaseModel):
+    ordinal: int
+    offset: int
+    length: int
+    field_name: str
+    type_name: str
+    type_path: str | None = None
+    comment: str | None = None
+
+
+class DataTypeDescriptionResponse(BaseModel):
+    binary_name: str
+    requested_name_or_path: str
+    name: str
+    display_name: str
+    path: str
+    category_path: str
+    kind: str
+    size: int
+    aligned_size: int
+    description: str | None = None
+    base_type_name: str | None = None
+    base_type_path: str | None = None
+    base_type_kind: str | None = None
+    fields: list[DataTypeFieldInfo]
+
+
 class GotoResponse(BaseModel):
     binary_name: str
     address: str
@@ -91,7 +152,29 @@ class VariableTypeResponse(BaseModel):
     variable_kind: str
     variable_name: str
     old_type: str
+    old_type_path: str | None = None
     new_type: str
+    new_type_path: str | None = None
+
+
+class FunctionReturnTypeResponse(BaseModel):
+    binary_name: str
+    function_name: str
+    function_address: str
+    old_return_type: str
+    old_return_type_path: str | None = None
+    new_return_type: str
+    new_return_type_path: str | None = None
+
+
+class DataTypeAtAddressResponse(BaseModel):
+    binary_name: str
+    address: str
+    old_type: str | None = None
+    old_type_path: str | None = None
+    new_type: str
+    new_type_path: str | None = None
+    length: int
 
 
 class FunctionPrototypeResponse(BaseModel):

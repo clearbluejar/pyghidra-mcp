@@ -4,9 +4,17 @@ from pyghidra_mcp.models import (
     CodeSearchResults,
     CrossReferenceInfo,
     CrossReferenceInfos,
+    DataTypeAtAddressResponse,
+    DataTypeDescriptionResponse,
+    DataTypeFieldInfo,
+    DataTypeReference,
+    DataTypeSearchResults,
     DecompiledFunction,
     ExportInfo,
     ExportInfos,
+    FunctionReturnTypeResponse,
+    HeaderImportDiagnostic,
+    HeaderImportResponse,
     ImportInfo,
     ImportInfos,
     ProgramBasicInfo,
@@ -19,6 +27,7 @@ from pyghidra_mcp.models import (
     StringSearchResults,
     SymbolInfo,
     SymbolSearchResults,
+    VariableTypeResponse,
 )
 
 
@@ -102,6 +111,111 @@ def test_program_infos_model():
     assert len(infos.programs) == 2
     assert infos.programs[0].name == "test_program1"
     assert infos.programs[1].analysis_complete is False
+
+
+def test_header_import_response_model():
+    """Test the header import response model."""
+    response = HeaderImportResponse(
+        binary_name="sample",
+        header_path="/tmp/sample.h",
+        category_root="/pyghidra_mcp/imported_headers",
+        resolved_local_includes=["/tmp/sample.h"],
+        resolved_system_includes=["stdint.h"],
+        created_types=["Node"],
+        updated_types=[],
+        diagnostics=[HeaderImportDiagnostic(severity="warning", message="test")],
+    )
+    assert response.binary_name == "sample"
+    assert response.header_path == "/tmp/sample.h"
+    assert response.created_types == ["Node"]
+    assert response.created_type_refs == []
+    assert response.updated_type_refs == []
+    assert response.diagnostics[0].severity == "warning"
+
+
+def test_data_type_reference_and_search_results_models():
+    """Test datatype reference/search models."""
+    ref = DataTypeReference(
+        name="Node",
+        display_name="Node",
+        path="/pyghidra_mcp/imported_headers/Node",
+        category_path="/pyghidra_mcp/imported_headers",
+        kind="structure",
+        size=16,
+    )
+    results = DataTypeSearchResults(data_types=[ref], total_matches=1)
+
+    assert results.total_matches == 1
+    assert results.data_types[0].path == "/pyghidra_mcp/imported_headers/Node"
+    assert results.model_dump()["data_types"][0]["kind"] == "structure"
+
+
+def test_mutation_response_models_include_optional_type_paths():
+    """Test mutation response models with path metadata."""
+    variable = VariableTypeResponse(
+        binary_name="sample",
+        function_name="helper",
+        function_address="1000",
+        variable_kind="parameter",
+        variable_name="node",
+        old_type="int",
+        new_type="Node",
+        new_type_path="/pyghidra_mcp/imported_headers/Node",
+    )
+    function_return = FunctionReturnTypeResponse(
+        binary_name="sample",
+        function_name="make_node",
+        function_address="1000",
+        old_return_type="int",
+        new_return_type="Node",
+        new_return_type_path="/pyghidra_mcp/imported_headers/Node",
+    )
+    data = DataTypeAtAddressResponse(
+        binary_name="sample",
+        address="1000",
+        old_type=None,
+        new_type="Node",
+        new_type_path="/pyghidra_mcp/imported_headers/Node",
+        length=16,
+    )
+
+    assert variable.old_type_path is None
+    assert variable.new_type_path == "/pyghidra_mcp/imported_headers/Node"
+    assert function_return.old_return_type_path is None
+    assert data.old_type_path is None
+    assert data.length == 16
+
+
+def test_data_type_description_response_model():
+    """Test the datatype description response model."""
+    response = DataTypeDescriptionResponse(
+        binary_name="sample",
+        requested_name_or_path="Node",
+        name="Node",
+        display_name="Node",
+        path="/pyghidra_mcp/imported_headers/Node",
+        category_path="/pyghidra_mcp/imported_headers",
+        kind="structure",
+        size=16,
+        aligned_size=16,
+        description="structure Node",
+        base_type_name=None,
+        base_type_path=None,
+        base_type_kind=None,
+        fields=[
+            DataTypeFieldInfo(
+                ordinal=0,
+                offset=0,
+                length=8,
+                field_name="next",
+                type_name="Node *",
+                type_path="/builtin/NodePtr",
+            )
+        ],
+    )
+    assert response.binary_name == "sample"
+    assert response.path == "/pyghidra_mcp/imported_headers/Node"
+    assert response.fields[0].field_name == "next"
 
 
 def test_export_info_model():

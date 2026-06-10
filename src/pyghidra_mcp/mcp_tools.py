@@ -22,10 +22,15 @@ from pyghidra_mcp.models import (
     CodeSearchResults,
     CommentResponse,
     CrossReferenceInfos,
+    DataTypeAtAddressResponse,
+    DataTypeDescriptionResponse,
+    DataTypeSearchResults,
     DecompiledFunction,
     ExportInfos,
     FunctionPrototypeResponse,
+    FunctionReturnTypeResponse,
     GotoResponse,
+    HeaderImportResponse,
     ImportInfos,
     ImportRequestResult,
     OpenProgramInfo,
@@ -308,6 +313,7 @@ def set_variable_type(
     variable_name: str,
     type_name: str,
     ctx: Context,
+    variable_kind: Literal["parameter", "local"] | None = None,
 ) -> VariableTypeResponse:
     """Set a parameter or local type by exact name."""
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
@@ -315,7 +321,9 @@ def set_variable_type(
     tools = GhidraTools(program_info)
     result = _run_for_context(
         pyghidra_context,
-        lambda: tools.set_variable_type(function_name_or_address, variable_name, type_name),
+        lambda: tools.set_variable_type(
+            function_name_or_address, variable_name, type_name, variable_kind=variable_kind
+        ),
     )
     result = cast(dict, result)
     return VariableTypeResponse(binary_name=binary_name, **result)
@@ -341,6 +349,47 @@ def set_function_prototype(
 
 
 @mcp_error_handler
+def set_function_return_type(
+    binary_name: str,
+    function_name_or_address: str,
+    type_name_or_path: str,
+    ctx: Context,
+) -> FunctionReturnTypeResponse:
+    """Set only a function's return datatype by exact path, unique name, or parser string."""
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.set_function_return_type(function_name_or_address, type_name_or_path),
+    )
+    result = cast(dict, result)
+    return FunctionReturnTypeResponse(binary_name=binary_name, **result)
+
+
+@mcp_error_handler
+def set_data_type_at_address(
+    binary_name: str,
+    address: str,
+    type_name_or_path: str,
+    ctx: Context,
+    clear_existing: bool = True,
+) -> DataTypeAtAddressResponse:
+    """Create data at an address using an exact datatype path, unique name, or parser string."""
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.set_data_type_at_address(
+            address, type_name_or_path, clear_existing=clear_existing
+        ),
+    )
+    result = cast(dict, result)
+    return DataTypeAtAddressResponse(binary_name=binary_name, **result)
+
+
+@mcp_error_handler
 def set_comment(
     binary_name: str,
     target: str,
@@ -358,6 +407,85 @@ def set_comment(
     )
     result = cast(dict, result)
     return CommentResponse(binary_name=binary_name, **result)
+
+
+@mcp_error_handler
+def import_header_types(
+    binary_name: str,
+    header_path: str | None = None,
+    ctx: Context | None = None,
+    validate_only: bool = False,
+    *,
+    header_content: str | None = None,
+    header_name: str | None = None,
+    include_files: dict[str, str] | None = None,
+    header_files: list[dict[str, str]] | None = None,
+) -> HeaderImportResponse:
+    """Import reviewed C header types into Ghidra under the canonical importer category root."""
+    if ctx is None:
+        raise ValueError("MCP context is required")
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.import_header_types(
+            header_path=header_path,
+            validate_only=validate_only,
+            header_content=header_content,
+            header_name=header_name,
+            include_files=include_files,
+            header_files=header_files,
+        ),
+    )
+    result = cast(dict, result)
+    return HeaderImportResponse(binary_name=binary_name, **result)
+
+
+@mcp_error_handler
+def list_data_types(
+    binary_name: str,
+    ctx: Context,
+    query: str = ".*",
+    category_path: str | None = None,
+    include_builtins: bool = False,
+    offset: int = 0,
+    limit: int = 50,
+) -> DataTypeSearchResults:
+    """List datatypes by regex, category subtree, and pagination."""
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.list_data_types(
+            query=query,
+            category_path=category_path,
+            include_builtins=include_builtins,
+            offset=offset,
+            limit=limit,
+        ),
+    )
+    result = cast(dict, result)
+    return DataTypeSearchResults(**result)
+
+
+@mcp_error_handler
+def describe_data_type(
+    binary_name: str,
+    data_type_name_or_path: str,
+    ctx: Context,
+) -> DataTypeDescriptionResponse:
+    """Describe the current Ghidra datatype metadata and fields for a named datatype."""
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.describe_data_type(data_type_name_or_path),
+    )
+    result = cast(dict, result)
+    return DataTypeDescriptionResponse(binary_name=binary_name, **result)
 
 
 @mcp_error_handler

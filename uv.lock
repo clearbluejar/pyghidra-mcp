@@ -2494,6 +2494,7 @@ dependencies = [
     { name = "click-option-group" },
     { name = "ghidrecomp" },
     { name = "mcp", extra = ["cli"] },
+    { name = "pycparser" },
     { name = "pyghidra" },
 ]
 
@@ -2540,6 +2541,7 @@ requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=1.26.0" },
     { name = "mcp", extras = ["cli"], marker = "extra == 'dev'", specifier = ">=1.26.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
+    { name = "pycparser", specifier = ">=2.22" },
     { name = "pyghidra", specifier = ">=2.2.1" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4.1" },

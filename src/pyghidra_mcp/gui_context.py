@@ -42,13 +42,19 @@ def _run_on_swing(fn, *args, **kwargs):
     return result_box[0]
 
 
-def _open_gui_project(front_end_tool, project_spec):
+def _project_matches_spec(project, project_spec: ProjectSpec) -> bool:
+    try:
+        locator = project.getProjectLocator()
+        marker_file = locator.getMarkerFile()
+        marker_path = Path(str(marker_file.getAbsolutePath())).resolve()
+        return marker_path == project_spec.gpr_path.resolve()
+    except Exception:
+        return False
+
+
+def _open_gui_project(front_end_tool, project_spec: ProjectSpec):
     from ghidra.framework.main import AppInfo
     from ghidra.framework.model import ProjectLocator
-
-    active_project = AppInfo.getActiveProject()
-    if active_project is not None:
-        return active_project
 
     project_spec.project_directory.mkdir(exist_ok=True, parents=True)
     project_manager = front_end_tool.getProjectManager()
@@ -56,6 +62,13 @@ def _open_gui_project(front_end_tool, project_spec):
         str(project_spec.project_directory.absolute()),
         project_spec.project_name,
     )
+
+    active_project = AppInfo.getActiveProject()
+    if active_project is not None:
+        if _project_matches_spec(active_project, project_spec):
+            return active_project
+        active_project.close()
+
     if locator.exists():
         opened_project = project_manager.openProject(locator, True, False)
     else:
@@ -110,7 +123,7 @@ class GuiPyGhidraContext(IndexingMixin):
                 project = AppInfo.getActiveProject()
             except Exception:
                 project = None
-            if project is not None:
+            if project is not None and _project_matches_spec(project, project_spec):
                 return project
 
             try:
