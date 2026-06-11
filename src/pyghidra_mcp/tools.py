@@ -486,29 +486,51 @@ class GhidraTools:
         self, query: str | None = None, offset: int = 0, limit: int = 25
     ) -> list[ExportInfo]:
         """Lists all exported functions and symbols from a specified binary."""
+        if limit <= 0:
+            return []
+
+        pattern = re.compile(query, re.IGNORECASE) if query else None
         exports = []
+        matches_seen = 0
         symbols = self.program.getSymbolTable().getAllSymbols(True)
         for symbol in symbols:
             if symbol.isExternalEntryPoint():
-                if query and not re.search(query, symbol.getName(), re.IGNORECASE):
+                if pattern and not pattern.search(symbol.getName()):
+                    continue
+                if matches_seen < offset:
+                    matches_seen += 1
                     continue
                 exports.append(ExportInfo(name=symbol.getName(), address=str(symbol.getAddress())))
-        return exports[offset : limit + offset]
+                matches_seen += 1
+                if len(exports) >= limit:
+                    break
+        return exports
 
     @handle_exceptions
     def list_imports(
         self, query: str | None = None, offset: int = 0, limit: int = 25
     ) -> list[ImportInfo]:
         """Lists all imported functions and symbols for a specified binary."""
+        if limit <= 0:
+            return []
+
+        pattern = re.compile(query, re.IGNORECASE) if query else None
         imports = []
+        matches_seen = 0
         symbols = self.program.getSymbolTable().getExternalSymbols()
         for symbol in symbols:
-            if query and not re.search(query, symbol.getName(), re.IGNORECASE):
+            if pattern and not pattern.search(symbol.getName()):
+                continue
+            if matches_seen < offset:
+                matches_seen += 1
                 continue
             imports.append(
                 ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace()))
             )
-        return imports[offset : limit + offset]
+            matches_seen += 1
+            if len(imports) >= limit:
+                break
+        return imports
 
     @handle_exceptions
     def list_xrefs(self, name_or_address: str) -> list[CrossReferenceInfo]:
