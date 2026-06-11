@@ -494,8 +494,5 @@ def import_binary(binary_path: str, ctx: Context) -> ImportRequestResult:
 def save(ctx: Context) -> SaveRequestResult:
     '''Save all programs.'''
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
-    for _program_name, program_info in pyghidra_context.programs.items():
-        program = program_info.program
-        pyghidra_context.project.save(program)
-
+    pyghidra_context.save()
     return SaveRequestResult()
