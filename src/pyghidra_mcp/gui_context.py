@@ -632,6 +632,10 @@ class GuiPyGhidraContext(IndexingMixin):
                 self._dispose_decompiler(program_info)
             self.programs.clear()
 
+    def save(self):
+        with self._programs_lock:
+            self.project.save()
+
     @staticmethod
     def _is_binary_file(path: Path) -> bool:
         return is_ghidra_importable(path)

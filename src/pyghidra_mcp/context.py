@@ -167,6 +167,13 @@ class PyGhidraContext(IndexingMixin):
         self.project.close()
         logger.info(f"Project {self.project_name} closed.")
 
+    def save(self):
+        """
+        Save changes to all open programs.
+        """
+        for program_info in self.programs.values():
+            self.project.save(program_info.program)
+
     def _get_or_create_project(self) -> "GhidraProject":
         """
         Creates a new Ghidra project if it doesn't exist, otherwise opens the existing project.

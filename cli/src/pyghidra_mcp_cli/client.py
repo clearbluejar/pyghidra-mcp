@@ -420,6 +420,16 @@ class PyGhidraMcpClient:
         )
         return self._extract_result(result)
 
+    async def save(self) -> dict[str, Any]:
+        """Save all programs."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "save",
+        )
+        return self._extract_result(result)
+
     async def delete_binary(self, binary_name: str) -> dict[str, Any]:
         """Delete a binary from the project."""
         if not self._connected:

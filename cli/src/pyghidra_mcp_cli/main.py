@@ -36,6 +36,7 @@ from .commands import (
     open_cmd,
     read,
     rename,
+    save,
     search,
     set_cmd,
     xref,
@@ -135,6 +136,7 @@ cli.add_command(xref.xref)
 cli.add_command(read.read)
 cli.add_command(callgraph.callgraph)
 cli.add_command(import_cmd.import_cmd)
+cli.add_command(save.save)
 cli.add_command(delete.delete)
 cli.add_command(metadata.metadata)
 
