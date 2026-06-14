@@ -20,7 +20,6 @@ from pyghidra_mcp.models import (
     CodeSearchResults,
     CrossReferenceInfo,
     DecompiledFunction,
-    DisassembledInstruction,
     DisassembleResult,
     ExportInfo,
     ImportInfo,
@@ -837,8 +836,15 @@ class GhidraTools:
         )
 
     @handle_exceptions
-    def disassemble(self, address: str, count: int = 20) -> "DisassembleResult":
-        """Disassembles instructions starting at an address."""
+    def disassemble(
+        self, address: str, count: int = 20, include_bytes: bool = False
+    ) -> "DisassembleResult":
+        """Disassembles instructions starting at an address.
+
+        Returns a compact, whitespace-aligned text listing rather than per-instruction
+        JSON objects to minimize token usage. Raw instruction bytes are omitted unless
+        ``include_bytes`` is True.
+        """
         af = self.program.getAddressFactory()
         try:
             addr_str = address[2:] if address.lower().startswith("0x") else address
@@ -852,9 +858,9 @@ class GhidraTools:
             raise ValueError(f"Address {address} is not in mapped memory")
 
         listing = self.program.getListing()
-        insns = []
+        rows: list[tuple[str, str, str, str]] = []
         for insn in listing.getInstructions(addr, True):
-            if len(insns) >= count:
+            if len(rows) >= count:
                 break
             raw = bytes([b & 0xFF for b in insn.getBytes()])
             operand_parts = []
@@ -862,15 +868,38 @@ class GhidraTools:
                 rep = insn.getDefaultOperandRepresentation(i)
                 if rep:
                     operand_parts.append(str(rep))
-            insns.append(
-                DisassembledInstruction(
-                    address=str(insn.getAddress()),
-                    bytes=raw.hex(),
-                    mnemonic=str(insn.getMnemonicString()),
-                    operands=",".join(operand_parts),
+            rows.append(
+                (
+                    str(insn.getAddress()),
+                    raw.hex(),
+                    str(insn.getMnemonicString()),
+                    ",".join(operand_parts),
                 )
             )
-        return DisassembleResult(address=str(addr), count=len(insns), instructions=insns)
+
+        listing_text = self._format_disassembly(rows, include_bytes=include_bytes)
+        return DisassembleResult(address=str(addr), count=len(rows), listing=listing_text)
+
+    @staticmethod
+    def _format_disassembly(
+        rows: list[tuple[str, str, str, str]], include_bytes: bool
+    ) -> str:
+        """Render disassembly rows as a compact, single-space-separated text listing.
+
+        Columns are ordered address [bytes] mnemonic operands. No alignment padding is
+        used: the consumer is an LLM that parses each line positionally, and padding
+        spaces only add tokens without aiding comprehension.
+        """
+        lines = []
+        for addr, raw, mnem, operands in rows:
+            parts = [addr]
+            if include_bytes:
+                parts.append(raw)
+            parts.append(mnem)
+            if operands:
+                parts.append(operands)
+            lines.append(" ".join(parts))
+        return "\n".join(lines)
 
     @handle_exceptions
     def gen_callgraph(

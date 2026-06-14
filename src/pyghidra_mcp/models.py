@@ -215,17 +215,16 @@ class BytesReadResult(BaseModel):
     data: str = Field(..., description="hex string")
 
 
-class DisassembledInstruction(BaseModel):
-    address: str
-    bytes: str = Field(..., description="hex string")
-    mnemonic: str
-    operands: str
-
-
 class DisassembleResult(BaseModel):
     address: str
     count: int
-    instructions: list[DisassembledInstruction]
+    listing: str = Field(
+        ...,
+        description=(
+            "Newline-delimited disassembly listing. Each line is single-space separated: "
+            "address, optional raw bytes (hex, when include_bytes=True), mnemonic, operands."
+        ),
+    )
 
 
 class CallGraphDirection(str, Enum):

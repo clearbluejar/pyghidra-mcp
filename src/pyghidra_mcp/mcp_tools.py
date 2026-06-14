@@ -467,11 +467,22 @@ def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> 
 
 
 @mcp_error_handler
-def disassemble(binary_name: str, ctx: Context, address: str, count: int = 20) -> DisassembleResult:
+def disassemble(
+    binary_name: str,
+    ctx: Context,
+    address: str,
+    count: int = 20,
+    include_bytes: bool = False,
+) -> DisassembleResult:
     """Disassemble instructions at an address. Returns up to `count` instructions (max 200).
 
-    Hex format supported (0x prefix optional). Useful for inspecting raw assembly
-    at any address without needing to know the function name or entry point.
+    Returns a compact, whitespace-aligned text listing in `listing` (one
+    instruction per line: address, mnemonic, operands).
+    Set `include_bytes=True` to also include the raw instruction bytes (hex) as a
+    column.
+
+    Useful for inspecting raw assembly at any address without needing to know
+    the function name or entry point.
     """
     if count <= 0:
         raise ValueError("count must be > 0")
@@ -480,7 +491,7 @@ def disassemble(binary_name: str, ctx: Context, address: str, count: int = 20) -
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
-    return tools.disassemble(address=address, count=count)
+    return tools.disassemble(address=address, count=count, include_bytes=include_bytes)
 
 
 @mcp_error_handler
