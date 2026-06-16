@@ -11,6 +11,11 @@ from pyghidra_mcp.tools import GhidraTools
 
 logger = logging.getLogger(__name__)
 
+# Collection metadata key flipped to True only after a code index is fully
+# populated. A collection missing this marker (legacy) or carrying False (an
+# interrupted/partial index) is rebuilt rather than trusted on restart.
+COLLECTION_COMPLETE_KEY = "pyghidra_index_complete"
+
 
 class IndexingMixin:
     """Shared MCP-side indexing behavior for headless and GUI contexts."""
@@ -92,18 +97,47 @@ class IndexingMixin:
         for program_info in analyzed_programs:
             self.schedule_indexing(program_info.name)
 
+    def _open_complete_collection(self, name: str) -> Any | None:
+        """Return an existing, fully-indexed collection, or None.
+
+        Completion is decided by the ``COLLECTION_COMPLETE_KEY`` marker, not by
+        mere existence: chromadb persists a collection the moment it is created,
+        so an index interrupted partway through leaves an empty/partial
+        collection on disk. Such a collection (and any legacy one lacking the
+        marker) is deleted here so the caller rebuilds it from scratch.
+        """
+        try:
+            collection = self.chroma_client.get_collection(name=name)
+        except Exception:
+            return None
+
+        metadata = collection.metadata or {}
+        if metadata.get(COLLECTION_COMPLETE_KEY):
+            return collection
+
+        logger.warning(
+            "Collection '%s' is incomplete (interrupted index?); deleting to rebuild.", name
+        )
+        self.chroma_client.delete_collection(name=name)
+        return None
+
+    def _mark_collection_complete(self, collection: Any, function_count: int) -> None:
+        """Flip a fully-populated collection's completion marker on disk."""
+        collection.modify(
+            metadata={COLLECTION_COMPLETE_KEY: True, "function_count": function_count}
+        )
+
     def _init_chroma_code_collection_for_program(self, program_info: Any) -> None:
         from ghidra.program.model.listing import Function
 
         logger.info("Initializing Chroma code collection for %s", program_info.name)
-        try:
-            collection = self.chroma_client.get_collection(name=program_info.name)
-            logger.info("Collection '%s' exists; skipping code ingest.", program_info.name)
-            program_info.code_collection = collection
+        existing = self._open_complete_collection(program_info.name)
+        if existing is not None:
+            logger.info("Collection '%s' already complete; skipping code ingest.", program_info.name)
+            program_info.code_collection = existing
             return
-        except Exception:
-            logger.info("Creating new code collection '%s'", program_info.name)
 
+        logger.info("Creating new code collection '%s'", program_info.name)
         tools = GhidraTools(program_info)
         functions = tools.get_all_functions()
         decompiles = []
@@ -127,19 +161,23 @@ class IndexingMixin:
             except Exception as e:
                 logger.error("Failed to decompile %s: %s", func.getSymbol().getName(True), e)
 
-        collection = self.chroma_client.create_collection(name=program_info.name)
-        try:
-            batch_size = 5000
-            for i in range(0, len(decompiles), batch_size):
-                end = min(i + batch_size, len(decompiles))
-                collection.add(
-                    documents=decompiles[i:end],
-                    metadatas=metadatas[i:end],
-                    ids=ids[i:end],
-                )
-        except Exception as e:
-            logger.error("Failed add decompiles to collection: %s", e)
+        # Created with the completion marker off; an interruption before the
+        # marker is flipped below leaves a collection that reads as incomplete
+        # and is rebuilt on the next run. The add failure is intentionally not
+        # swallowed: a partial index must fail loudly so it is not marked done.
+        collection = self.chroma_client.create_collection(
+            name=program_info.name, metadata={COLLECTION_COMPLETE_KEY: False}
+        )
+        batch_size = 5000
+        for i in range(0, len(decompiles), batch_size):
+            end = min(i + batch_size, len(decompiles))
+            collection.add(
+                documents=decompiles[i:end],
+                metadatas=metadatas[i:end],
+                ids=ids[i:end],
+            )
 
+        self._mark_collection_complete(collection, len(ids))
         logger.info("Code analysis complete for collection '%s'", program_info.name)
         program_info.code_collection = collection
 
