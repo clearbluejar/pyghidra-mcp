@@ -20,6 +20,7 @@ from pyghidra_mcp.models import (
     CodeSearchResults,
     CrossReferenceInfo,
     DecompiledFunction,
+    DisassembleResult,
     ExportInfo,
     ImportInfo,
     SearchMode,
@@ -116,15 +117,14 @@ class GhidraTools:
     def _lookup_functions(
         self,
         name_or_address: str,
-        *,
-        exact: bool = True,
         partial: bool = False,
         include_externals: bool = True,
     ) -> list["Function"]:
         """
         Resolve functions by name or address.
         Returns a flat list of unique Function objects.
-        Search modes (exact, partial) are optional and only applied if enabled.
+        Exact matches are always returned first; partial (substring) matches
+        are appended only when ``partial`` is enabled.
         """
         af = self.program.getAddressFactory()
         fm = self.program.getFunctionManager()
@@ -134,6 +134,8 @@ class GhidraTools:
             addr = af.getAddress(name_or_address)
             if addr:
                 func = fm.getFunctionAt(addr)
+                if func is None:
+                    func = fm.getFunctionContaining(addr)
                 if func:
                     return [func]
         except Exception:
@@ -144,12 +146,11 @@ class GhidraTools:
         seen: set = set()
         matches: list[Function] = []
 
-        if exact:
-            for f in functions:
-                key = f.getEntryPoint()
-                if key not in seen and name_lc == f.getSymbol().getName(True).lower():
-                    seen.add(key)
-                    matches.append(f)
+        for f in functions:
+            key = f.getEntryPoint()
+            if key not in seen and name_lc == f.getSymbol().getName(True).lower():
+                seen.add(key)
+                matches.append(f)
 
         if partial:
             for f in functions:
@@ -171,7 +172,7 @@ class GhidraTools:
         Raises if ambiguous or not found.
         """
         matches = self._lookup_functions(
-            name_or_address, exact=True, partial=False, include_externals=include_externals
+            name_or_address, partial=False, include_externals=include_externals
         )
 
         if len(matches) == 1:
@@ -199,21 +200,21 @@ class GhidraTools:
         Never raises; returns empty list if none.
         """
         return self._lookup_functions(
-            name_or_address, exact=True, partial=True, include_externals=include_externals
+            name_or_address, partial=True, include_externals=include_externals
         )
 
     def _lookup_symbols(
         self,
         name_or_address: str,
         *,
-        exact: bool = True,
         partial: bool = False,
         dynamic: bool = False,
     ) -> list["Symbol"]:
         """
         Resolve symbols by name or address.
         Returns a single flat list of unique Symbol objects.
-        Search modes (exact, partial, dynamic) are optional and only applied if enabled.
+        Exact matches are always included; partial (substring) and dynamic
+        matches are added only when their respective flags are enabled.
         """
         st = self.program.getSymbolTable()
         af = self.program.getAddressFactory()
@@ -234,9 +235,8 @@ class GhidraTools:
         # Base symbol set (externals only once)
         base_symbols = self.get_all_symbols(include_externals=True)
 
-        # Exact match
-        if exact:
-            matches.update(s for s in base_symbols if name_lc == s.getName(True).lower())
+        # Exact match (always included)
+        matches.update(s for s in base_symbols if name_lc == s.getName(True).lower())
 
         # Partial match
         if partial:
@@ -255,7 +255,7 @@ class GhidraTools:
         Return all symbols that match name_or_address (exact or partial).
         Never raises; returns empty list if none.
         """
-        return self._lookup_symbols(name_or_address, exact=True, partial=True)
+        return self._lookup_symbols(name_or_address, partial=True)
 
     @handle_exceptions
     def find_symbol(self, name_or_address: str) -> "Symbol":
@@ -263,7 +263,7 @@ class GhidraTools:
         Resolve a single symbol by name or address (exact match only).
         Raises if ambiguous or not found.
         """
-        matches = self._lookup_symbols(name_or_address, exact=True, partial=False)
+        matches = self._lookup_symbols(name_or_address, partial=False)
 
         if len(matches) == 1:
             return matches[0]
@@ -831,6 +831,70 @@ class GhidraTools:
             size=len(data),
             data=data.hex(),
         )
+
+    @handle_exceptions
+    def disassemble(
+        self, address: str, count: int = 20, include_bytes: bool = False
+    ) -> "DisassembleResult":
+        """Disassembles instructions starting at an address.
+
+        Returns a compact, whitespace-aligned text listing rather than per-instruction
+        JSON objects to minimize token usage. Raw instruction bytes are omitted unless
+        ``include_bytes`` is True.
+        """
+        af = self.program.getAddressFactory()
+        try:
+            addr_str = address[2:] if address.lower().startswith("0x") else address
+            addr = af.getAddress(addr_str)
+            if addr is None:
+                raise ValueError(f"Invalid address: {address}")
+        except Exception as e:
+            raise ValueError(f"Invalid address format '{address}': {e}") from e
+
+        if not self.program.getMemory().contains(addr):
+            raise ValueError(f"Address {address} is not in mapped memory")
+
+        listing = self.program.getListing()
+        rows: list[tuple[str, str, str, str]] = []
+        for insn in listing.getInstructions(addr, True):
+            if len(rows) >= count:
+                break
+            raw = bytes([b & 0xFF for b in insn.getBytes()])
+            operand_parts = []
+            for i in range(insn.getNumOperands()):
+                rep = insn.getDefaultOperandRepresentation(i)
+                if rep:
+                    operand_parts.append(str(rep))
+            rows.append(
+                (
+                    str(insn.getAddress()),
+                    raw.hex(),
+                    str(insn.getMnemonicString()),
+                    ",".join(operand_parts),
+                )
+            )
+
+        listing_text = self._format_disassembly(rows, include_bytes=include_bytes)
+        return DisassembleResult(address=str(addr), count=len(rows), listing=listing_text)
+
+    @staticmethod
+    def _format_disassembly(rows: list[tuple[str, str, str, str]], include_bytes: bool) -> str:
+        """Render disassembly rows as a compact, single-space-separated text listing.
+
+        Columns are ordered address [bytes] mnemonic operands. No alignment padding is
+        used: the consumer is an LLM that parses each line positionally, and padding
+        spaces only add tokens without aiding comprehension.
+        """
+        lines = []
+        for addr, raw, mnem, operands in rows:
+            parts = [addr]
+            if include_bytes:
+                parts.append(raw)
+            parts.append(mnem)
+            if operands:
+                parts.append(operands)
+            lines.append(" ".join(parts))
+        return "\n".join(lines)
 
     @handle_exceptions
     def gen_callgraph(

@@ -273,6 +273,76 @@ class GuiPyGhidraContext(IndexingMixin):
         with self._programs_lock:
             return self.programs.get(path)
 
+    def _get_active_tool_for_gui(self, current_program):
+        tool = None
+        if current_program:
+            try:
+                tool = self._find_tool_for_program(current_program)
+            except Exception as e:
+                logger.debug("Could not find tool for active program: %s", e)
+
+        if not tool:
+            tools = self.project.getToolServices().getRunningTools()
+            if not tools:
+                raise RuntimeError("No active Ghidra tools are currently running.")
+            tool = tools[0]
+        return tool
+
+    def _extract_provider_name(self, tool) -> str | None:
+        wm = getattr(tool, "getWindowManager", lambda: None)()
+        if wm:
+            provider = getattr(wm, "getActiveComponentProvider", lambda: None)()
+            if provider:
+                return str(provider.getName())
+        return None
+
+    def _extract_location_info(self, tool, current_program, result: dict[str, Any]) -> None:
+        from ghidra.app.services import CodeViewerService
+
+        cvs = tool.getService(CodeViewerService)
+        if not cvs:
+            return
+
+        loc = cvs.getCurrentLocation()
+        if loc:
+            result["active_address"] = str(loc.getAddress())
+            result["location_type"] = type(loc).__name__
+
+            if current_program:
+                fm = current_program.getFunctionManager()
+                func = fm.getFunctionContaining(loc.getAddress())
+                if func:
+                    result["active_function"] = str(func.getName())
+
+        sel = cvs.getCurrentSelection()
+        if sel and not sel.isEmpty():
+            result["selection"] = f"{sel.getMinAddress()} - {sel.getMaxAddress()}"
+
+    def get_active_gui_context(self) -> dict[str, Any]:
+        def do_get_context() -> dict[str, Any]:
+            program_manager = self._get_primary_program_manager(required=False)
+            current_program = program_manager.getCurrentProgram() if program_manager else None
+
+            tool = self._get_active_tool_for_gui(current_program)
+
+            result: dict[str, Any] = {}
+            if current_program:
+                domain_file = current_program.getDomainFile()
+                if domain_file:
+                    result["active_program"] = str(domain_file.getPathname())
+                else:
+                    result["active_program"] = str(current_program.getName())
+
+            provider_name = self._extract_provider_name(tool)
+            if provider_name:
+                result["active_provider"] = provider_name
+
+            self._extract_location_info(tool, current_program, result)
+
+            return result
+
+        return self.run_on_swing(do_get_context)
+
     def run_on_swing(self, fn, *args, **kwargs):
         return _run_on_swing(fn, *args, **kwargs)
 

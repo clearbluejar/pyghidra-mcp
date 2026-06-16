@@ -23,9 +23,11 @@ from pyghidra_mcp.models import (
     CommentResponse,
     CrossReferenceInfos,
     DecompiledFunction,
+    DisassembleResult,
     ExportInfos,
     FunctionPrototypeResponse,
     GotoResponse,
+    GuiContextResponse,
     ImportInfos,
     ImportRequestResult,
     OpenProgramInfo,
@@ -264,6 +266,16 @@ def goto(
 
 
 @mcp_error_handler
+def get_gui_context(ctx: Context) -> GuiContextResponse:
+    """Get the current active user's location and metadata in the Ghidra GUI.
+
+    Assume this is volatile and has changed since last call.
+    """
+    gui_context = _require_gui_context(ctx)
+    return GuiContextResponse(**gui_context.get_active_gui_context())
+
+
+@mcp_error_handler
 def rename_function(
     binary_name: str,
     name_or_address: str,
@@ -453,6 +465,34 @@ def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> 
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
     return tools.read_bytes(address=address, size=size)
+
+
+@mcp_error_handler
+def disassemble(
+    binary_name: str,
+    ctx: Context,
+    address: str,
+    count: int = 20,
+    include_bytes: bool = False,
+) -> DisassembleResult:
+    """Disassemble instructions at an address. Returns up to `count` instructions (max 200).
+
+    Returns a compact, whitespace-aligned text listing in `listing` (one
+    instruction per line: address, mnemonic, operands).
+    Set `include_bytes=True` to also include the raw instruction bytes (hex) as a
+    column.
+
+    Useful for inspecting raw assembly at any address without needing to know
+    the function name or entry point.
+    """
+    if count <= 0:
+        raise ValueError("count must be > 0")
+    if count > 200:
+        raise ValueError("count must be <= 200")
+    pyghidra_context: MCPContext = ctx.request_context.lifespan_context
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    return tools.disassemble(address=address, count=count, include_bytes=include_bytes)
 
 
 @mcp_error_handler

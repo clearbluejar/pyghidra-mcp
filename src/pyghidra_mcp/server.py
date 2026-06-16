@@ -62,6 +62,7 @@ def register_common_tools(server: FastMCP) -> None:
     server.tool()(mcp_tools.list_xrefs)
     server.tool()(mcp_tools.search_strings)
     server.tool()(mcp_tools.read_bytes)
+    server.tool()(mcp_tools.disassemble)
     server.tool()(mcp_tools.gen_callgraph)
     server.tool()(mcp_tools.import_binary)
 
@@ -71,6 +72,7 @@ def register_gui_tools(server: FastMCP) -> None:
     server.tool()(mcp_tools.open_program_in_gui)
     server.tool()(mcp_tools.set_current_program)
     server.tool()(mcp_tools.goto)
+    server.tool()(mcp_tools.get_gui_context)
 
 
 register_common_tools(mcp)

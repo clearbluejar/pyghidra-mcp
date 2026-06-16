@@ -133,6 +133,7 @@ async def test_rename_variable_tool(variable_server_params, variable_test_binary
                     "new_name": "item_count",
                 },
             )
+            print(rename_result.content[0].text)
             rename_payload = json.loads(rename_result.content[0].text)
             assert rename_payload["function_name"] == function_name
             assert rename_payload["variable_kind"] == "parameter"
