@@ -9,9 +9,6 @@ These tests exercise the gate against a real PersistentClient (no Ghidra runtime
 needed), reopening the client between steps to prove the marker is durable.
 """
 
-import chromadb
-from chromadb.config import Settings
-
 from pyghidra_mcp.indexing_mixin import COLLECTION_COMPLETE_KEY, IndexingMixin
 
 

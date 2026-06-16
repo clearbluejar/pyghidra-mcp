@@ -117,15 +117,14 @@ class GhidraTools:
     def _lookup_functions(
         self,
         name_or_address: str,
-        *,
-        exact: bool = True,
         partial: bool = False,
         include_externals: bool = True,
     ) -> list["Function"]:
         """
         Resolve functions by name or address.
         Returns a flat list of unique Function objects.
-        Search modes (exact, partial) are optional and only applied if enabled.
+        Exact matches are always returned first; partial (substring) matches
+        are appended only when ``partial`` is enabled.
         """
         af = self.program.getAddressFactory()
         fm = self.program.getFunctionManager()
@@ -147,12 +146,11 @@ class GhidraTools:
         seen: set = set()
         matches: list[Function] = []
 
-        if exact:
-            for f in functions:
-                key = f.getEntryPoint()
-                if key not in seen and name_lc == f.getSymbol().getName(True).lower():
-                    seen.add(key)
-                    matches.append(f)
+        for f in functions:
+            key = f.getEntryPoint()
+            if key not in seen and name_lc == f.getSymbol().getName(True).lower():
+                seen.add(key)
+                matches.append(f)
 
         if partial:
             for f in functions:
@@ -174,7 +172,7 @@ class GhidraTools:
         Raises if ambiguous or not found.
         """
         matches = self._lookup_functions(
-            name_or_address, exact=True, partial=False, include_externals=include_externals
+            name_or_address, partial=False, include_externals=include_externals
         )
 
         if len(matches) == 1:
@@ -202,21 +200,21 @@ class GhidraTools:
         Never raises; returns empty list if none.
         """
         return self._lookup_functions(
-            name_or_address, exact=True, partial=True, include_externals=include_externals
+            name_or_address, partial=True, include_externals=include_externals
         )
 
     def _lookup_symbols(
         self,
         name_or_address: str,
         *,
-        exact: bool = True,
         partial: bool = False,
         dynamic: bool = False,
     ) -> list["Symbol"]:
         """
         Resolve symbols by name or address.
         Returns a single flat list of unique Symbol objects.
-        Search modes (exact, partial, dynamic) are optional and only applied if enabled.
+        Exact matches are always included; partial (substring) and dynamic
+        matches are added only when their respective flags are enabled.
         """
         st = self.program.getSymbolTable()
         af = self.program.getAddressFactory()
@@ -237,9 +235,8 @@ class GhidraTools:
         # Base symbol set (externals only once)
         base_symbols = self.get_all_symbols(include_externals=True)
 
-        # Exact match
-        if exact:
-            matches.update(s for s in base_symbols if name_lc == s.getName(True).lower())
+        # Exact match (always included)
+        matches.update(s for s in base_symbols if name_lc == s.getName(True).lower())
 
         # Partial match
         if partial:
@@ -258,7 +255,7 @@ class GhidraTools:
         Return all symbols that match name_or_address (exact or partial).
         Never raises; returns empty list if none.
         """
-        return self._lookup_symbols(name_or_address, exact=True, partial=True)
+        return self._lookup_symbols(name_or_address, partial=True)
 
     @handle_exceptions
     def find_symbol(self, name_or_address: str) -> "Symbol":
@@ -266,7 +263,7 @@ class GhidraTools:
         Resolve a single symbol by name or address (exact match only).
         Raises if ambiguous or not found.
         """
-        matches = self._lookup_symbols(name_or_address, exact=True, partial=False)
+        matches = self._lookup_symbols(name_or_address, partial=False)
 
         if len(matches) == 1:
             return matches[0]
@@ -881,9 +878,7 @@ class GhidraTools:
         return DisassembleResult(address=str(addr), count=len(rows), listing=listing_text)
 
     @staticmethod
-    def _format_disassembly(
-        rows: list[tuple[str, str, str, str]], include_bytes: bool
-    ) -> str:
+    def _format_disassembly(rows: list[tuple[str, str, str, str]], include_bytes: bool) -> str:
         """Render disassembly rows as a compact, single-space-separated text listing.
 
         Columns are ordered address [bytes] mnemonic operands. No alignment padding is

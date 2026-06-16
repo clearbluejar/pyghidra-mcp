@@ -133,7 +133,9 @@ class IndexingMixin:
         logger.info("Initializing Chroma code collection for %s", program_info.name)
         existing = self._open_complete_collection(program_info.name)
         if existing is not None:
-            logger.info("Collection '%s' already complete; skipping code ingest.", program_info.name)
+            logger.info(
+                "Collection '%s' already complete; skipping code ingest.", program_info.name
+            )
             program_info.code_collection = existing
             return
 
