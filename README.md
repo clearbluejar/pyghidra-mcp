@@ -205,6 +205,7 @@ flowchart TD
       - [Docker](#docker)
     - [Streamable HTTP](#streamable-http)
       - [Python](#python-1)
+      - [CORS](#cors)
       - [Docker](#docker-1)
     - [Server-sent events (SSE)](#server-sent-events-sse)
       - [Python](#python-2)
@@ -569,6 +570,9 @@ Options:
                                       use streamable-http instead. [default: stdio]
   -p, --port INTEGER                  Port for HTTP-based transports. [default: 8000]
   -o, --host TEXT                     Host for HTTP-based transports. [default: 127.0.0.1]
+  --cors-origin TEXT                  Allowed CORS origin for HTTP transports.
+                                      Repeat for multiple origins. Use * to
+                                      allow all. [env: MCP_CORS_ORIGINS]
   --project-path PATH                 Directory for a pyghidra-mcp project or an
                                       existing Ghidra .gpr file. [default: pyghidra_mcp_projects]
   --project-name TEXT                 Ghidra project name. Ignored for .gpr paths.
@@ -675,6 +679,35 @@ pyghidra-mcp -t streamable-http
 ```
 
 By default, the Python package will run in `stdio` mode, so you will have to include `-t streamable-http`.
+
+#### CORS
+
+When a browser-based client connects to the server from a different origin, CORS headers must be present. Use `--cors-origin` (repeatable) to specify allowed origins, or `*` to allow all:
+
+```bash
+# Allow all origins
+pyghidra-mcp -t streamable-http --cors-origin "*"
+
+# Allow specific origins
+pyghidra-mcp -t streamable-http \
+  --cors-origin "http://localhost:3000" \
+  --cors-origin "http://192.168.1.100:8080"
+```
+
+The same option is available as an environment variable, which avoids shell quoting issues on Windows:
+
+```powershell
+# PowerShell
+$env:MCP_CORS_ORIGINS = "*"
+pyghidra-mcp -t streamable-http
+```
+
+```bash
+# bash / Linux / macOS
+MCP_CORS_ORIGINS="*" pyghidra-mcp -t streamable-http
+```
+
+CORS is disabled by default. `--cors-origin` has no effect on `stdio` transport.
 
 GUI mode uses this transport:
 
