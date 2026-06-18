@@ -217,3 +217,5 @@ notes-*.txt
 
 # macOS
 .DS_Store
+
+/compose.yml
