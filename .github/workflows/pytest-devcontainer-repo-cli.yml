@@ -65,7 +65,7 @@ jobs:
           # Install uv first
           pip install --upgrade pip
           curl -LsSf https://astral.sh/uv/install.sh | sh
-          export PATH="/root/.cargo/bin:$PATH"
+          export PATH="$HOME/.local/bin:/root/.cargo/bin:$PATH"
 
           # Change to CLI directory
           cd cli

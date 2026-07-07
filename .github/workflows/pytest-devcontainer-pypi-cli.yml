@@ -47,7 +47,7 @@ jobs:
           ls /usr/local/include/
           pip install --upgrade pip
           curl -LsSf https://astral.sh/uv/install.sh | sh
-          export PATH="/root/.cargo/bin:$PATH"
+          export PATH="$HOME/.local/bin:/root/.cargo/bin:$PATH"
           
           # Create and activate an isolated virtual environment
           uv venv
