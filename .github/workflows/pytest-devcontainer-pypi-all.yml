@@ -16,6 +16,10 @@ jobs:
       matrix:
         image: [
           "latest",
+          "12.1.2ghidra3.13python-bookworm",
+          "12.1.2ghidra3.13python-trixie",
+          "12.1.2ghidra3.13python-bookworm-slim",
+          "12.1.2ghidra3.13python-trixie-slim",
           "11.3.2ghidra3.12python-bookworm",
           "11.4.1ghidra3.11python-bookworm",
           "11.3ghidra3.10python-bookworm",

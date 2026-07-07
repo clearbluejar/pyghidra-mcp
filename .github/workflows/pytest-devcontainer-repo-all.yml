@@ -32,6 +32,10 @@ jobs:
       matrix:
         image: [
           "latest",
+          "12.1.2ghidra3.13python-bookworm",
+          "12.1.2ghidra3.13python-trixie",
+          "12.1.2ghidra3.13python-bookworm-slim",
+          "12.1.2ghidra3.13python-trixie-slim",
           "12.0ghidra3.13python-bookworm",
           "11.3.2ghidra3.12python-bookworm",
           "11.4.1ghidra3.11python-bookworm",
@@ -110,7 +114,7 @@ jobs:
         retention-days: 7
 
   test-linux-gui:
-    name: test-linux-gui (12.0ghidra3.13python-bookworm)
+    name: test-linux-gui (12.1.2ghidra3.13python-trixie)
     runs-on: ubuntu-latest
 
     steps:
@@ -121,7 +125,7 @@ jobs:
 
     - name: Run GUI integration smoke tests on devcontainer
       env:
-        DC_IMAGE_TAG: "12.0ghidra3.13python-bookworm"
+        DC_IMAGE_TAG: "12.1.2ghidra3.13python-trixie"
       uses: devcontainers/ci@v0.3
       with:
         imageName: ghcr.io/clearbluejar/ghidra-python
