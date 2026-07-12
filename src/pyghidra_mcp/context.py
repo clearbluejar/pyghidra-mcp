@@ -524,10 +524,18 @@ class PyGhidraContext(IndexingMixin):
 
     def _init_program_info(self, program):
         from ghidra.program.flatapi import FlatProgramAPI
+        from ghidra.program.util import GhidraProgramUtilities
 
         assert program is not None
 
         metadata = self.get_metadata(program)
+        try:
+            analysis_complete = not bool(
+                GhidraProgramUtilities.shouldAskToAnalyze(program)
+            )
+        except Exception:
+            logger.debug("Could not restore persisted analysis state", exc_info=True)
+            analysis_complete = False
 
         program_info = ProgramInfo(
             name=program.name,
@@ -535,7 +543,7 @@ class PyGhidraContext(IndexingMixin):
             flat_api=FlatProgramAPI(program),
             decompiler_pool=self._create_decompiler_pool(program),
             metadata=metadata,
-            ghidra_analysis_complete=False,
+            ghidra_analysis_complete=analysis_complete,
             file_path=metadata["Executable Location"],
             load_time=time.time(),
             code_collection=None,

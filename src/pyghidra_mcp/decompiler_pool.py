@@ -21,22 +21,16 @@ class DecompilerPool:
         self._created: list[DecompInterface] = []
         self._created_lock = threading.Lock()
 
-    def _create(self) -> "DecompInterface":
-        decompiler = self._factory()
-        with self._created_lock:
-            self._created.append(decompiler)
-        return decompiler
-
     def _ensure_available(self) -> "DecompInterface":
         try:
             return self._queue.get_nowait()
         except queue.Empty:
             with self._created_lock:
                 if len(self._created) < self._size:
-                    pass
-                else:
-                    return self._queue.get()
-            return self._create()
+                    decompiler = self._factory()
+                    self._created.append(decompiler)
+                    return decompiler
+            return self._queue.get()
 
     @contextmanager
     def acquire(self):
