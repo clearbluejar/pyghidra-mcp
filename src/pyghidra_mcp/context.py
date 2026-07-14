@@ -530,9 +530,8 @@ class PyGhidraContext(IndexingMixin):
 
         metadata = self.get_metadata(program)
         try:
-            analysis_complete = not bool(
-                GhidraProgramUtilities.shouldAskToAnalyze(program)
-            )
+            # "Don't ask" is not equivalent to analyzed; trust the persisted flag.
+            analysis_complete = bool(GhidraProgramUtilities.isAnalyzed(program))
         except Exception:
             logger.debug("Could not restore persisted analysis state", exc_info=True)
             analysis_complete = False
