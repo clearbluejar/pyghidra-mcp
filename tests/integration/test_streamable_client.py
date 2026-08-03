@@ -59,7 +59,7 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args, streamab
             for _ in range(timeout):
                 try:
                     async with session.get(f"{streamable_base_url}/mcp") as response:
-                        if response.status == 406:
+                        if response.status in {400, 406}:
                             return
                 except aiohttp.ClientConnectorError:
                     pass

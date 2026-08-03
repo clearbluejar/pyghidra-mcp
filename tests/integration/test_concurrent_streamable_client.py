@@ -45,7 +45,7 @@ async def wait_for_server(base_url: str, timeout=120):
         for _ in range(timeout):
             try:
                 async with session.get(f"{base_url}/mcp") as response:
-                    if response.status == 406:
+                    if response.status in {400, 406}:
                         return
             except aiohttp.ClientConnectorError:
                 pass
