@@ -60,7 +60,7 @@ async def wait_for_collections(base_url: str, test_binary, timeout: int = 120) -
     """
     deadline = time.time() + timeout
 
-    async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+    async with streamable_http_client(f"{base_url}/mcp") as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
@@ -145,7 +145,7 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args, streamab
 
 
 async def invoke_tool_concurrently(base_url: str, server_binary_path):
-    async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+    async with streamable_http_client(f"{base_url}/mcp") as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))
@@ -191,7 +191,7 @@ async def invoke_tool_concurrently(base_url: str, server_binary_path):
 
 
 async def invoke_mutation_tools(base_url: str, server_binary_path):
-    async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+    async with streamable_http_client(f"{base_url}/mcp") as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))

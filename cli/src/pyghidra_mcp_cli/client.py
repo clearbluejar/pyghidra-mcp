@@ -88,7 +88,8 @@ class PyGhidraMcpClient:
 
         transport_gen = streamable_http_client(url)
         try:
-            read, write, _ = await asyncio.wait_for(transport_gen.__aenter__(), timeout=5.0)
+            streams = await asyncio.wait_for(transport_gen.__aenter__(), timeout=5.0)
+            read, write = streams[:2]
         except asyncio.TimeoutError:
             try:
                 await transport_gen.__aexit__(None, None, None)

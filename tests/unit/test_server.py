@@ -1,9 +1,101 @@
+import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import Mock
 
 import click.testing
+import pytest
+from mcp import ClientSession
+from mcp.client._memory import InMemoryTransport
+from mcp.server.mcpserver import MCPServer
 
 import pyghidra_mcp.server as server
+
+
+def test_server_uses_mcp_v2_api():
+    assert isinstance(server.mcp, MCPServer)
+
+
+@pytest.mark.asyncio
+async def test_common_tools_register_with_mcp_v2():
+    tools = await server.mcp.list_tools()
+    assert {tool.name for tool in tools} == {
+        "decompile_function",
+        "delete_project_binary",
+        "disassemble",
+        "gen_callgraph",
+        "import_binary",
+        "list_exports",
+        "list_imports",
+        "list_project_binaries",
+        "list_project_binary_metadata",
+        "list_xrefs",
+        "read_bytes",
+        "rename_function",
+        "rename_variable",
+        "save",
+        "search_code",
+        "search_strings",
+        "search_symbols_by_name",
+        "set_comment",
+        "set_function_prototype",
+        "set_variable_type",
+    }
+
+
+@pytest.mark.asyncio
+async def test_common_tools_list_over_mcp_v2_protocol():
+    mcp = MCPServer("pyghidra-mcp-test")
+    server.register_common_tools(mcp)
+
+    async with InMemoryTransport(mcp) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+
+    assert any(tool.name == "decompile_function" for tool in tools.tools)
+    assert any(tool.name == "list_project_binaries" for tool in tools.tools)
+
+
+@pytest.mark.asyncio
+async def test_common_tool_call_over_mcp_v2_protocol():
+    pyghidra_context = Mock()
+    pyghidra_context.list_project_binary_infos.return_value = []
+
+    @asynccontextmanager
+    async def lifespan(_mcp):
+        yield pyghidra_context
+
+    mcp = MCPServer("pyghidra-mcp-test", lifespan=lifespan)
+    server.register_common_tools(mcp)
+
+    async with InMemoryTransport(mcp) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("list_project_binaries")
+
+    assert result.is_error is False
+    assert json.loads(result.content[0].text) == {"programs": []}
+    pyghidra_context.list_project_binary_infos.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("transport", "expected_kwargs"),
+    [
+        ("stdio", {"transport": "stdio"}),
+        ("http", {"transport": "streamable-http", "host": "0.0.0.0", "port": 9000}),
+        (
+            "streamable-http",
+            {"transport": "streamable-http", "host": "0.0.0.0", "port": 9000},
+        ),
+    ],
+)
+def test_run_mcp_server_dispatches_supported_transports(transport, expected_kwargs):
+    mcp = Mock()
+
+    server.run_mcp_server(mcp, transport, host="0.0.0.0", port=9000)
+
+    mcp.run.assert_called_once_with(**expected_kwargs)
 
 
 def _common_kwargs():

@@ -86,7 +86,6 @@ async def test_streamable_client_smoke(streamable_server, main_func_name):
     async with streamable_http_client(f"{streamable_base_url}/mcp") as (
         read_stream,
         write_stream,
-        _,
     ):
         async with ClientSession(read_stream, write_stream) as session:
             # Initializing session...

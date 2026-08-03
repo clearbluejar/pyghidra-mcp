@@ -175,7 +175,7 @@ async def test_gui_background_indexing_eventually_enables_string_search(
     try:
         await _wait_for_http_server(base_url, proc, gui_env)
 
-        async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+        async with streamable_http_client(f"{base_url}/mcp") as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
