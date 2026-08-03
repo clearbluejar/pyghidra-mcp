@@ -74,8 +74,20 @@ class FakeMcpResult:
     def __init__(self, payload):
         self.payload = payload
 
-    def model_dump(self):
+    def model_dump(self, *, by_alias=False):
+        assert by_alias is True
         return {"structuredContent": self.payload}
+
+
+def test_client_extracts_mcp_v2_structured_content():
+    """Test extraction from an MCP 2 result using Python field names."""
+    from mcp.types import CallToolResult
+
+    from pyghidra_mcp_cli.client import PyGhidraMcpClient
+
+    result = CallToolResult(content=[], structured_content={"programs": []})
+
+    assert PyGhidraMcpClient()._extract_result(result) == {"programs": []}
 
 
 @pytest.mark.asyncio

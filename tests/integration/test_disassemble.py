@@ -8,6 +8,7 @@ compact text listing (optionally with raw instruction bytes).
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
+from mcp.shared.exceptions import MCPError
 
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import DisassembleResult
@@ -78,10 +79,8 @@ async def test_disassemble_invalid_count(server_params, base_address):
 
             binary_name = PyGhidraContext._gen_unique_bin_name(server_params.args[-1])
 
-            response = await session.call_tool(
-                "disassemble",
-                {"binary_name": binary_name, "address": base_address, "count": 999},
-            )
-
-            assert response.isError
-            assert "200" in response.content[0].text
+            with pytest.raises(MCPError, match="count must be <= 200"):
+                await session.call_tool(
+                    "disassemble",
+                    {"binary_name": binary_name, "address": base_address, "count": 999},
+                )

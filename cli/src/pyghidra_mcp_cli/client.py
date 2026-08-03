@@ -148,7 +148,7 @@ class PyGhidraMcpClient:
 
     def _extract_result(self, result) -> dict[str, Any]:
         """Extract data from MCP result, handling structuredContent and errors."""
-        result_dict = result.model_dump()
+        result_dict = result.model_dump(by_alias=True)
 
         if result_dict.get("isError"):
             content = result_dict.get("content", [])
