@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fclearbluejar%2Fpyghidra-mcp.svg)](https://mcptoplist.com/server/glama%2Fclearbluejar%2Fpyghidra-mcp)
+
 <p align="center">
   <img src="https://github.com/user-attachments/assets/31c1831a-5be1-4698-8171-5ebfc9d6797c" width=60% >
 </p>
