@@ -7,7 +7,7 @@ from typing import Any
 import chromadb
 from chromadb.config import Settings
 
-from pyghidra_mcp.tools import GhidraTools
+from pyghidra_mcp.tools import DEFAULT_DECOMPILE_TIMEOUT_SECONDS, GhidraTools
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,9 @@ class IndexingMixin:
             try:
                 if i % 10 == 0:
                     logger.debug("Decompiling %s/%s", i, len(functions))
-                decompiled = tools.decompile_function(func)
+                decompiled = tools.decompile_function(
+                    func, timeout=DEFAULT_DECOMPILE_TIMEOUT_SECONDS
+                )
                 decompiles.append(decompiled.code)
                 ids.append(decompiled.name)
                 metadatas.append(

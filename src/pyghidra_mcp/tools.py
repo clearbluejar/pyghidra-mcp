@@ -4,7 +4,9 @@ Comprehensive tool implementations for pyghidra-mcp.
 
 import functools
 import logging
+import math
 import re
+import time
 import typing
 from contextlib import contextmanager
 
@@ -39,6 +41,7 @@ if typing.TYPE_CHECKING:
     from .context import ProgramInfo
 
 logger = logging.getLogger(__name__)
+DEFAULT_DECOMPILE_TIMEOUT_SECONDS = 30
 
 
 @contextmanager
@@ -278,20 +281,30 @@ class GhidraTools:
 
     @handle_exceptions
     def decompile_function_by_name_or_addr(
-        self, name_or_address: str, timeout: int = 0
+        self, name_or_address: str, timeout: int = DEFAULT_DECOMPILE_TIMEOUT_SECONDS
     ) -> DecompiledFunction:
         """Finds and decompiles a function in a specified binary and returns its pseudo-C code."""
 
         func = self.find_function(name_or_address)
         return self.decompile_function(func, timeout=timeout)
 
-    def decompile_function(self, func: "Function", timeout: int = 0) -> DecompiledFunction:
+    def decompile_function(
+        self, func: "Function", timeout: int = DEFAULT_DECOMPILE_TIMEOUT_SECONDS
+    ) -> DecompiledFunction:
         """Decompiles a function in a specified binary and returns its pseudo-C code."""
         from ghidra.util.task import ConsoleTaskMonitor
 
+        if timeout <= 0:
+            raise ValueError("Decompiler timeout must be greater than zero")
+
         monitor = ConsoleTaskMonitor()
-        with self.decompiler_pool.acquire() as decompiler:
-            result: DecompileResults = decompiler.decompileFunction(func, timeout, monitor)
+        deadline = time.monotonic() + timeout
+        with self.decompiler_pool.acquire(timeout=timeout) as decompiler:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Timed out waiting for a decompiler after {timeout} seconds")
+            ghidra_timeout = max(1, math.ceil(remaining))
+            result: DecompileResults = decompiler.decompileFunction(func, ghidra_timeout, monitor)
         if "" == result.getErrorMessage():
             decompiled = result.getDecompiledFunction()
             if decompiled is None:

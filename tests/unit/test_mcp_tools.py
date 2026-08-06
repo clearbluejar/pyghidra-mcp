@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from unittest.mock import Mock
 
 import pytest
@@ -208,6 +209,43 @@ async def test_decompile_function_offloads_with_timeout(monkeypatch):
 
     fake_tools.decompile_function_by_name_or_addr.assert_called_once_with("entry", timeout=17)
     assert response == [decompiled]
+
+
+@pytest.mark.asyncio
+async def test_decompile_function_returns_timeout_when_worker_stalls(monkeypatch):
+    pyghidra_context = Mock()
+    pyghidra_context.get_program_info.return_value = Mock()
+
+    ctx = Mock()
+    ctx.request_context.lifespan_context = pyghidra_context
+
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    fake_tools = Mock()
+
+    def stalled_decompile(*_args, **_kwargs):
+        worker_started.set()
+        assert release_worker.wait(timeout=1)
+
+    fake_tools.decompile_function_by_name_or_addr.side_effect = stalled_decompile
+    monkeypatch.setattr("pyghidra_mcp.mcp_tools.GhidraTools", lambda _program_info: fake_tools)
+    monkeypatch.setattr("pyghidra_mcp.mcp_tools.DECOMPILE_TIMEOUT_GRACE_SECONDS", -0.99)
+
+    started = asyncio.get_running_loop().time()
+    response = await decompile_function(
+        binary_name="sample",
+        name_or_address="entry",
+        timeout_sec=1,
+        ctx=ctx,
+    )
+
+    assert asyncio.get_running_loop().time() - started < 0.5
+    assert worker_started.is_set()
+    assert len(response) == 1
+    assert response[0].name == "entry"
+    assert response[0].code == ""
+    assert response[0].error == "Decompilation timed out after 1 seconds"
+    release_worker.set()
 
 
 @pytest.mark.asyncio
