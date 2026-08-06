@@ -153,7 +153,7 @@ async def decompile_function(
                 timeout=timeout_sec + DECOMPILE_TIMEOUT_GRACE_SECONDS,
             )
             results.append(result)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             results.append(
                 DecompiledFunction(
                     name=target,
