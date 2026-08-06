@@ -44,6 +44,7 @@ from pyghidra_mcp.models import (
 from pyghidra_mcp.tools import GhidraTools
 
 logger = logging.getLogger(__name__)
+DECOMPILE_TIMEOUT_GRACE_SECONDS = 1.0
 
 
 def _require_gui_context(ctx: Context):
@@ -126,6 +127,9 @@ async def decompile_function(
     Rich response flags attach callees, strings, and/or xrefs to each result.
     `timeout_sec` applies per target.
     """
+    if timeout_sec <= 0:
+        raise ValueError("timeout_sec must be greater than zero")
+
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
@@ -144,8 +148,19 @@ async def decompile_function(
 
     for target in targets:
         try:
-            result = await asyncio.to_thread(_decompile_target, target)
+            result = await asyncio.wait_for(
+                asyncio.to_thread(_decompile_target, target),
+                timeout=timeout_sec + DECOMPILE_TIMEOUT_GRACE_SECONDS,
+            )
             results.append(result)
+        except TimeoutError:
+            results.append(
+                DecompiledFunction(
+                    name=target,
+                    code="",
+                    error=f"Decompilation timed out after {timeout_sec:g} seconds",
+                )
+            )
         except Exception as e:
             results.append(DecompiledFunction(name=target, code="", error=str(e)))
     return results
@@ -530,9 +545,10 @@ def import_binary(binary_path: str, ctx: Context) -> ImportRequestResult:
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     return pyghidra_context.import_binary_backgrounded(binary_path)
 
+
 @mcp_error_handler
 def save(ctx: Context) -> SaveRequestResult:
-    '''Save all programs.'''
+    """Save all programs."""
     pyghidra_context: MCPContext = ctx.request_context.lifespan_context
     pyghidra_context.save()
     return SaveRequestResult()
