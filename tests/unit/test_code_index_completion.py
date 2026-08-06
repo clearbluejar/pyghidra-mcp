@@ -9,7 +9,12 @@ These tests exercise the gate against a real PersistentClient (no Ghidra runtime
 needed), reopening the client between steps to prove the marker is durable.
 """
 
+import sys
+import types
+from unittest.mock import Mock
+
 from pyghidra_mcp.indexing_mixin import COLLECTION_COMPLETE_KEY, IndexingMixin
+from pyghidra_mcp.tools import DEFAULT_DECOMPILE_TIMEOUT_SECONDS
 
 
 class _Probe(IndexingMixin):
@@ -71,3 +76,43 @@ def test_collection_without_marker_is_treated_as_incomplete(tmp_path):
 
     probe2 = _reopen(tmp_path)
     assert probe2._open_complete_collection("bin_legacy") is None
+
+
+def test_code_indexing_uses_a_finite_decompile_timeout(monkeypatch):
+    ghidra_module = types.ModuleType("ghidra")
+    program_module = types.ModuleType("ghidra.program")
+    model_module = types.ModuleType("ghidra.program.model")
+    listing_module = types.ModuleType("ghidra.program.model.listing")
+    listing_module.Function = object
+    monkeypatch.setitem(sys.modules, "ghidra", ghidra_module)
+    monkeypatch.setitem(sys.modules, "ghidra.program", program_module)
+    monkeypatch.setitem(sys.modules, "ghidra.program.model", model_module)
+    monkeypatch.setitem(sys.modules, "ghidra.program.model.listing", listing_module)
+
+    function = Mock()
+    function.getEntryPoint.return_value = "1000"
+    decompiled = Mock(code="int entry(void) { return 0; }")
+    decompiled.name = "entry-1000"
+    tools = Mock()
+    tools.get_all_functions.return_value = [function]
+    tools.decompile_function.return_value = decompiled
+    monkeypatch.setattr("pyghidra_mcp.indexing_mixin.GhidraTools", Mock(return_value=tools))
+
+    probe = IndexingMixin.__new__(IndexingMixin)
+    probe._open_complete_collection = Mock(return_value=None)
+    probe._mark_collection_complete = Mock()
+    collection = Mock()
+    probe.chroma_client = Mock()
+    probe.chroma_client.create_collection.return_value = collection
+    program_info = Mock(name="sample", code_collection=None)
+
+    probe._init_chroma_code_collection_for_program(program_info)
+
+    tools.decompile_function.assert_called_once_with(
+        function, timeout=DEFAULT_DECOMPILE_TIMEOUT_SECONDS
+    )
+    collection.add.assert_called_once_with(
+        documents=["int entry(void) { return 0; }"],
+        metadatas=[{"function_name": "entry-1000", "entry_point": "1000"}],
+        ids=["entry-1000"],
+    )

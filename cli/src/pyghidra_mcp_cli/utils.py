@@ -109,7 +109,7 @@ def handle_command_error(
 
     # Check for connection-related errors first
     if (
-        isinstance(error, (ConnectionRefusedError, ConnectionError, OSError))
+        isinstance(error, ConnectionRefusedError | ConnectionError | OSError)
         or "ConnectError" in error_msg
         or "connection refused" in error_msg.lower()
         or "all connection attempts failed" in error_msg.lower()

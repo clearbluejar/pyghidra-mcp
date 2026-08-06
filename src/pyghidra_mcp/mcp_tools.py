@@ -44,6 +44,7 @@ from pyghidra_mcp.models import (
 from pyghidra_mcp.tools import GhidraTools
 
 logger = logging.getLogger(__name__)
+DECOMPILE_TIMEOUT_GRACE_SECONDS = 1.0
 
 
 def _get_pyghidra_context(ctx: Context) -> MCPContext:
@@ -130,6 +131,9 @@ async def decompile_function(
     Rich response flags attach callees, strings, and/or xrefs to each result.
     `timeout_sec` applies per target.
     """
+    if timeout_sec <= 0:
+        raise ValueError("timeout_sec must be greater than zero")
+
     pyghidra_context = _get_pyghidra_context(ctx)
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
@@ -148,8 +152,19 @@ async def decompile_function(
 
     for target in targets:
         try:
-            result = await asyncio.to_thread(_decompile_target, target)
+            result = await asyncio.wait_for(
+                asyncio.to_thread(_decompile_target, target),
+                timeout=timeout_sec + DECOMPILE_TIMEOUT_GRACE_SECONDS,
+            )
             results.append(result)
+        except asyncio.TimeoutError:
+            results.append(
+                DecompiledFunction(
+                    name=target,
+                    code="",
+                    error=f"Decompilation timed out after {timeout_sec:g} seconds",
+                )
+            )
         except Exception as e:
             results.append(DecompiledFunction(name=target, code="", error=str(e)))
     return results
