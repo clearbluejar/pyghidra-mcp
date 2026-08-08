@@ -490,15 +490,10 @@ def disassemble(
     count: int = 20,
     include_bytes: bool = False,
 ) -> DisassembleResult:
-    """Disassemble instructions at an address. Returns up to `count` instructions (max 200).
+    """Disassemble raw instructions at any address, like objdump.
 
-    Returns a compact, whitespace-aligned text listing in `listing` (one
-    instruction per line: address, mnemonic, operands).
-    Set `include_bytes=True` to also include the raw instruction bytes (hex) as a
-    column.
-
-    Useful for inspecting raw assembly at any address without needing to know
-    the function name or entry point.
+    `listing` is one instruction per line: address, mnemonic, operands, plus a hex
+    bytes column if `include_bytes=True`. Returns up to `count` instructions (max 200).
     """
     if count <= 0:
         raise ValueError("count must be > 0")
