@@ -1,5 +1,6 @@
 import concurrent.futures
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -97,6 +98,19 @@ class IndexingMixin:
         for program_info in analyzed_programs:
             self.schedule_indexing(program_info.name)
 
+    def _normalize_collection_name(self, name: str) -> str:
+        """Return the actual name of a Chroma collection for a given binary.
+        We must normalize a few parts of the name to avoid restrictions on
+        collection names (only letters, numbers, dashes, dots, underscores)
+        """
+        # No Consecutive dots
+        name = re.sub(r"\.{2,}", ".", name)
+
+        # Replace all other characters
+        name = re.sub(r"[^\w\s.-]", "_", name)
+
+        return name
+
     def _open_complete_collection(self, name: str) -> Any | None:
         """Return an existing, fully-indexed collection, or None.
 
@@ -106,6 +120,7 @@ class IndexingMixin:
         collection on disk. Such a collection (and any legacy one lacking the
         marker) is deleted here so the caller rebuilds it from scratch.
         """
+        name = self._normalize_collection_name(name)
         try:
             collection = self.chroma_client.get_collection(name=name)
         except Exception:
@@ -131,7 +146,9 @@ class IndexingMixin:
         from ghidra.program.model.listing import Function
 
         logger.info("Initializing Chroma code collection for %s", program_info.name)
-        existing = self._open_complete_collection(program_info.name)
+        existing = self._open_complete_collection(
+            self._normalize_collection_name(program_info.name)
+        )
         if existing is not None:
             logger.info(
                 "Collection '%s' already complete; skipping code ingest.", program_info.name
@@ -170,7 +187,8 @@ class IndexingMixin:
         # and is rebuilt on the next run. The add failure is intentionally not
         # swallowed: a partial index must fail loudly so it is not marked done.
         collection = self.chroma_client.create_collection(
-            name=program_info.name, metadata={COLLECTION_COMPLETE_KEY: False}
+            name=self._normalize_collection_name(program_info.name),
+            metadata={COLLECTION_COMPLETE_KEY: False},
         )
         batch_size = 5000
         for i in range(0, len(decompiles), batch_size):
