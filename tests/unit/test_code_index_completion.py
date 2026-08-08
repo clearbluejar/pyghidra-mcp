@@ -105,6 +105,7 @@ def test_code_indexing_uses_a_finite_decompile_timeout(monkeypatch):
     probe.chroma_client = Mock()
     probe.chroma_client.create_collection.return_value = collection
     program_info = Mock(name="sample", code_collection=None)
+    program_info.name = "sample"
 
     probe._init_chroma_code_collection_for_program(program_info)
 
