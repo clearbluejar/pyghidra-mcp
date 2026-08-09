@@ -3,8 +3,6 @@ import threading
 from unittest.mock import Mock
 
 import pytest
-from mcp.shared.exceptions import MCPError
-from mcp.types import INVALID_PARAMS
 
 from pyghidra_mcp.gui_context import GuiPyGhidraContext
 from pyghidra_mcp.mcp_tools import (
@@ -21,16 +19,13 @@ from pyghidra_mcp.mcp_tools import (
 from pyghidra_mcp.models import ProgramInfo, SymbolInfo
 
 
-def test_mcp_error_handler_uses_v2_error_api():
+def test_mcp_error_handler_preserves_tool_execution_errors():
     @mcp_error_handler
     def invalid_tool_call():
         raise ValueError("invalid input")
 
-    with pytest.raises(MCPError) as exc_info:
+    with pytest.raises(RuntimeError, match="invalid input"):
         invalid_tool_call()
-
-    assert exc_info.value.code == INVALID_PARAMS
-    assert exc_info.value.message == "invalid input"
 
 
 def test_list_project_binaries_uses_project_wide_context_listing():

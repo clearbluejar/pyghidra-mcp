@@ -1,6 +1,6 @@
 """Unit tests for the pyghidra-mcp client."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -70,15 +70,6 @@ def test_client_has_gui_methods():
     assert callable(client.goto)
 
 
-class FakeMcpResult:
-    def __init__(self, payload):
-        self.payload = payload
-
-    def model_dump(self, *, by_alias=False):
-        assert by_alias is True
-        return {"structuredContent": self.payload}
-
-
 def test_client_extracts_mcp_v2_structured_content():
     """Test extraction from an MCP 2 result using Python field names."""
     from mcp.types import CallToolResult
@@ -90,6 +81,21 @@ def test_client_extracts_mcp_v2_structured_content():
     assert PyGhidraMcpClient()._extract_result(result) == {"programs": []}
 
 
+def test_client_extracts_mcp_v2_tool_errors():
+    """Test that MCP tool execution errors remain actionable CLI errors."""
+    from mcp.types import CallToolResult, TextContent
+
+    from pyghidra_mcp_cli.client import ClientError, PyGhidraMcpClient
+
+    result = CallToolResult(
+        content=[TextContent(type="text", text="count must be <= 200")],
+        is_error=True,
+    )
+
+    with pytest.raises(ClientError, match="count must be <= 200"):
+        PyGhidraMcpClient()._extract_result(result)
+
+
 @pytest.mark.asyncio
 async def test_gui_client_methods_call_expected_tools():
     """Test GUI client wrappers call the expected MCP tools."""
@@ -98,7 +104,9 @@ async def test_gui_client_methods_call_expected_tools():
     client = PyGhidraMcpClient()
     client._connected = True
     client._session = AsyncMock()
-    client._session.call_tool.return_value = FakeMcpResult({"ok": True})
+    mcp_result = Mock()
+    mcp_result.model_dump.return_value = {"structuredContent": {"ok": True}}
+    client._session.call_tool.return_value = mcp_result
 
     assert await client.list_open_programs() == {"ok": True}
     client._session.call_tool.assert_awaited_with("list_open_programs", {})
@@ -120,3 +128,5 @@ async def test_gui_client_methods_call_expected_tools():
         "goto",
         {"binary_name": "sample", "target": "entry", "target_type": "function"},
     )
+    assert mcp_result.model_dump.call_count == 4
+    mcp_result.model_dump.assert_called_with(by_alias=True)

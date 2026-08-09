@@ -10,8 +10,6 @@ import logging
 from typing import Literal, cast
 
 from mcp.server.mcpserver import Context
-from mcp.shared.exceptions import MCPError
-from mcp.types import INTERNAL_ERROR, INVALID_PARAMS
 
 from pyghidra_mcp.context_protocol import MCPContext
 from pyghidra_mcp.models import (
@@ -87,12 +85,13 @@ def mcp_error_handler(func):
     """
     action = _get_action_name(func.__name__)
 
-    def handle_error(e):
+    def handle_error(e: Exception) -> RuntimeError:
+        # MCPServer turns ordinary exceptions into CallToolResult(isError=True),
+        # which keeps actionable tool failures visible to clients and models.
+        # MCPError is intentionally reserved for JSON-RPC protocol failures.
         if isinstance(e, ValueError):
-            return MCPError(code=INVALID_PARAMS, message=str(e))
-        if isinstance(e, MCPError):
-            return e
-        return MCPError(code=INTERNAL_ERROR, message=f"Error {action}: {e!s}")
+            return RuntimeError(str(e))
+        return RuntimeError(f"Error {action}: {e!s}")
 
     @functools.wraps(func)
     async def async_wrapper(*args, **kwargs):
@@ -399,10 +398,7 @@ async def delete_project_binary(binary_name: str, ctx: Context) -> str:
     if pyghidra_context.delete_program(binary_name):
         return f"Successfully deleted binary: {binary_name}"
     else:
-        raise MCPError(
-            code=INVALID_PARAMS,
-            message=f"Binary '{binary_name}' not found or could not be deleted.",
-        )
+        raise ValueError(f"Binary '{binary_name}' not found or could not be deleted.")
 
 
 @mcp_error_handler

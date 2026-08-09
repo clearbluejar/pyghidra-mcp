@@ -59,6 +59,8 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args, streamab
             for _ in range(timeout):
                 try:
                     async with session.get(f"{streamable_base_url}/mcp") as response:
+                        # A bare GET proves the MCP route is listening: MCP 2 returns
+                        # 400 for missing request metadata, while MCP 1 returned 406.
                         if response.status in {400, 406}:
                             return
                 except aiohttp.ClientConnectorError:

@@ -18,7 +18,10 @@ def test_server_uses_mcp_v2_api():
 
 @pytest.mark.asyncio
 async def test_common_tools_register_with_mcp_v2():
-    tools = await server.mcp.list_tools()
+    mcp = MCPServer("pyghidra-mcp-test")
+    server.register_common_tools(mcp)
+
+    tools = await mcp.list_tools()
     assert {tool.name for tool in tools} == {
         "decompile_function",
         "delete_project_binary",
@@ -79,6 +82,23 @@ async def test_common_tool_call_over_mcp_v2_protocol():
     pyghidra_context.list_project_binary_infos.assert_called_once_with()
 
 
+@pytest.mark.asyncio
+async def test_tool_validation_failure_is_a_tool_result_error():
+    mcp = MCPServer("pyghidra-mcp-test")
+    server.register_common_tools(mcp)
+
+    async with InMemoryTransport(mcp) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(
+                "disassemble",
+                {"binary_name": "sample", "address": "1000", "count": 201},
+            )
+
+    assert result.is_error is True
+    assert "count must be <= 200" in result.content[0].text
+
+
 @pytest.mark.parametrize(
     ("transport", "expected_kwargs"),
     [
@@ -96,6 +116,24 @@ def test_run_mcp_server_dispatches_supported_transports(transport, expected_kwar
     server.run_mcp_server(mcp, transport, host="0.0.0.0", port=9000)
 
     mcp.run.assert_called_once_with(**expected_kwargs)
+
+
+def test_run_mcp_server_dispatches_sse_with_deprecation_warning():
+    mcp = Mock()
+
+    with pytest.warns(DeprecationWarning, match="SSE transport is deprecated"):
+        server.run_mcp_server(mcp, "sse", host="0.0.0.0", port=9000)
+
+    mcp.run.assert_called_once_with(transport="sse", host="0.0.0.0", port=9000)
+
+
+def test_run_mcp_server_rejects_invalid_transport():
+    mcp = Mock()
+
+    with pytest.raises(ValueError, match="Invalid transport: websocket"):
+        server.run_mcp_server(mcp, "websocket", host="0.0.0.0", port=9000)
+
+    mcp.run.assert_not_called()
 
 
 def _common_kwargs():

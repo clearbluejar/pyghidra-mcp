@@ -113,7 +113,7 @@ flowchart TD
     end
 
     subgraph Server["pyghidra-mcp server"]
-        FastMcp["FastMCP tool server"]
+        McpServer["MCPServer tool server"]
         Context["PyGhidra context"]
         Indexing["background analysis and Chroma indexing"]
 
@@ -141,11 +141,11 @@ flowchart TD
     Automation --> Sse
     Cli --> Http
 
-    Stdio --> FastMcp
-    Http --> FastMcp
-    Sse --> FastMcp
+    Stdio --> McpServer
+    Http --> McpServer
+    Sse --> McpServer
 
-    FastMcp --> Context
+    McpServer --> Context
     Context --> PyGhidra
     PyGhidra --> Jpype
     Jpype --> Project
@@ -153,7 +153,7 @@ flowchart TD
     Context --> Indexing
     Indexing --> Search
 
-    FastMcp --> Tools
+    McpServer --> Tools
     Tools --> Context
     GuiOnly -.-> CodeBrowser
     Context -.-> CodeBrowser
@@ -248,7 +248,7 @@ docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
 
 `pyghidra-mcp` keeps the MCP surface intentionally narrow so agent clients spend fewer tokens on tool discovery and argument selection.
 
-- **Short tool descriptions**: MCP tool docstrings are kept compact so FastMCP tool schemas stay small and cheap to send to models.
+- **Short tool descriptions**: MCP tool docstrings are kept compact so MCPServer tool schemas stay small and cheap to send to models.
 - **Context discipline**: tools return focused structured data instead of dumping whole-program context by default. Decompilation, symbol search, and cross-reference results are shaped to support iterative analysis rather than one large response.
 - **GUI tools only when relevant**: GUI-only controls such as `open_program_in_gui`, `list_open_programs`, `set_current_program`, and `goto` are only exposed when the server is started with `--gui`.
 - **CLI is optional**: if MCP is not your preferred interface, `pyghidra-mcp-cli` provides a direct command-line client over HTTP with grouped commands for common edit and analysis workflows.

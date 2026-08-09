@@ -6,7 +6,6 @@ import tempfile
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.shared.exceptions import MCPError
 
 
 def _callee_name(callee):
@@ -296,12 +295,14 @@ async def test_set_function_prototype_surfaces_parser_errors(
             await session.initialize()
             binary_name = await _resolve_binary_name(session)
             function_name = await _resolve_function_one_name(session, binary_name)
-            with pytest.raises(MCPError, match="Can't resolve datatype: size_t"):
-                await session.call_tool(
-                    "set_function_prototype",
-                    {
-                        "binary_name": binary_name,
-                        "function_name_or_address": function_name,
-                        "prototype": "long function_one(size_t count)",
-                    },
-                )
+            result = await session.call_tool(
+                "set_function_prototype",
+                {
+                    "binary_name": binary_name,
+                    "function_name_or_address": function_name,
+                    "prototype": "long function_one(size_t count)",
+                },
+            )
+
+            assert result.is_error is True
+            assert "Can't resolve datatype: size_t" in result.content[0].text

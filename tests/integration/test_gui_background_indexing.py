@@ -69,6 +69,8 @@ async def _wait_for_http_server(  # noqa: C901
                 )
             try:
                 async with session.get(f"{base_url}/mcp") as response:
+                    # A bare GET proves the MCP route is listening: MCP 2 returns
+                    # 400 for missing request metadata, while MCP 1 returned 406.
                     if response.status in {400, 406}:
                         return
             except aiohttp.ClientConnectorError:
