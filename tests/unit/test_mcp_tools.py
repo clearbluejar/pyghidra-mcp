@@ -9,6 +9,7 @@ from pyghidra_mcp.mcp_tools import (
     decompile_function,
     goto,
     list_project_binaries,
+    mcp_error_handler,
     rename_variable,
     search_symbols_by_name,
     set_comment,
@@ -16,6 +17,15 @@ from pyghidra_mcp.mcp_tools import (
     set_variable_type,
 )
 from pyghidra_mcp.models import ProgramInfo, SymbolInfo
+
+
+def test_mcp_error_handler_preserves_tool_execution_errors():
+    @mcp_error_handler
+    def invalid_tool_call():
+        raise ValueError("invalid input")
+
+    with pytest.raises(RuntimeError, match="invalid input"):
+        invalid_tool_call()
 
 
 def test_list_project_binaries_uses_project_wide_context_listing():

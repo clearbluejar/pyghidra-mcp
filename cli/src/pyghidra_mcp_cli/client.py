@@ -88,7 +88,8 @@ class PyGhidraMcpClient:
 
         transport_gen = streamable_http_client(url)
         try:
-            read, write, _ = await asyncio.wait_for(transport_gen.__aenter__(), timeout=5.0)
+            streams = await asyncio.wait_for(transport_gen.__aenter__(), timeout=5.0)
+            read, write = streams
         except asyncio.TimeoutError:
             try:
                 await transport_gen.__aexit__(None, None, None)
@@ -147,7 +148,7 @@ class PyGhidraMcpClient:
 
     def _extract_result(self, result) -> dict[str, Any]:
         """Extract data from MCP result, handling structuredContent and errors."""
-        result_dict = result.model_dump()
+        result_dict = result.model_dump(by_alias=True)
 
         if result_dict.get("isError"):
             content = result_dict.get("content", [])
