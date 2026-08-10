@@ -1,0 +1,13 @@
+/.devcontainer
+/.git
+/.github
+/.venv
+/dist
+/.dockerignore
+/.gitattributes
+/.gitignore
+/.pre-commit-config.yaml
+/.python-version
+/compose.yml
+/Dockerfile
+/LICENSE
