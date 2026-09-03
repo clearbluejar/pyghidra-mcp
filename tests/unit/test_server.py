@@ -1,9 +1,15 @@
+import concurrent.futures
+import signal
+import threading
+import time
 from pathlib import Path
 from unittest.mock import Mock
 
 import click.testing
+import pytest
 
 import pyghidra_mcp.server as server
+from pyghidra_mcp.indexing_mixin import IndexingMixin
 
 
 def _common_kwargs():
@@ -164,3 +170,58 @@ def test_gui_mode_allows_missing_project_for_auto_create(monkeypatch, tmp_path):
     assert launcher_state["gpr_path"] == tmp_path / "new_project.gpr"
     assert launcher_state["started"] is True
     server.init_gui_context.assert_called_once()
+
+
+class TestSigintShutdownHandler:
+    """Ctrl+C must reach Python (JPype hands SIGINT to the JVM otherwise)."""
+
+    def test_first_interrupt_raises_keyboard_interrupt(self):
+        handler = server._SigintShutdownHandler()
+
+        with pytest.raises(KeyboardInterrupt):
+            handler(signal.SIGINT, None)
+
+    def test_second_interrupt_force_exits_with_130(self, monkeypatch):
+        handler = server._SigintShutdownHandler()
+        exits = []
+        monkeypatch.setattr(server.os, "_exit", exits.append)
+
+        with pytest.raises(KeyboardInterrupt):
+            handler(signal.SIGINT, None)
+        handler(signal.SIGINT, None)
+
+        assert exits == [130]
+
+    def test_install_registers_handler_and_restores_python_ownership(self):
+        previous = signal.getsignal(signal.SIGINT)
+        try:
+            handler = server.install_sigint_shutdown_handler()
+            assert signal.getsignal(signal.SIGINT) is handler
+        finally:
+            signal.signal(signal.SIGINT, previous)
+
+
+class TestShutdownExecutor:
+    """close() must drop queued work but never abandon an in-flight Ghidra task."""
+
+    def test_cancels_queued_work_and_awaits_in_flight_work(self):
+        running = threading.Event()
+        finished = []
+
+        def task(index):
+            if index == 0:
+                running.set()
+                time.sleep(0.5)
+            finished.append(index)
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        futures = [executor.submit(task, index) for index in range(4)]
+        assert running.wait(5)
+
+        IndexingMixin.shutdown_executor(object.__new__(IndexingMixin), "test", executor)
+
+        assert finished == [0], "in-flight task was abandoned instead of awaited"
+        assert all(future.cancelled() for future in futures[1:]), "queued work was not cancelled"
+
+    def test_tolerates_a_missing_executor(self):
+        IndexingMixin.shutdown_executor(object.__new__(IndexingMixin), "test", None)

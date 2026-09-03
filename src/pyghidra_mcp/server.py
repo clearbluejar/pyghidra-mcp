@@ -2,6 +2,8 @@
 # ---------------------------------------------------------------------------------
 import json
 import logging
+import os
+import signal
 import sys
 import threading
 from collections.abc import AsyncIterator
@@ -27,6 +29,50 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+class _SigintShutdownHandler:
+    """Turn the first Ctrl+C into normal Python shutdown, then force-exit.
+
+    Writes with ``os.write`` rather than ``logger``: a signal handler can
+    interrupt a frame that already holds the logging lock, and logging from
+    there would deadlock the very shutdown it is announcing.
+    """
+
+    FIRST_INTERRUPT = (
+        b"\nReceived Ctrl+C; shutting down. Queued work is cancelled, then open "
+        b"programs are saved and the project is closed -- this can take a while "
+        b"on large binaries. Progress is logged below.\n"
+        b"Press Ctrl+C again to force exit and ABANDON UNSAVED CHANGES.\n"
+    )
+    SECOND_INTERRUPT = b"\nForced exit; unsaved program changes were abandoned.\n"
+
+    def __init__(self) -> None:
+        self._interrupt_count = 0
+
+    def __call__(self, _signum, _frame) -> None:
+        self._interrupt_count += 1
+        if self._interrupt_count == 1:
+            os.write(2, self.FIRST_INTERRUPT)
+            raise KeyboardInterrupt
+        os.write(2, self.SECOND_INTERRUPT)
+        os._exit(130)
+
+
+def install_sigint_shutdown_handler() -> _SigintShutdownHandler:
+    """Restore Python-owned Ctrl+C handling after JPype starts the JVM.
+
+    JPype starts the JVM with ``interrupt=not interactive()``, so on a normal
+    (non-REPL) run Java installs its own SIGINT handler and Ctrl+C never
+    reaches Python. Re-registering here -- after ``pyghidra.start()`` -- takes
+    the signal back so the save-and-close path in ``close()`` actually runs.
+
+    Must be called from the main thread; ``signal.signal`` rejects any other.
+    """
+    handler = _SigintShutdownHandler()
+    signal.signal(signal.SIGINT, handler)
+    logger.info("Ctrl+C handler installed; interrupts now trigger a clean save-and-close.")
+    return handler
 
 
 # Init Pyghidra
@@ -111,6 +157,7 @@ def init_pyghidra_context(  # noqa: C901
 
     # init pyghidra
     pyghidra.start(False)  # setting Verbose output
+    install_sigint_shutdown_handler()
 
     # init PyGhidraContext / import + analyze binaries
     logger.info("Server initializing...")
@@ -215,6 +262,75 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
         mcp.run(transport="sse")
     else:
         raise ValueError(f"Invalid transport: {transport}")
+
+
+def run_gui_server(
+    mcp: FastMCP,
+    *,
+    transport: str,
+    project_spec: ProjectSpec,
+    input_paths: list[Path],
+) -> None:
+    """Run the MCP server alongside the Ghidra GUI, releasing the context on exit."""
+    register_gui_tools(mcp)
+    ensure_macos_framework_python()
+    launcher = GuiPyGhidraMcpLauncher(project_spec.gpr_path)
+    launcher.start()
+    # Installed here, on the main thread, because launcher.start() is what boots
+    # the JVM in GUI mode and the server thread cannot register signal handlers.
+    install_sigint_shutdown_handler()
+    gui_server_error: list[BaseException] = []
+
+    def gui_server_thread() -> None:
+        try:
+            init_gui_context(mcp=mcp, project_spec=project_spec, input_paths=input_paths)
+            run_mcp_server(mcp, transport)
+        except BaseException as exc:
+            gui_server_error.append(exc)
+            logger.exception("GUI MCP server failed during startup or runtime.")
+            launcher.request_shutdown()
+
+    server_thread = threading.Thread(
+        target=gui_server_thread,
+        name="pyghidra-mcp-gui-server",
+        daemon=True,
+    )
+    server_thread.start()
+
+    interrupted = False
+    try:
+        launcher.run_gui_event_loop()
+    except KeyboardInterrupt:
+        interrupted = True
+        logger.info("Interrupted; asking the Ghidra GUI to close and save.")
+    finally:
+        launcher.request_shutdown()
+        launcher.wait_for_shutdown()
+        context = getattr(mcp, "_pyghidra_context", None)
+        if context is not None:
+            context.close()
+
+    if gui_server_error:
+        raise RuntimeError("GUI MCP server failed to start.") from gui_server_error[0]
+    if interrupted:
+        sys.exit(130)
+
+
+def run_headless_server(mcp: FastMCP, transport: str) -> None:
+    """Run the MCP server and always release the project context on exit."""
+    interrupted = False
+    try:
+        run_mcp_server(mcp, transport)
+    except KeyboardInterrupt:
+        interrupted = True
+        logger.info("Interrupted; starting clean shutdown.")
+    finally:
+        mcp._pyghidra_context.close()  # type: ignore
+
+    # Exit only after close() has saved and closed everything, so the
+    # conventional 130 still means "shut down cleanly on Ctrl+C".
+    if interrupted:
+        sys.exit(130)
 
 
 # MCP Server Entry Point
@@ -415,37 +531,12 @@ def main(
         if list_project_binaries or delete_project_binary:
             raise click.UsageError("GUI mode does not support project-management CLI actions yet")
 
-        register_gui_tools(mcp)
-        ensure_macos_framework_python()
-        launcher = GuiPyGhidraMcpLauncher(project_spec.gpr_path)
-        launcher.start()
-        gui_server_error: list[BaseException] = []
-
-        def gui_server_thread() -> None:
-            try:
-                init_gui_context(mcp=mcp, project_spec=project_spec, input_paths=input_paths)
-                run_mcp_server(mcp, transport)
-            except BaseException as exc:
-                gui_server_error.append(exc)
-                logger.exception("GUI MCP server failed during startup or runtime.")
-                launcher.request_shutdown()
-
-        server_thread = threading.Thread(
-            target=gui_server_thread,
-            name="pyghidra-mcp-gui-server",
-            daemon=True,
+        run_gui_server(
+            mcp,
+            transport=transport,
+            project_spec=project_spec,
+            input_paths=input_paths,
         )
-        server_thread.start()
-        try:
-            launcher.run_gui_event_loop()
-        finally:
-            launcher.request_shutdown()
-            launcher.wait_for_shutdown()
-            context = getattr(mcp, "_pyghidra_context", None)
-            if context is not None:
-                context.close()
-        if gui_server_error:
-            raise RuntimeError("GUI MCP server failed to start.") from gui_server_error[0]
         return
 
     init_pyghidra_context(
@@ -470,10 +561,7 @@ def main(
         symbols_path=symbols_path,
     )
 
-    try:
-        run_mcp_server(mcp, transport)
-    finally:
-        mcp._pyghidra_context.close()  # type: ignore
+    run_headless_server(mcp, transport)
 
 
 if __name__ == "__main__":

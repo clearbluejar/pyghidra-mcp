@@ -2,6 +2,7 @@ import concurrent.futures
 import logging
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,9 +36,28 @@ class IndexingMixin:
         self._index_futures: dict[str, concurrent.futures.Future] = {}
         self._index_lock = threading.Lock()
 
+    def shutdown_executor(
+        self,
+        label: str,
+        executor: concurrent.futures.ThreadPoolExecutor | None,
+    ) -> None:
+        """Drop queued work, then wait -- without a deadline -- for in-flight work.
+
+        ``cancel_futures`` is what makes Ctrl+C responsive: tasks that have not
+        started are dropped instead of run. The wait is deliberately unbounded,
+        because a task already inside Ghidra cannot be interrupted from Python
+        and abandoning it mid-write risks a corrupt program database.
+        """
+        if executor is None:
+            return
+
+        logger.info("Stopping %s tasks (queued work cancelled, in-flight work awaited)...", label)
+        start = time.monotonic()
+        executor.shutdown(wait=True, cancel_futures=True)
+        logger.info("%s tasks stopped after %.1fs.", label.capitalize(), time.monotonic() - start)
+
     def shutdown_indexing(self) -> None:
-        if self.index_executor:
-            self.index_executor.shutdown(wait=True)
+        self.shutdown_executor("indexing", self.index_executor)
 
     def _lookup_program_info(self, binary_name: str) -> Any | None:
         raise NotImplementedError
@@ -227,6 +247,11 @@ class IndexingMixin:
     ) -> None:
         with self._index_lock:
             self._index_futures.pop(binary_name, None)
+        # CancelledError derives from BaseException, so shutdown-cancelled work
+        # must be checked for explicitly or it escapes as a spurious callback error.
+        if future.cancelled():
+            logger.info("Background indexing for %s cancelled during shutdown.", binary_name)
+            return
         try:
             future.result()
             logger.info("Background indexing completed successfully for %s.", binary_name)

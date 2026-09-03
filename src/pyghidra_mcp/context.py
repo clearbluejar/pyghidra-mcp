@@ -149,23 +149,55 @@ class PyGhidraContext(IndexingMixin):
         """
         Saves changes to all open programs and closes the project.
         """
-        if self.executor:
-            self.executor.shutdown(wait=True)
+        started = time.monotonic()
+        logger.info("Closing project %s (save=%s)...", self.project_name, save)
 
+        self.shutdown_executor("analysis", self.executor)
         self.shutdown_indexing()
+        self.shutdown_executor("import", self.import_executor)
 
-        if self.import_executor:
-            self.import_executor.shutdown(wait=True)
+        program_count = len(self.programs)
+        logger.info(
+            "Background work stopped after %.1fs; %s open program(s) to %s.",
+            time.monotonic() - started,
+            program_count,
+            "save and close" if save else "close",
+        )
 
-        for _program_name, program_info in self.programs.items():
-            self._dispose_decompiler(program_info)
-            program = program_info.program
-            if save:
-                self.project.save(program)
-            self.project.close(program)
+        # One failing program must not strand the others: each is saved and
+        # closed independently so a single bad database cannot cost the rest
+        # of the session's work.
+        failed: list[str] = []
+        for position, (program_name, program_info) in enumerate(self.programs.items(), start=1):
+            try:
+                self._dispose_decompiler(program_info)
+                program = program_info.program
+                if save:
+                    logger.info("Saving %s/%s: %s", position, program_count, program_name)
+                    save_started = time.monotonic()
+                    self.project.save(program)
+                    logger.info("Saved %s in %.1fs.", program_name, time.monotonic() - save_started)
+                self.project.close(program)
+            except Exception:
+                failed.append(program_name)
+                logger.error("Failed to save/close %s.", program_name, exc_info=True)
 
         self.project.close()
-        logger.info(f"Project {self.project_name} closed.")
+        if failed:
+            logger.error(
+                "Project %s closed in %.1fs, but %s of %s program(s) failed to save: %s",
+                self.project_name,
+                time.monotonic() - started,
+                len(failed),
+                program_count,
+                ", ".join(failed),
+            )
+        else:
+            logger.info(
+                "Project %s closed cleanly in %.1fs.",
+                self.project_name,
+                time.monotonic() - started,
+            )
 
     def save(self):
         """
@@ -438,6 +470,9 @@ class PyGhidraContext(IndexingMixin):
         """
         A callback function to handle results or exceptions from the import task.
         """
+        if future.cancelled():
+            logger.info("Background import cancelled during shutdown.")
+            return
         try:
             result = future.result()
             logger.info(f"Background import task completed successfully. Result: {result}")
@@ -572,6 +607,9 @@ class PyGhidraContext(IndexingMixin):
 
     # Callback function that runs when the future is done to catch any exceptions
     def _analysis_done_callback(self, future: concurrent.futures.Future):
+        if future.cancelled():
+            logging.info("Asynchronous analysis cancelled during shutdown.")
+            return
         try:
             future.result()
             logging.info("Asynchronous analysis finished successfully.")
@@ -641,6 +679,15 @@ class PyGhidraContext(IndexingMixin):
             }
 
             for future in concurrent.futures.as_completed(futures):
+                if future.cancelled():
+                    # close() cancels queued analysis on shutdown; stop quietly
+                    # rather than surfacing CancelledError as an analysis failure.
+                    logger.info(
+                        "Analysis cancelled during shutdown after %s/%s programs.",
+                        completed_count,
+                        prog_count,
+                    )
+                    return
                 result = future.result()
                 logger.info(f"Analysis complete for {result.getName()}")
                 completed_count += 1

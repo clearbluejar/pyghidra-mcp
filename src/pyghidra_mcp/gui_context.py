@@ -695,12 +695,14 @@ class GuiPyGhidraContext(IndexingMixin):
 
     def close(self, save: bool = True) -> None:
         """Release MCP-owned resources. Does not close the GUI project or programs."""
-        self.import_executor.shutdown(wait=True)
+        logger.info("Releasing MCP-owned resources; the GUI owns saving and closing programs.")
+        self.shutdown_executor("import", self.import_executor)
         self.shutdown_indexing()
         with self._programs_lock:
             for program_info in self.programs.values():
                 self._dispose_decompiler(program_info)
             self.programs.clear()
+        logger.info("MCP resources released.")
 
     def save(self):
         with self._programs_lock:
