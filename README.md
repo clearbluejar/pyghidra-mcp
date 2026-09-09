@@ -56,7 +56,7 @@ flowchart LR
     end
 
     subgraph Process["pyghidra-mcp process"]
-        Transport["stdio or streamable-http"]
+        Transport["streamable HTTP (recommended)<br/>stdio (local fallback)"]
         Tools["MCP tools"]
         Context["PyGhidra context"]
     end
@@ -65,7 +65,7 @@ flowchart LR
     Artifacts["MCP artifacts<br/>ChromaDB + GZF cache"]
     Gui["Ghidra GUI / CodeBrowser<br/>only with --gui"]
 
-    Agent -->|"stdio or HTTP"| Transport
+    Agent -->|"HTTP (recommended)"| Transport
     Cli -->|"HTTP only"| Transport
     Transport --> Tools
     Tools --> Context
@@ -81,19 +81,20 @@ flowchart LR
 ```mermaid
 flowchart TD
     Start["What do you need?"]
-    Start --> Headless["Agent or automation only"]
+    Start --> Headless["Agent or automation"]
     Start --> GuiNeed["Live Ghidra GUI control"]
     Start --> Terminal["Interactive terminal client"]
 
-    Headless --> Stdio["pyghidra-mcp -t stdio<br/>or -t streamable-http"]
+    Headless --> Http["pyghidra-mcp<br/>--transport streamable-http"]
     GuiNeed --> GuiMode["pyghidra-mcp --gui<br/>--transport streamable-http<br/>--project-path project.gpr"]
     Terminal --> HttpServer["Start pyghidra-mcp<br/>--transport streamable-http"]
     HttpServer --> CliMode["Run pyghidra-mcp-cli commands"]
 ```
 
-- **Headless MCP**: use `stdio` for local MCP hosts, or `streamable-http` when several clients need the same long-running Ghidra project.
+- **Headless MCP**: use `streamable-http`. It keeps Ghidra and its project alive as one long-running server and works with both MCP hosts and the CLI client.
 - **GUI mode**: `pyghidra-mcp` launches Ghidra, opens the project, and exposes extra tools that steer the CodeBrowser in the same JVM.
 - **CLI client**: `pyghidra-mcp-cli` is an HTTP client. Start a `streamable-http` server first, then issue terminal commands against that running server.
+- **stdio**: retain this only for MCP hosts that cannot connect to an HTTP endpoint.
 
 <details>
 <summary>Detailed architecture and tool surface</summary>
@@ -134,9 +135,7 @@ flowchart TD
         CodeBrowser["Ghidra GUI / CodeBrowser"]
     end
 
-    Agent --> Stdio
     Agent --> Http
-    Automation --> Stdio
     Automation --> Http
     Automation --> Sse
     Cli --> Http
@@ -197,31 +196,36 @@ flowchart TD
       - [GUI Control Tools (`--gui` only)](#gui-control-tools---gui-only)
   - [Usage](#usage)
     - [Mapping Binaries with Docker](#mapping-binaries-with-docker)
-    - [Using with OpenWeb-UI and MCPO](#using-with-openweb-ui-and-mcpo)
-      - [With `uvx`](#with-uvx)
-      - [With Docker](#with-docker)
-    - [Standard Input/Output (stdio)](#standard-inputoutput-stdio)
+    - [Streamable HTTP](#streamable-http)
       - [Python](#python)
       - [Docker](#docker)
-    - [Streamable HTTP](#streamable-http)
+    - [Claude Code](#claude-code)
+    - [Codex](#codex)
+    - [Standard Input/Output (stdio)](#standard-inputoutput-stdio)
       - [Python](#python-1)
       - [Docker](#docker-1)
+    - [Using with OpenWeb-UI and MCPO](#using-with-openweb-ui-and-mcpo)
+      - [With `uvx`](#with-uvx)
+      - [With Docker](#docker-2)
     - [Server-sent events (SSE)](#server-sent-events-sse)
       - [Python](#python-2)
-      - [Docker](#docker-2)
-  - [Integrations](#integrations)
-    - [Claude Desktop](#claude-desktop)
+      - [Docker](#docker-3)
   - [Inspiration](#inspiration)
   - [Contributing, community, and running from source](#contributing-community-and-running-from-source)
     - [Contributor workflow](#contributor-workflow)
 
 ## Getting started
 
-Run the [Python package](https://pypi.org/p/pyghidra-mcp) as a CLI command using [`uv`](https://docs.astral.sh/uv/guides/tools/):
+Start a persistent Streamable HTTP server using the [Python package](https://pypi.org/p/pyghidra-mcp) and [`uv`](https://docs.astral.sh/uv/guides/tools/):
 
 ```bash
-uvx pyghidra-mcp # Creates pyghidra_mcp_projects directory by default
+uvx pyghidra-mcp \
+  --transport streamable-http \
+  --project-path /absolute/path/to/ghidra-projects \
+  /absolute/path/to/binary
 ```
+
+The server is then available at `http://127.0.0.1:8000/mcp`. Leave it running and configure your MCP client to use that URL; the [Claude Code](#claude-code) and [Codex](#codex) examples below show the expected configuration.
 
 To launch and control a live Ghidra GUI from MCP, use `--gui` with `streamable-http`:
 
@@ -241,7 +245,7 @@ uvx pyghidra-mcp \
 Or, run as a [Docker container](https://ghcr.io/clearbluejar/pyghidra-mcp):
 
 ```bash
-docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
+docker run --rm -p 8000:8000 ghcr.io/clearbluejar/pyghidra-mcp
 ```
 
 ## Optimized for Agents
@@ -615,56 +619,9 @@ docker run -i --rm \
   /binaries/*
 ```
 
-### Using with OpenWeb-UI and MCPO
-
-You can integrate `pyghidra-mcp` with [OpenWeb-UI](https://github.com/open-webui/open-webui) using [MCPO](https://github.com/open-webui/mcpo), an MCP-to-OpenAPI proxy. This allows you to expose `pyghidra-mcp`'s tools through a standard RESTful API, making them accessible to web interfaces and other tools.
-
-
-https://github.com/user-attachments/assets/3d56ea08-ed2d-471d-9ed2-556fb8ee4c95
-
-
-#### With `uvx`
-
-You can run `pyghidra-mcp` and `mcpo` together using `uvx`:
-
-```bash
-uvx mcpo -- \
-  pyghidra-mcp /bin/ls
-```
-
-#### With Docker
-
-You can combine mcpo with Docker:
-
-```bash
-uvx mcpo -- docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp /bin/ls
-```
-
-### Standard Input/Output (stdio)
-
-The stdio transport enables communication through standard input and output streams. This is particularly useful for local integrations and command-line tools. See the [spec](https://modelcontextprotocol.io/docs/concepts/transports#built-in-transport-types) for more details.
-
-#### Python
-
-```bash
-pyghidra-mcp
-```
-
-By default, the Python package will run in `stdio` mode. Because it's using the standard input and output streams, it will look like the tool is hanging without any output, but this is expected.
-
-#### Docker
-
-This server is published to GitHub's Container Registry ([ghcr.io/clearbluejar/pyghidra-mcp](http://ghcr.io/clearbluejar/pyghidra-mcp))
-
-```
-docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
-```
-
-By default, the Docker container starts the `streamable-http` server, so include `-t stdio` after the image name and run with `-i` for [interactive](https://docs.docker.com/reference/cli/docker/container/run/#interactive) stdio mode.
-
 ### Streamable HTTP
 
-Streamable HTTP enables streaming responses over JSON RPC via HTTP POST requests. See the [spec](https://modelcontextprotocol.io/specification/draft/basic/transports#streamable-http) for more details.
+Streamable HTTP is the recommended transport. It keeps one Ghidra process and project available to MCP hosts and `pyghidra-mcp-cli`, avoiding the startup cost of a separate process per client. It sends JSON-RPC requests over HTTP; see the [spec](https://modelcontextprotocol.io/specification/draft/basic/transports#streamable-http) for details.
 
 By default, the server listens on [http://127.0.0.1:8000/mcp](http://127.0.0.1:8000/mcp) for client connections. Use `--host` / `--port` or the `MCP_HOST` / `MCP_PORT` environment variables to change the bind address. _The server must be running for clients to connect to it._
 
@@ -674,7 +631,7 @@ By default, the server listens on [http://127.0.0.1:8000/mcp](http://127.0.0.1:8
 pyghidra-mcp -t streamable-http
 ```
 
-By default, the Python package will run in `stdio` mode, so you will have to include `-t streamable-http`.
+The Python package defaults to `stdio`, so always include `--transport streamable-http` when starting the server.
 
 GUI mode uses this transport:
 
@@ -689,6 +646,78 @@ pyghidra-mcp \
 
 ```
 docker run -p 8000:8000 ghcr.io/clearbluejar/pyghidra-mcp
+```
+
+### Claude Code
+
+After starting the HTTP server, add it to Claude Code:
+
+```bash
+claude mcp add --transport http pyghidra-mcp http://127.0.0.1:8000/mcp
+```
+
+For a project-shared configuration, add this to `.mcp.json` in the project root:
+
+```json
+{
+  "mcpServers": {
+    "pyghidra-mcp": {
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}
+```
+
+`type: "http"` is required: an entry with only `url` is treated as a stdio server by Claude Code. Use `claude mcp list` or `/mcp` to verify the connection.
+
+### Codex
+
+After starting the HTTP server, add the following to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.pyghidra-mcp]
+url = "http://127.0.0.1:8000/mcp"
+```
+
+Restart Codex after saving the configuration. The server name is arbitrary; `pyghidra-mcp` is the name that will appear in Codex.
+
+### Standard Input/Output (stdio)
+
+Use stdio only when an MCP host cannot use an HTTP endpoint. It starts a server that communicates over its parent process's standard input and output streams.
+
+#### Python
+
+```bash
+pyghidra-mcp --transport stdio
+```
+
+Because the server communicates on standard input and output, it will appear to wait without terminal output; that is expected.
+
+#### Docker
+
+```bash
+docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
+```
+
+The Docker image starts the Streamable HTTP server by default, so include `-t stdio` after the image name and use `-i` for [interactive](https://docs.docker.com/reference/cli/docker/container/run/#interactive) stdio mode.
+
+### Using with OpenWeb-UI and MCPO
+
+Use [MCPO](https://github.com/open-webui/mcpo) only when OpenWeb-UI or another consumer specifically requires an OpenAPI proxy. For normal MCP clients, connect directly to the Streamable HTTP endpoint above.
+
+https://github.com/user-attachments/assets/3d56ea08-ed2d-471d-9ed2-556fb8ee4c95
+
+#### With `uvx`
+
+```bash
+uvx mcpo -- pyghidra-mcp /bin/ls
+```
+
+#### With Docker
+
+```bash
+uvx mcpo -- docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp /bin/ls
 ```
 
 ### Server-sent events (SSE)
@@ -714,35 +743,6 @@ By default, the Python package will run in `stdio` mode, so you will have to inc
 docker run -p 8000:8000 ghcr.io/clearbluejar/pyghidra-mcp -t sse
 ```
 
-## Integrations
-
-> [!NOTE]
-> This section is a work in progress. We will be adding examples for specific integrations soon.
-
-### Claude Desktop
-
-Add the following JSON block to your `claude_desktop_config.json` file:
-
-```json
-{
-    "mcpServers": {
-        "pyghidra-mcp": {
-            "command": "uvx",
-            "args": [
-                "--from",
-                "git+https://github.com/clearbluejar/pyghidra-mcp",
-                "pyghidra-mcp",
-                "--project-path",
-                "/tmp/pyghidra", // or path to writeable directory
-                "/bin/ls" //
-            ],
-            "env": {
-                "GHIDRA_INSTALL_DIR": "/path/to/ghidra/ghidra_12.0_PUBLIC"
-            }
-        }
-    }
-}
-```
 ## Inspiration
 
 This project implementation and design was inspired by these awesome projects:
