@@ -6,7 +6,7 @@ import os
 import signal
 import sys
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -20,7 +20,12 @@ from pyghidra_mcp import __version__, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.context_protocol import MCPContext
 from pyghidra_mcp.gui_context import GuiPyGhidraContext
-from pyghidra_mcp.gui_launcher import GuiPyGhidraMcpLauncher, ensure_macos_framework_python
+from pyghidra_mcp.gui_launcher import (
+    GuiPyGhidraMcpLauncher,
+    ensure_macos_framework_python,
+    install_console_ctrl_handler,
+    remove_console_ctrl_handler,
+)
 from pyghidra_mcp.project_spec import DEFAULT_PROJECT_NAME, ProjectSpec
 
 logging.basicConfig(
@@ -45,6 +50,11 @@ class _SigintShutdownHandler:
         b"on large binaries. Progress is logged below.\n"
         b"Press Ctrl+C again to force exit and ABANDON UNSAVED CHANGES.\n"
     )
+    GUI_FIRST_INTERRUPT = (
+        b"\nReceived Ctrl+C; asking the Ghidra GUI to close. It may prompt you to "
+        b"save open programs, and closing can take a while on large binaries.\n"
+        b"Press Ctrl+C again to force exit and ABANDON UNSAVED CHANGES.\n"
+    )
     SECOND_INTERRUPT = b"\nForced exit; unsaved program changes were abandoned.\n"
 
     def __init__(self) -> None:
@@ -57,6 +67,25 @@ class _SigintShutdownHandler:
             raise KeyboardInterrupt
         os.write(2, self.SECOND_INTERRUPT)
         os._exit(130)
+
+    def on_console_interrupt(self, request_shutdown: Callable[[], None]) -> Callable[[], None]:
+        """Build the callback for a native console handler, sharing the escalation.
+
+        A console control handler runs on an OS-owned thread with no Python
+        exception to propagate, so the first Ctrl+C hands off to
+        ``request_shutdown`` instead of raising ``KeyboardInterrupt``.
+        """
+
+        def on_interrupt() -> None:
+            self._interrupt_count += 1
+            if self._interrupt_count == 1:
+                os.write(2, self.GUI_FIRST_INTERRUPT)
+                request_shutdown()
+                return
+            os.write(2, self.SECOND_INTERRUPT)
+            os._exit(130)
+
+        return on_interrupt
 
 
 def install_sigint_shutdown_handler() -> _SigintShutdownHandler:
@@ -264,6 +293,35 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
         raise ValueError(f"Invalid transport: {transport}")
 
 
+def install_gui_console_ctrl_handler(
+    launcher: GuiPyGhidraMcpLauncher,
+    sigint_handler: _SigintShutdownHandler,
+) -> object | None:
+    """Take Ctrl+C back from the Ghidra GUI once its front end has come up.
+
+    On Windows the running front end registers a console control handler that
+    claims CTRL_C_EVENT, so the Python ``SIGINT`` handler never runs and Ctrl+C
+    on the console does nothing. Ours has to be registered after the front end's
+    to sit ahead of it, hence the wait. Non-Windows platforms keep the plain
+    ``SIGINT`` path and get ``None`` back.
+    """
+    if sys.platform != "win32":
+        return None
+
+    if not launcher.wait_for_front_end():
+        logger.warning(
+            "Ghidra front end did not come up in time; Ctrl+C on the console may be "
+            "swallowed by the GUI. Close the Ghidra window to shut down."
+        )
+        return None
+
+    handler_ref = install_console_ctrl_handler(
+        sigint_handler.on_console_interrupt(launcher.interrupt)
+    )
+    logger.info("Ctrl+C handler installed for GUI mode; interrupts now close the GUI cleanly.")
+    return handler_ref
+
+
 def run_gui_server(
     mcp: FastMCP,
     *,
@@ -278,7 +336,7 @@ def run_gui_server(
     launcher.start()
     # Installed here, on the main thread, because launcher.start() is what boots
     # the JVM in GUI mode and the server thread cannot register signal handlers.
-    install_sigint_shutdown_handler()
+    sigint_handler = install_sigint_shutdown_handler()
     gui_server_error: list[BaseException] = []
 
     def gui_server_thread() -> None:
@@ -297,9 +355,14 @@ def run_gui_server(
     )
     server_thread.start()
 
+    console_handler_ref = install_gui_console_ctrl_handler(launcher, sigint_handler)
+
     interrupted = False
     try:
         launcher.run_gui_event_loop()
+        interrupted = launcher.interrupted
+        if interrupted:
+            logger.info("Interrupted; asking the Ghidra GUI to close and save.")
     except KeyboardInterrupt:
         interrupted = True
         logger.info("Interrupted; asking the Ghidra GUI to close and save.")
@@ -309,6 +372,8 @@ def run_gui_server(
         context = getattr(mcp, "_pyghidra_context", None)
         if context is not None:
             context.close()
+        # Only now: until close() returns, a second Ctrl+C still has to force-exit.
+        remove_console_ctrl_handler(console_handler_ref)
 
     if gui_server_error:
         raise RuntimeError("GUI MCP server failed to start.") from gui_server_error[0]

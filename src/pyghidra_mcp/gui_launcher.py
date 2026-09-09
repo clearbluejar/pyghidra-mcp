@@ -1,14 +1,71 @@
 import contextlib
 import ctypes
+import logging
 import os
 import sys
 import threading
 import time
+from collections.abc import Callable
+from ctypes import wintypes
 from pathlib import Path
 
 from pyghidra.launcher import PyGhidraLauncher, _PyGhidraStdOut
 
 REEXEC_ENV = "PYGHIDRA_MCP_REEXEC"
+
+logger = logging.getLogger(__name__)
+
+if sys.platform == "win32":
+    _CONSOLE_CTRL_ROUTINE = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+    CTRL_C_EVENT = 0
+    CTRL_BREAK_EVENT = 1
+else:  # pragma: no cover - the console handler is a Windows-only concept
+    _CONSOLE_CTRL_ROUTINE = None
+    CTRL_C_EVENT = 0
+    CTRL_BREAK_EVENT = 1
+
+
+def install_console_ctrl_handler(on_interrupt: Callable[[], None]) -> object | None:
+    """Claim Ctrl+C from the Ghidra GUI by registering a native console handler.
+
+    Windows dispatches console control handlers in reverse registration order and
+    stops at the first one returning TRUE. Starting the Ghidra front end registers
+    a handler that swallows CTRL_C_EVENT, so the Python-level ``SIGINT`` handler --
+    registered back when the interpreter started -- is never reached. Registering
+    here, *after* the front end is up, puts us at the head of that chain.
+
+    ``on_interrupt`` runs on a console-callback thread owned by the OS, so it must
+    return quickly and must not touch Java; signal a waiting thread instead.
+    Returns the callback object, which the caller must keep alive for as long as
+    the handler is registered, or ``None`` on non-Windows platforms.
+    """
+    if sys.platform != "win32":
+        return None
+
+    def handler(ctrl_type: int) -> bool:
+        if ctrl_type not in (CTRL_C_EVENT, CTRL_BREAK_EVENT):
+            return False  # let close/logoff/shutdown fall through to the GUI
+        on_interrupt()
+        return True
+
+    callback = _CONSOLE_CTRL_ROUTINE(handler)
+    if not ctypes.windll.kernel32.SetConsoleCtrlHandler(callback, True):
+        raise OSError(ctypes.get_last_error(), "SetConsoleCtrlHandler failed")
+    return callback
+
+
+def remove_console_ctrl_handler(callback: object | None) -> None:
+    """Unregister a handler from ``install_console_ctrl_handler``.
+
+    Dropping the reference without this leaves Windows holding a pointer to a
+    freed ctypes callback, so a late Ctrl+C would land in freed memory.
+    """
+    if callback is None or sys.platform != "win32":
+        return
+    if not ctypes.windll.kernel32.SetConsoleCtrlHandler(callback, False):
+        logger.warning(
+            "Could not unregister the Ctrl+C console handler (error %s).", ctypes.get_last_error()
+        )
 
 
 def _framework_python_path() -> Path:
@@ -50,6 +107,7 @@ class GuiPyGhidraMcpLauncher(PyGhidraLauncher):
         self.project_gpr_path = project_gpr_path
         self.args = []
         self._is_exiting = threading.Event()
+        self._interrupted = threading.Event()
         self._shutdown_requested = False
 
     def _launch(self) -> None:
@@ -70,15 +128,52 @@ class GuiPyGhidraMcpLauncher(PyGhidraLauncher):
                 lambda: Ghidra.main(["ghidra.GhidraRun", *self.args])  # pyright: ignore[reportArgumentType]
             ).start()
 
+    def _front_end_tool(self):
+        """Return the front-end tool, or None while the GUI is still starting.
+
+        ``AppInfo.getFrontEndTool()`` asserts rather than returning null before
+        the front end exists, so "not up yet" arrives as an exception.
+        """
+        from ghidra.framework.main import AppInfo
+        from ghidra.util.exception import AssertException
+
+        try:
+            return AppInfo.getFrontEndTool()
+        except AssertException:
+            return None
+
+    def wait_for_front_end(self, timeout: float = 120.0) -> bool:
+        """Wait until the Ghidra front-end tool exists, so the GUI is really up."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._is_exiting.is_set():
+                return False
+            if self._front_end_tool() is not None:
+                return True
+            time.sleep(0.25)
+        logger.warning("Ghidra front end was not up after %.0fs.", timeout)
+        return False
+
+    def interrupt(self) -> None:
+        """Wake ``run_gui_event_loop`` the way a Ctrl+C on the console should."""
+        self._interrupted.set()
+
+    @property
+    def interrupted(self) -> bool:
+        return self._interrupted.is_set()
+
     def run_gui_event_loop(self) -> None:
-        """Block until the GUI is shutting down."""
+        """Block until the GUI is shutting down, or until we are interrupted."""
 
         if sys.platform == "darwin":
             from pyghidra.launcher import _run_mac_app
 
             _run_mac_app()
 
-        self._is_exiting.wait()
+        # Polled rather than a plain wait(): either event ends the loop, and the
+        # interrupt one is set from a console-callback thread.
+        while not (self._is_exiting.is_set() or self._interrupted.is_set()):
+            self._is_exiting.wait(timeout=0.2)
 
     def request_shutdown(self) -> None:
         """Ask the running Ghidra front-end to close itself cleanly."""
@@ -86,13 +181,14 @@ class GuiPyGhidraMcpLauncher(PyGhidraLauncher):
             return
         self._shutdown_requested = True
 
-        from ghidra.framework.main import AppInfo
         from ghidra.util import Swing
 
         def do_close():
-            front_end_tool = AppInfo.getFrontEndTool()
-            if front_end_tool is not None:
-                front_end_tool.close()
+            front_end_tool = self._front_end_tool()
+            if front_end_tool is None:
+                logger.warning("No Ghidra front end to close; it never finished starting.")
+                return
+            front_end_tool.close()
 
         Swing.runLater(do_close)
 

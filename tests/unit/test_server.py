@@ -3,6 +3,7 @@ import signal
 import threading
 import time
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import Mock
 
 import click.testing
@@ -115,33 +116,55 @@ def test_init_pyghidra_context_wait_for_analysis_indexes_for_streamable_server(m
     fake_context.schedule_startup_indexing.assert_called_once_with(max_binaries=1)
 
 
-def test_gui_mode_allows_missing_project_for_auto_create(monkeypatch, tmp_path):
-    launcher_state = {}
+class FakeLauncher:
+    """Stands in for GuiPyGhidraMcpLauncher, recording lifecycle calls."""
 
-    class FakeLauncher:
-        def __init__(self, gpr_path):
-            launcher_state["gpr_path"] = gpr_path
+    state: ClassVar[dict] = {}
+    interrupt_on_event_loop = False
 
-        def start(self):
-            launcher_state["started"] = True
+    def __init__(self, gpr_path):
+        FakeLauncher.state["gpr_path"] = gpr_path
 
-        def run_gui_event_loop(self):
-            launcher_state["event_loop"] = True
+    def start(self):
+        FakeLauncher.state["started"] = True
 
-        def request_shutdown(self):
-            launcher_state["shutdown"] = True
+    def wait_for_front_end(self, timeout=120.0):
+        FakeLauncher.state["waited_for_front_end"] = True
+        return True
 
-        def wait_for_shutdown(self):
-            return True
+    def run_gui_event_loop(self):
+        FakeLauncher.state["event_loop"] = True
+        if FakeLauncher.interrupt_on_event_loop:
+            self.interrupt()
 
-    class FakeThread:
-        def __init__(self, target, name, daemon):
-            self.target = target
-            self.name = name
-            self.daemon = daemon
+    @property
+    def interrupted(self):
+        return bool(FakeLauncher.state.get("interrupted"))
 
-        def start(self):
-            self.target()
+    def interrupt(self):
+        FakeLauncher.state["interrupted"] = True
+
+    def request_shutdown(self):
+        FakeLauncher.state["shutdown"] = True
+
+    def wait_for_shutdown(self):
+        return True
+
+
+class FakeThread:
+    def __init__(self, target, name, daemon):
+        self.target = target
+        self.name = name
+        self.daemon = daemon
+
+    def start(self):
+        self.target()
+
+
+def _patch_gui_mode(monkeypatch, interrupt_on_event_loop=False):
+    """Wire GUI mode up to the fakes and return the launcher's state dict."""
+    FakeLauncher.state = {}
+    FakeLauncher.interrupt_on_event_loop = interrupt_on_event_loop
 
     monkeypatch.setattr(server, "register_gui_tools", Mock())
     monkeypatch.setattr(server, "ensure_macos_framework_python", Mock())
@@ -149,27 +172,48 @@ def test_gui_mode_allows_missing_project_for_auto_create(monkeypatch, tmp_path):
     monkeypatch.setattr(server.threading, "Thread", FakeThread)
     monkeypatch.setattr(server, "init_gui_context", Mock())
     monkeypatch.setattr(server, "run_mcp_server", Mock())
+    monkeypatch.setattr(server, "install_sigint_shutdown_handler", Mock())
+    monkeypatch.setattr(server, "install_gui_console_ctrl_handler", Mock(return_value=None))
+    monkeypatch.setattr(server, "remove_console_ctrl_handler", Mock())
     if hasattr(server.mcp, "_pyghidra_context"):
         delattr(server.mcp, "_pyghidra_context")
+    return FakeLauncher.state
+
+
+def _gui_cli_args(tmp_path):
+    return [
+        "--gui",
+        "--transport",
+        "http",
+        "--project-path",
+        str(tmp_path),
+        "--project-name",
+        "new_project",
+    ]
+
+
+def test_gui_mode_allows_missing_project_for_auto_create(monkeypatch, tmp_path):
+    launcher_state = _patch_gui_mode(monkeypatch)
 
     runner = click.testing.CliRunner()
-    result = runner.invoke(
-        server.main,
-        [
-            "--gui",
-            "--transport",
-            "http",
-            "--project-path",
-            str(tmp_path),
-            "--project-name",
-            "new_project",
-        ],
-    )
+    result = runner.invoke(server.main, _gui_cli_args(tmp_path))
 
     assert result.exit_code == 0, result.output
     assert launcher_state["gpr_path"] == tmp_path / "new_project.gpr"
     assert launcher_state["started"] is True
     server.init_gui_context.assert_called_once()
+
+
+def test_gui_mode_exits_130_when_the_console_handler_interrupts(monkeypatch, tmp_path):
+    """A console-thread interrupt must end the run the same way Ctrl+C headless does."""
+    launcher_state = _patch_gui_mode(monkeypatch, interrupt_on_event_loop=True)
+
+    runner = click.testing.CliRunner()
+    result = runner.invoke(server.main, _gui_cli_args(tmp_path))
+
+    assert result.exit_code == 130, result.output
+    assert launcher_state["shutdown"] is True
+    server.remove_console_ctrl_handler.assert_called_once()
 
 
 class TestSigintShutdownHandler:
@@ -199,6 +243,85 @@ class TestSigintShutdownHandler:
             assert signal.getsignal(signal.SIGINT) is handler
         finally:
             signal.signal(signal.SIGINT, previous)
+
+
+class TestGuiConsoleCtrlHandler:
+    """In GUI mode the Ghidra front end swallows CTRL_C_EVENT before Python sees it."""
+
+    def test_first_interrupt_requests_shutdown_instead_of_raising(self, monkeypatch):
+        handler = server._SigintShutdownHandler()
+        writes = []
+        monkeypatch.setattr(server.os, "write", lambda fd, data: writes.append(data))
+        shutdowns = []
+
+        on_interrupt = handler.on_console_interrupt(lambda: shutdowns.append(1))
+        on_interrupt()  # a console callback has no frame to raise into
+
+        assert shutdowns == [1]
+        assert writes == [handler.GUI_FIRST_INTERRUPT]
+
+    def test_second_interrupt_force_exits_with_130(self, monkeypatch):
+        handler = server._SigintShutdownHandler()
+        exits = []
+        monkeypatch.setattr(server.os, "write", lambda fd, data: None)
+        monkeypatch.setattr(server.os, "_exit", exits.append)
+
+        on_interrupt = handler.on_console_interrupt(lambda: None)
+        on_interrupt()
+        on_interrupt()
+
+        assert exits == [130]
+
+    def test_escalation_is_shared_with_the_signal_path(self, monkeypatch):
+        """A Ctrl+C on the console then one on the signal path still force-exits."""
+        handler = server._SigintShutdownHandler()
+        exits = []
+        monkeypatch.setattr(server.os, "write", lambda fd, data: None)
+        monkeypatch.setattr(server.os, "_exit", exits.append)
+
+        handler.on_console_interrupt(lambda: None)()
+        handler(signal.SIGINT, None)
+
+        assert exits == [130]
+
+    def test_install_is_skipped_when_the_front_end_never_starts(self, monkeypatch):
+        monkeypatch.setattr(server.sys, "platform", "win32")
+        installs = []
+        monkeypatch.setattr(server, "install_console_ctrl_handler", installs.append)
+        launcher = Mock()
+        launcher.wait_for_front_end.return_value = False
+
+        result = server.install_gui_console_ctrl_handler(launcher, server._SigintShutdownHandler())
+
+        assert result is None
+        assert installs == []
+
+    def test_install_waits_for_the_front_end_before_registering(self, monkeypatch):
+        monkeypatch.setattr(server.sys, "platform", "win32")
+        order = []
+        launcher = Mock()
+        launcher.wait_for_front_end.side_effect = lambda *a, **k: order.append("wait") or True
+        monkeypatch.setattr(
+            server,
+            "install_console_ctrl_handler",
+            lambda on_interrupt: order.append("install") or "callback",
+        )
+
+        result = server.install_gui_console_ctrl_handler(launcher, server._SigintShutdownHandler())
+
+        # Registering first would put us behind the front end in the LIFO chain.
+        assert order == ["wait", "install"]
+        assert result == "callback"
+
+    def test_install_is_a_no_op_off_windows(self, monkeypatch):
+        monkeypatch.setattr(server.sys, "platform", "linux")
+        launcher = Mock()
+
+        assert (
+            server.install_gui_console_ctrl_handler(launcher, server._SigintShutdownHandler())
+            is None
+        )
+        launcher.wait_for_front_end.assert_not_called()
 
 
 class TestShutdownExecutor:
