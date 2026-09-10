@@ -34,6 +34,26 @@ def test_open_complete_collection_returns_none_when_missing(tmp_path):
     assert probe._open_complete_collection("bin_missing") is None
 
 
+def test_normalize_collection_name_satisfies_chroma_validation(tmp_path):
+    # Production names already carry the "-<6 hex>" suffix that
+    # _gen_unique_bin_name appends, which guarantees >=3 characters and an
+    # alphanumeric end.
+    probe = _Probe(tmp_path)
+    cases = [
+        ("Chakan (USA, Europe).md-1a2b3c", "Chakan__USA__Europe_.md-1a2b3c"),
+        ("libstdc++.so.6-1a2b3c", "libstdc__.so.6-1a2b3c"),
+        ("日本語-1a2b3c", "1a2b3c"),
+        ("café.exe-1a2b3c", "caf_.exe-1a2b3c"),
+        (".hidden.exe-1a2b3c", "hidden.exe-1a2b3c"),
+    ]
+    for binary_name, collection_name in cases:
+        assert probe._normalize_collection_name(binary_name) == collection_name
+        assert (
+            probe.chroma_client.create_collection(name=collection_name).name
+            == collection_name
+        )
+
+
 def test_incomplete_collection_is_deleted_and_rebuilt(tmp_path):
     # Simulate an interrupted index: collection created + partially populated,
     # but never marked complete.
