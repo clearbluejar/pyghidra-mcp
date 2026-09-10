@@ -822,7 +822,13 @@ class PyGhidraContext(IndexingMixin):
             self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
 
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
-        self.programs[df.pathname].ghidra_analysis_complete = True
+        program_info = self.programs[df.pathname]
+        program_info.ghidra_analysis_complete = True
+        # _init_program_info() caches metadata at import time, before auto-analysis
+        # runs. Re-read it so list_project_binary_metadata reports the post-analysis
+        # values (# of Instructions / # of Functions / Analyzed) instead of a stale
+        # snapshot (all zeros / false).
+        program_info.metadata = self.get_metadata(program)
         return df_or_prog
 
     def set_analysis_option(  # noqa: C901
