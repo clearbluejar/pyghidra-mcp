@@ -1,6 +1,8 @@
 import tomli
+from click.testing import CliRunner
 
 from pyghidra_mcp import __version__
+from pyghidra_mcp.server import main, mcp
 
 
 def test_version_matches_pyproject():
@@ -8,6 +10,17 @@ def test_version_matches_pyproject():
     with open("pyproject.toml", "rb") as f:
         pyproject = tomli.load(f)
     assert __version__ == pyproject["project"]["version"]
+
+
+def test_server_reports_package_version_to_mcp_clients():
+    options = mcp._mcp_server.create_initialization_options()
+    assert options.server_version == __version__
+
+
+def test_server_cli_reports_package_version():
+    result = CliRunner().invoke(main, ["--version"])
+    assert result.exit_code == 0
+    assert __version__ in result.output
 
 
 def test_mcp_dependency_excludes_incompatible_v2():

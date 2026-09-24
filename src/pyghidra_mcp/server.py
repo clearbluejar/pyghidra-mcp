@@ -121,6 +121,7 @@ async def server_lifespan(server: Server) -> AsyncIterator[MCPContext]:
 # Rebuild before FastMCP constructs Settings so pydantic-settings 2.15+ can inspect it.
 FastMCPSettings.model_rebuild()
 mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
+mcp._mcp_server.version = __version__
 
 
 def register_common_tools(server: FastMCP) -> None:
