@@ -165,7 +165,9 @@ class GuiPyGhidraMcpLauncher(PyGhidraLauncher):
     def run_gui_event_loop(self) -> None:
         """Block until the GUI is shutting down, or until we are interrupted."""
 
-        if sys.platform == "darwin":
+        if sys.platform == "darwin" and not (
+            self._is_exiting.is_set() or self._interrupted.is_set()
+        ):
             from pyghidra.launcher import _run_mac_app
 
             _run_mac_app()

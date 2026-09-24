@@ -2387,7 +2387,7 @@ wheels = [
 
 [[package]]
 name = "pyghidra-mcp"
-version = "0.2.3"
+version = "0.2.6"
 source = { editable = "../" }
 dependencies = [
     { name = "chromadb" },
@@ -2406,8 +2406,8 @@ requires-dist = [
     { name = "click-option-group", specifier = ">=0.5.9" },
     { name = "ghidra-stubs", marker = "extra == 'dev'", specifier = ">=11.3.2" },
     { name = "ghidrecomp", specifier = ">=0.5.8" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.26.0" },
-    { name = "mcp", extras = ["cli"], marker = "extra == 'dev'", specifier = ">=1.26.0" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.26.0,<2" },
+    { name = "mcp", extras = ["cli"], marker = "extra == 'dev'", specifier = ">=1.26.0,<2" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
     { name = "pyghidra", specifier = ">=2.2.1" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.0" },
@@ -2425,7 +2425,7 @@ provides-extras = ["dev"]
 dev = [
     { name = "aiohttp" },
     { name = "ghidra-stubs", specifier = ">=11.3.2" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.26.0" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.26.0,<2" },
     { name = "pre-commit", specifier = ">=3.0.0" },
     { name = "pyright", specifier = ">=1.1.0" },
     { name = "pytest", specifier = ">=8.4.1" },
@@ -2439,7 +2439,7 @@ dev = [
 
 [[package]]
 name = "pyghidra-mcp-cli"
-version = "0.2.3"
+version = "0.2.6"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

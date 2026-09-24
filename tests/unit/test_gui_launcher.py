@@ -140,6 +140,23 @@ def test_gui_event_loop_still_ends_on_a_normal_gui_exit():
     assert launcher.interrupted is False
 
 
+@pytest.mark.parametrize("shutdown_signal", ["interrupt", "exit"])
+def test_macos_gui_event_loop_skips_native_loop_after_shutdown(monkeypatch, shutdown_signal):
+    launcher = GuiPyGhidraMcpLauncher(Path("/tmp/project.gpr"))
+    if shutdown_signal == "interrupt":
+        launcher.interrupt()
+    else:
+        launcher._is_exiting.set()
+
+    native_loop = Mock()
+    monkeypatch.setattr("pyghidra.launcher._run_mac_app", native_loop)
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    launcher.run_gui_event_loop()
+
+    native_loop.assert_not_called()
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="console handlers are Windows-only")
 def test_console_ctrl_handler_round_trip():
     from pyghidra_mcp.gui_launcher import (

@@ -15,6 +15,7 @@ import pyghidra
 from click_option_group import optgroup
 from mcp.server import Server
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
 from pyghidra_mcp import __version__, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
@@ -116,7 +117,11 @@ async def server_lifespan(server: Server) -> AsyncIterator[MCPContext]:
         pass
 
 
+# MCP 1.x leaves Settings.lifespan as an unresolved forward reference until rebuilt.
+# Rebuild before FastMCP constructs Settings so pydantic-settings 2.15+ can inspect it.
+FastMCPSettings.model_rebuild()
 mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
+mcp._mcp_server.version = __version__
 
 
 def register_common_tools(server: FastMCP) -> None:
