@@ -24,7 +24,7 @@ jobs:
   test-macos-smoke:
     name: test-macos-smoke (${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python)
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -146,6 +146,25 @@ jobs:
         fi
 
         xattr -dr com.apple.quarantine "${GHIDRA_DIR}" || true
+
+        # Recent public Ghidra archives omit macOS natives, so build the
+        # decompiler and Sleigh executables when they are not bundled.
+        MAC_ARCH="$(uname -m)"
+        case "${MAC_ARCH}" in
+          arm64) GHIDRA_OS="mac_arm_64" ;;
+          x86_64) GHIDRA_OS="mac_x86_64" ;;
+          *) echo "Unsupported macOS architecture: ${MAC_ARCH}" >&2; exit 1 ;;
+        esac
+        DECOMPILER_SRC="${GHIDRA_DIR}/Ghidra/Features/Decompiler/src/decompile/cpp"
+        DECOMPILER_BIN="${GHIDRA_DIR}/Ghidra/Features/Decompiler/os/${GHIDRA_OS}"
+        if [ ! -x "${DECOMPILER_BIN}/decompile" ] || [ ! -x "${DECOMPILER_BIN}/sleigh" ]; then
+          make -C "${DECOMPILER_SRC}" -j4 ghidra_opt ARCH_TYPE="-arch ${MAC_ARCH}"
+          make -C "${DECOMPILER_SRC}" -j4 sleigh_opt ARCH_TYPE="-arch ${MAC_ARCH}"
+          mkdir -p "${DECOMPILER_BIN}"
+          install -m 755 "${DECOMPILER_SRC}/ghidra_opt" "${DECOMPILER_BIN}/decompile"
+          install -m 755 "${DECOMPILER_SRC}/sleigh_opt" "${DECOMPILER_BIN}/sleigh"
+        fi
+
         echo "GHIDRA_INSTALL_DIR=${GHIDRA_DIR}" >> "${GITHUB_ENV}"
 
     - name: Install dependencies
