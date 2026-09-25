@@ -216,6 +216,48 @@ def test_gui_mode_exits_130_when_the_console_handler_interrupts(monkeypatch, tmp
     server.remove_console_ctrl_handler.assert_called_once()
 
 
+def test_headless_stdio_interrupt_closes_project_before_exiting(monkeypatch):
+    class ForcedExitError(Exception):
+        pass
+
+    events = []
+    context = Mock()
+    context.close.side_effect = lambda: events.append("close")
+    fake_mcp = Mock(_pyghidra_context=context)
+
+    def interrupt(_mcp, _transport):
+        events.append("interrupt")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(server, "run_mcp_server", interrupt)
+
+    def force_exit(code):
+        events.append(("exit", code))
+        raise ForcedExitError
+
+    monkeypatch.setattr(server.os, "_exit", force_exit)
+
+    with pytest.raises(ForcedExitError):
+        server.run_headless_server(fake_mcp, "stdio")
+
+    assert events == ["interrupt", "close", ("exit", 130)]
+
+
+def test_headless_http_interrupt_uses_normal_system_exit(monkeypatch):
+    context = Mock()
+    fake_mcp = Mock(_pyghidra_context=context)
+    monkeypatch.setattr(server, "run_mcp_server", Mock(side_effect=KeyboardInterrupt))
+    forced_exit = Mock()
+    monkeypatch.setattr(server.os, "_exit", forced_exit)
+
+    with pytest.raises(SystemExit) as exc_info:
+        server.run_headless_server(fake_mcp, "streamable-http")
+
+    assert exc_info.value.code == 130
+    context.close.assert_called_once_with()
+    forced_exit.assert_not_called()
+
+
 class TestSigintShutdownHandler:
     """Ctrl+C must reach Python (JPype hands SIGINT to the JVM otherwise)."""
 

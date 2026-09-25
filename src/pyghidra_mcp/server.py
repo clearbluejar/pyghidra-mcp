@@ -400,6 +400,12 @@ def run_headless_server(mcp: FastMCP, transport: str) -> None:
     # Exit only after close() has saved and closed everything, so the
     # conventional 130 still means "shut down cleanly on Ctrl+C".
     if interrupted:
+        if transport == "stdio":
+            # MCP's AnyIO stdio reader can leave a non-daemon worker thread
+            # alive after KeyboardInterrupt. sys.exit() then waits for that
+            # thread until another line arrives on stdin (usually Enter).
+            # The project is already saved and closed; exit without waiting.
+            os._exit(130)
         sys.exit(130)
 
 
