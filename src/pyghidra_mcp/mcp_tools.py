@@ -10,6 +10,7 @@ import logging
 from typing import Literal, cast
 
 from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.exceptions import ToolError
 
 from pyghidra_mcp.context_protocol import MCPContext
 from pyghidra_mcp.models import (
@@ -85,13 +86,16 @@ def mcp_error_handler(func):
     """
     action = _get_action_name(func.__name__)
 
-    def handle_error(e: Exception) -> RuntimeError:
-        # MCPServer turns ordinary exceptions into CallToolResult(isError=True),
-        # which keeps actionable tool failures visible to clients and models.
+    def handle_error(e: Exception) -> ToolError:
+        # MCPServer returns ToolError text to the client as CallToolResult(isError=True).
+        # Since MCP 2.2 any other exception is treated as a crash and the client sees
+        # only "Error executing tool <name>", hiding the actionable message.
         # MCPError is intentionally reserved for JSON-RPC protocol failures.
+        if isinstance(e, ToolError):
+            return e
         if isinstance(e, ValueError):
-            return RuntimeError(str(e))
-        return RuntimeError(f"Error {action}: {e!s}")
+            return ToolError(str(e))
+        return ToolError(f"Error {action}: {e!s}")
 
     @functools.wraps(func)
     async def async_wrapper(*args, **kwargs):

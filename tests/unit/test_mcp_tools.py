@@ -3,6 +3,7 @@ import threading
 from unittest.mock import Mock
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 from pyghidra_mcp.gui_context import GuiPyGhidraContext
 from pyghidra_mcp.mcp_tools import (
@@ -24,7 +25,7 @@ def test_mcp_error_handler_preserves_tool_execution_errors():
     def invalid_tool_call():
         raise ValueError("invalid input")
 
-    with pytest.raises(RuntimeError, match="invalid input"):
+    with pytest.raises(ToolError, match="invalid input"):
         invalid_tool_call()
 
 
