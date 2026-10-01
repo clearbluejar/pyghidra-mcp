@@ -45,7 +45,9 @@ async def wait_for_server(base_url: str, timeout=120):
         for _ in range(timeout):
             try:
                 async with session.get(f"{base_url}/mcp") as response:
-                    if response.status == 406:
+                    # A bare GET proves the MCP route is listening: MCP 2 returns
+                    # 400 for missing request metadata, while MCP 1 returned 406.
+                    if response.status in {400, 406}:
                         return
             except aiohttp.ClientConnectorError:
                 pass
@@ -60,7 +62,7 @@ async def wait_for_collections(base_url: str, test_binary, timeout: int = 120) -
     """
     deadline = time.time() + timeout
 
-    async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+    async with streamable_http_client(f"{base_url}/mcp") as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
@@ -145,7 +147,7 @@ def streamable_server(test_binary, ghidra_env, streamable_project_args, streamab
 
 
 async def invoke_tool_concurrently(base_url: str, server_binary_path):
-    async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+    async with streamable_http_client(f"{base_url}/mcp") as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))
@@ -191,7 +193,7 @@ async def invoke_tool_concurrently(base_url: str, server_binary_path):
 
 
 async def invoke_mutation_tools(base_url: str, server_binary_path):
-    async with streamable_http_client(f"{base_url}/mcp") as (read, write, _):
+    async with streamable_http_client(f"{base_url}/mcp") as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             binary_name = PyGhidraContext._gen_unique_bin_name(Path(server_binary_path))

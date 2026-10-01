@@ -83,5 +83,5 @@ async def test_disassemble_invalid_count(server_params, base_address):
                 {"binary_name": binary_name, "address": base_address, "count": 999},
             )
 
-            assert response.isError
-            assert "200" in response.content[0].text
+            assert response.is_error is True
+            assert "count must be <= 200" in response.content[0].text

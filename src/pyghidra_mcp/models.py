@@ -65,6 +65,7 @@ class ImportRequestResult(BaseModel):
 class SaveRequestResult(BaseModel):
     pass
 
+
 class GotoResponse(BaseModel):
     binary_name: str
     address: str

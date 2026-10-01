@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.2.1",
-    "mcp[cli]>=1.9.4",
+    "mcp[cli]>=2.0.0,<3",
     "pydantic>=2.0",
 ]
 
