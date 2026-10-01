@@ -1,6 +1,8 @@
 import concurrent.futures
 import logging
+import re
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,9 +36,28 @@ class IndexingMixin:
         self._index_futures: dict[str, concurrent.futures.Future] = {}
         self._index_lock = threading.Lock()
 
+    def shutdown_executor(
+        self,
+        label: str,
+        executor: concurrent.futures.ThreadPoolExecutor | None,
+    ) -> None:
+        """Drop queued work, then wait -- without a deadline -- for in-flight work.
+
+        ``cancel_futures`` is what makes Ctrl+C responsive: tasks that have not
+        started are dropped instead of run. The wait is deliberately unbounded,
+        because a task already inside Ghidra cannot be interrupted from Python
+        and abandoning it mid-write risks a corrupt program database.
+        """
+        if executor is None:
+            return
+
+        logger.info("Stopping %s tasks (queued work cancelled, in-flight work awaited)...", label)
+        start = time.monotonic()
+        executor.shutdown(wait=True, cancel_futures=True)
+        logger.info("%s tasks stopped after %.1fs.", label.capitalize(), time.monotonic() - start)
+
     def shutdown_indexing(self) -> None:
-        if self.index_executor:
-            self.index_executor.shutdown(wait=True)
+        self.shutdown_executor("indexing", self.index_executor)
 
     def _lookup_program_info(self, binary_name: str) -> Any | None:
         raise NotImplementedError
@@ -97,6 +118,27 @@ class IndexingMixin:
         for program_info in analyzed_programs:
             self.schedule_indexing(program_info.name)
 
+    def _normalize_collection_name(self, name: str) -> str:
+        """Return a name that satisfies Chroma's collection-name validation.
+
+        Chroma only accepts ASCII letters, numbers, dots, dashes, and
+        underscores, starting and ending with an alphanumeric. Names arrive here
+        already carrying the "-<6 hex>" hash suffix appended by
+        _gen_unique_bin_name, which guarantees they are long enough and end
+        alphanumerically, so no length padding or fallback is needed.
+        """
+        # No consecutive dots (Chroma rejects "..").
+        name = re.sub(r"\.{2,}", ".", name)
+
+        # Replace everything Chroma rejects, including whitespace and Unicode
+        # word characters (the previous regex kept both and Chroma refused the
+        # resulting collection name).
+        name = re.sub(r"[^a-zA-Z0-9._-]", "_", name)
+
+        # Chroma requires a leading and trailing alphanumeric (e.g. dotfiles
+        # start with ".").
+        return name.strip("._-")
+
     def _open_complete_collection(self, name: str) -> Any | None:
         """Return an existing, fully-indexed collection, or None.
 
@@ -106,6 +148,7 @@ class IndexingMixin:
         collection on disk. Such a collection (and any legacy one lacking the
         marker) is deleted here so the caller rebuilds it from scratch.
         """
+        name = self._normalize_collection_name(name)
         try:
             collection = self.chroma_client.get_collection(name=name)
         except Exception:
@@ -131,7 +174,9 @@ class IndexingMixin:
         from ghidra.program.model.listing import Function
 
         logger.info("Initializing Chroma code collection for %s", program_info.name)
-        existing = self._open_complete_collection(program_info.name)
+        existing = self._open_complete_collection(
+            self._normalize_collection_name(program_info.name)
+        )
         if existing is not None:
             logger.info(
                 "Collection '%s' already complete; skipping code ingest.", program_info.name
@@ -170,7 +215,8 @@ class IndexingMixin:
         # and is rebuilt on the next run. The add failure is intentionally not
         # swallowed: a partial index must fail loudly so it is not marked done.
         collection = self.chroma_client.create_collection(
-            name=program_info.name, metadata={COLLECTION_COMPLETE_KEY: False}
+            name=self._normalize_collection_name(program_info.name),
+            metadata={COLLECTION_COMPLETE_KEY: False},
         )
         batch_size = 5000
         for i in range(0, len(decompiles), batch_size):
@@ -209,6 +255,11 @@ class IndexingMixin:
     ) -> None:
         with self._index_lock:
             self._index_futures.pop(binary_name, None)
+        # CancelledError derives from BaseException, so shutdown-cancelled work
+        # must be checked for explicitly or it escapes as a spurious callback error.
+        if future.cancelled():
+            logger.info("Background indexing for %s cancelled during shutdown.", binary_name)
+            return
         try:
             future.result()
             logger.info("Background indexing completed successfully for %s.", binary_name)

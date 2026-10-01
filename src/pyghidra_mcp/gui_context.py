@@ -555,18 +555,18 @@ class GuiPyGhidraContext(IndexingMixin):
                 program_info = self._get_unique_short_name_match(binary_name)
 
             if program_info is None:
-                available_progs = list(self.programs.keys())
                 try:
                     opened_info = self.open_program_in_gui(binary_name)
                 except ValueError:
                     raise ValueError(
-                        f"Binary {binary_name} not found. Available binaries: {available_progs}"
+                        f"Binary {binary_name} not found. "
+                         f"Available binaries: {self.list_binaries()}"
                     ) from None
                 program_info = self.programs.get(opened_info["path"])
                 if program_info is None:
+                    # The binary was imported by the user outside our context.
                     raise ValueError(
-                        f"Binary {binary_name} could not be opened. Available binaries: "
-                        f"{available_progs}"
+                        f"Binary {binary_name} not imported by the MCP. Restart pyghidra-mcp."
                     )
         return program_info
 
@@ -695,12 +695,14 @@ class GuiPyGhidraContext(IndexingMixin):
 
     def close(self, save: bool = True) -> None:
         """Release MCP-owned resources. Does not close the GUI project or programs."""
-        self.import_executor.shutdown(wait=True)
+        logger.info("Releasing MCP-owned resources; the GUI owns saving and closing programs.")
+        self.shutdown_executor("import", self.import_executor)
         self.shutdown_indexing()
         with self._programs_lock:
             for program_info in self.programs.values():
                 self._dispose_decompiler(program_info)
             self.programs.clear()
+        logger.info("MCP resources released.")
 
     def save(self):
         with self._programs_lock:

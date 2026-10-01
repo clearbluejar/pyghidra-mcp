@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: '30 5,15 * * *'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published version to test (for example, v0.2.6); blank tests latest'
+        required: false
+        type: string
 
 jobs:
   test-linux:
@@ -59,14 +64,32 @@ jobs:
             uv pip install "pyghidra==2.2.1"
           fi
 
-          # Install pyghidra-mcp-cli from PyPI with dev dependencies
-          uv pip install "pyghidra-mcp-cli[dev]"
+          # Test the version that triggered this release, not a cached older
+          # PyPI version. Scheduled and manual runs continue to test latest.
+          RELEASE_TAG="${{ github.event.release.tag_name || inputs.version }}"
+          PACKAGE_SPEC="pyghidra-mcp-cli[dev]"
+          if [ -n "$RELEASE_TAG" ]; then
+            RELEASE_VERSION="${RELEASE_TAG#v}"
+            PACKAGE_SPEC="${PACKAGE_SPEC}==${RELEASE_VERSION}"
+          fi
+          for attempt in $(seq 1 12); do
+            if uv pip install --refresh "$PACKAGE_SPEC"; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              exit 1
+            fi
+            sleep 10
+          done
+          if [ -n "$RELEASE_TAG" ]; then
+            python -c 'import importlib.metadata as m, sys; assert all(m.version(p) == sys.argv[1] for p in ("pyghidra-mcp", "pyghidra-mcp-cli"))' "$RELEASE_VERSION"
+          fi
           
           # Change to CLI directory where the tests are located
           cd cli
           
-          # Run tests using the CLI's test approach
-          uv run pytest tests/ -v --doctest-modules --junitxml=junit/pypi-test-results-${{ matrix.image }}.xml
+          # Use the active environment; uv run would sync the local CLI project.
+          python -m pytest tests/ -v --doctest-modules --junitxml=junit/pypi-test-results-${{ matrix.image }}.xml
 
     - name: Upload CLI test results
       if: ${{ always() }}
