@@ -8,11 +8,14 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import Mock
 
+import anyio
+import anyio.to_thread
 import click.testing
 import pytest
 from mcp import ClientSession
 from mcp.client._memory import InMemoryTransport
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 import pyghidra_mcp.server as server
 from pyghidra_mcp.indexing_mixin import IndexingMixin
@@ -103,6 +106,101 @@ async def test_tool_validation_failure_is_a_tool_result_error():
 
     assert result.is_error is True
     assert "count must be <= 200" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_registered_sync_tool_schema_hides_context():
+    mcp = MCPServer("pyghidra-mcp-test")
+    server.register_common_tools(mcp)
+
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    schema = tools["search_symbols_by_name"].input_schema
+
+    assert "ctx" not in schema["properties"]
+    assert schema["required"] == ["binary_name", "query"]
+
+
+def test_with_tool_timeout_leaves_async_tools_unchanged():
+    async def async_tool() -> str:
+        return "ok"
+
+    assert server.with_tool_timeout(async_tool) is async_tool
+
+
+@pytest.mark.asyncio
+async def test_with_tool_timeout_runs_sync_tool_in_worker_thread():
+    caller_thread = threading.get_ident()
+
+    def sync_tool(value: str) -> tuple[str, int]:
+        return value, threading.get_ident()
+
+    value, tool_thread = await server.with_tool_timeout(sync_tool)("ok")
+
+    assert value == "ok"
+    assert tool_thread != caller_thread
+
+
+@pytest.mark.asyncio
+async def test_with_tool_timeout_abandons_hung_tool_and_frees_worker_slot(monkeypatch):
+    monkeypatch.setattr(server, "_tool_timeout_seconds", 0.1)
+    release = threading.Event()
+
+    def hung_tool() -> str:
+        release.wait(5)
+        return "late"
+
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    try:
+        with pytest.raises(ToolError, match=r"hung_tool timed out after 0\.1 seconds"):
+            await server.with_tool_timeout(hung_tool)()
+        assert limiter.borrowed_tokens == 0
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_hung_tool_times_out_without_blocking_other_calls(monkeypatch):
+    monkeypatch.setattr(server, "_tool_timeout_seconds", 0.5)
+    release = threading.Event()
+
+    def hung_tool() -> str:
+        """Blocks like a stuck Ghidra iterator."""
+        release.wait(5)
+        return "late"
+
+    def quick_tool() -> str:
+        """Returns immediately."""
+        return "quick"
+
+    mcp = MCPServer("pyghidra-mcp-test")
+    server._add_tool(mcp, hung_tool)
+    server._add_tool(mcp, quick_tool)
+    hung_results = []
+
+    try:
+        async with InMemoryTransport(mcp) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+
+                async def call_hung_tool():
+                    hung_results.append(await session.call_tool("hung_tool"))
+
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(call_hung_tool)
+                    quick_result = await session.call_tool("quick_tool")
+                    assert hung_results == []
+    finally:
+        release.set()
+
+    assert quick_result.is_error is False
+    assert quick_result.content[0].text == "quick"
+    assert hung_results[0].is_error is True
+    assert "timed out after 0.5 seconds" in hung_results[0].content[0].text
+
+
+def test_set_tool_timeout_rejects_non_positive_values():
+    with pytest.raises(ValueError, match="greater than zero"):
+        server.set_tool_timeout(0)
 
 
 @pytest.mark.parametrize(
@@ -331,6 +429,25 @@ def test_gui_mode_allows_missing_project_for_auto_create(monkeypatch, tmp_path):
     assert launcher_state["gpr_path"] == tmp_path / "new_project.gpr"
     assert launcher_state["started"] is True
     server.init_gui_context.assert_called_once()
+
+
+def test_tool_timeout_cli_option_sets_timeout(monkeypatch, tmp_path):
+    _patch_gui_mode(monkeypatch)
+    monkeypatch.setattr(server, "_tool_timeout_seconds", server._tool_timeout_seconds)
+
+    runner = click.testing.CliRunner()
+    result = runner.invoke(server.main, [*_gui_cli_args(tmp_path), "--tool-timeout", "42"])
+
+    assert result.exit_code == 0, result.output
+    assert server._tool_timeout_seconds == 42
+
+
+def test_tool_timeout_cli_option_rejects_zero(tmp_path):
+    runner = click.testing.CliRunner()
+    result = runner.invoke(server.main, [*_gui_cli_args(tmp_path), "--tool-timeout", "0"])
+
+    assert result.exit_code == 2
+    assert "--tool-timeout" in result.output
 
 
 def test_gui_mode_exits_130_when_the_console_handler_interrupts(monkeypatch, tmp_path):

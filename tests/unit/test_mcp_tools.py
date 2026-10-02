@@ -1,5 +1,7 @@
 import asyncio
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock
 
 import pytest
@@ -7,11 +9,14 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from pyghidra_mcp.gui_context import GuiPyGhidraContext
 from pyghidra_mcp.mcp_tools import (
+    _HEADLESS_WRITE_LOCK,
+    _run_for_context,
     decompile_function,
     goto,
     list_project_binaries,
     mcp_error_handler,
     rename_variable,
+    save,
     search_symbols_by_name,
     set_comment,
     set_function_prototype,
@@ -347,3 +352,40 @@ def test_goto_uses_gui_context():
     assert response.binary_name == "sample"
     assert response.address == "1000042e3"
     assert response.success is True
+
+
+def test_headless_writes_are_serialized():
+    pyghidra_context = Mock()
+    counter_lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def write():
+        nonlocal active, max_active
+        with counter_lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with counter_lock:
+            active -= 1
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(_run_for_context, pyghidra_context, write) for _ in range(4)]
+        for future in futures:
+            future.result()
+
+    assert max_active == 1
+
+
+def test_save_holds_headless_write_lock():
+    pyghidra_context = Mock()
+    pyghidra_context.save.side_effect = lambda: held.append(_HEADLESS_WRITE_LOCK.locked())
+    held: list[bool] = []
+
+    ctx = Mock()
+    ctx.request_context.lifespan_context = pyghidra_context
+
+    save(ctx)
+
+    assert held == [True]
+    assert not _HEADLESS_WRITE_LOCK.locked()

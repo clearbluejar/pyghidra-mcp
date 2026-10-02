@@ -327,11 +327,11 @@ class GhidraTools:
 
         funcs = set()
         fm = self.program.getFunctionManager()
+        # getFunctions() only walks memory, so external functions never appear here;
+        # checking isExternal() per function would just add a JNI round trip.
         functions = fm.getFunctions(True)
         for func in functions:
             func: Function
-            if not include_externals and func.isExternal():
-                continue
             if not include_externals and func.thunk:
                 continue
             funcs.add(func)

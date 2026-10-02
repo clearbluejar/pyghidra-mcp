@@ -573,6 +573,10 @@ Options:
                                       use streamable-http instead. [default: stdio]
   -p, --port INTEGER                  Port for HTTP-based transports. [default: 8000]
   -o, --host TEXT                     Host for HTTP-based transports. [default: 127.0.0.1]
+  --tool-timeout INTEGER RANGE        Seconds a tool call may run before it returns
+                                      a timeout error. The Ghidra work cannot be
+                                      interrupted and may finish in the background.
+                                      [default: 600; x>=1]
   --project-path PATH                 Directory for a pyghidra-mcp project or an
                                       existing Ghidra .gpr file. [default: pyghidra_mcp_projects]
   --project-name TEXT                 Ghidra project name. Ignored for .gpr paths.
