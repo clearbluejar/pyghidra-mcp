@@ -1,5 +1,7 @@
 # Server
 # ---------------------------------------------------------------------------------
+import functools
+import inspect
 import json
 import logging
 import os
@@ -10,10 +12,13 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import anyio
+import anyio.to_thread
 import click
 import pyghidra
 from click_option_group import optgroup
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from pyghidra_mcp import __version__, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
@@ -117,36 +122,88 @@ async def server_lifespan(server: MCPServer) -> AsyncIterator[MCPContext]:
 
 mcp = MCPServer("pyghidra-mcp", version=__version__, lifespan=server_lifespan)  # type: ignore
 
+DEFAULT_TOOL_TIMEOUT_SECONDS = 600
+_tool_timeout_seconds = DEFAULT_TOOL_TIMEOUT_SECONDS
+
+
+def set_tool_timeout(seconds: int) -> None:
+    """Set the per-call timeout applied to sync tools (read at call time)."""
+    global _tool_timeout_seconds
+    if seconds <= 0:
+        raise ValueError("Tool timeout must be greater than zero")
+    _tool_timeout_seconds = seconds
+
+
+def with_tool_timeout(func):
+    """Run a sync tool in a worker thread, giving up on it after the tool timeout.
+
+    MCP v2 already offloads sync tools, but without ``abandon_on_cancel`` a hung
+    Ghidra call holds its worker slot forever. Abandoning returns the slot to
+    AnyIO's thread limiter so other calls keep getting workers. The abandoned
+    thread cannot be interrupted from Python and keeps running until its Ghidra
+    call returns, so a timed-out write may still complete later.
+
+    Async tools are returned unchanged; they manage their own deadlines.
+    """
+    if inspect.iscoroutinefunction(func):
+        return func
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        timeout = _tool_timeout_seconds
+        with anyio.move_on_after(timeout):
+            return await anyio.to_thread.run_sync(
+                functools.partial(func, *args, **kwargs), abandon_on_cancel=True
+            )
+
+        logger.warning(
+            "Tool %s timed out after %ss; its worker thread was abandoned and may "
+            "still be running inside Ghidra.",
+            func.__name__,
+            timeout,
+        )
+        raise ToolError(
+            f"{func.__name__} timed out after {timeout} seconds. The Ghidra operation "
+            "could not be interrupted and may still be running (or complete) in the "
+            "background."
+        )
+
+    return wrapper
+
+
+def _add_tool(server: MCPServer, func) -> None:
+    server.tool()(with_tool_timeout(func))
+
 
 def register_common_tools(server: MCPServer) -> None:
-    server.tool()(mcp_tools.decompile_function)
-    server.tool()(mcp_tools.search_symbols_by_name)
-    server.tool()(mcp_tools.search_code)
-    server.tool()(mcp_tools.list_project_binaries)
-    server.tool()(mcp_tools.list_project_binary_metadata)
-    server.tool()(mcp_tools.rename_function)
-    server.tool()(mcp_tools.rename_variable)
-    server.tool()(mcp_tools.save)
-    server.tool()(mcp_tools.set_variable_type)
-    server.tool()(mcp_tools.set_function_prototype)
-    server.tool()(mcp_tools.set_comment)
-    server.tool()(mcp_tools.delete_project_binary)
-    server.tool()(mcp_tools.list_exports)
-    server.tool()(mcp_tools.list_imports)
-    server.tool()(mcp_tools.list_xrefs)
-    server.tool()(mcp_tools.search_strings)
-    server.tool()(mcp_tools.read_bytes)
-    server.tool()(mcp_tools.disassemble)
-    server.tool()(mcp_tools.gen_callgraph)
-    server.tool()(mcp_tools.import_binary)
+    _add_tool(server, mcp_tools.decompile_function)
+    _add_tool(server, mcp_tools.search_symbols_by_name)
+    _add_tool(server, mcp_tools.search_code)
+    _add_tool(server, mcp_tools.list_project_binaries)
+    _add_tool(server, mcp_tools.list_project_binary_metadata)
+    _add_tool(server, mcp_tools.rename_function)
+    _add_tool(server, mcp_tools.rename_variable)
+    _add_tool(server, mcp_tools.save)
+    _add_tool(server, mcp_tools.set_variable_type)
+    _add_tool(server, mcp_tools.set_function_prototype)
+    _add_tool(server, mcp_tools.set_comment)
+    _add_tool(server, mcp_tools.delete_project_binary)
+    _add_tool(server, mcp_tools.list_exports)
+    _add_tool(server, mcp_tools.list_imports)
+    _add_tool(server, mcp_tools.list_xrefs)
+    _add_tool(server, mcp_tools.search_strings)
+    _add_tool(server, mcp_tools.read_bytes)
+    _add_tool(server, mcp_tools.disassemble)
+    _add_tool(server, mcp_tools.gen_callgraph)
+    _add_tool(server, mcp_tools.import_binary)
 
 
 def register_gui_tools(server: MCPServer) -> None:
-    server.tool()(mcp_tools.list_open_programs)
-    server.tool()(mcp_tools.open_program_in_gui)
-    server.tool()(mcp_tools.set_current_program)
-    server.tool()(mcp_tools.goto)
-    server.tool()(mcp_tools.get_gui_context)
+    _add_tool(server, mcp_tools.list_open_programs)
+    _add_tool(server, mcp_tools.open_program_in_gui)
+    _add_tool(server, mcp_tools.set_current_program)
+    _add_tool(server, mcp_tools.goto)
+    _add_tool(server, mcp_tools.get_gui_context)
 
 
 register_common_tools(mcp)
@@ -458,6 +515,17 @@ def run_headless_server(
     help="Host to listen on for HTTP-based transports.",
 )
 @optgroup.option(
+    "--tool-timeout",
+    type=click.IntRange(min=1),
+    default=DEFAULT_TOOL_TIMEOUT_SECONDS,
+    envvar="MCP_TOOL_TIMEOUT",
+    show_default=True,
+    help=(
+        "Seconds a tool call may run before it returns a timeout error. The underlying "
+        "Ghidra work cannot be interrupted and may finish in the background."
+    ),
+)
+@optgroup.option(
     "--project-path",
     type=click.Path(path_type=Path),
     default=Path("pyghidra_mcp_projects"),
@@ -569,6 +637,7 @@ def main(
     project_name: str,
     port: int,
     host: str,
+    tool_timeout: int,
     threaded: bool,
     force_analysis: bool,
     verbose_analysis: bool,
@@ -592,6 +661,8 @@ def main(
     For streamable-http and sse, it will start an HTTP server on the specified port (default 8000).
 
     """
+    set_tool_timeout(tool_timeout)
+
     try:
         project_spec = ProjectSpec.from_cli(
             project_path,

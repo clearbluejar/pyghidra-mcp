@@ -7,6 +7,7 @@ This module contains all MCP tool implementations with centralized error handlin
 import asyncio
 import functools
 import logging
+import threading
 from typing import Literal, cast
 
 from mcp.server.mcpserver import Context
@@ -45,6 +46,13 @@ from pyghidra_mcp.tools import GhidraTools
 logger = logging.getLogger(__name__)
 DECOMPILE_TIMEOUT_GRACE_SECONDS = 1.0
 
+# Tools run concurrently in worker threads. Ghidra merges overlapping transactions
+# on a program, and one aborted transaction rolls back all of them, so a failed
+# write could undo another client's successful one. GUI mode serializes writes on
+# the Swing thread; headless writes (and saves, which fail while a transaction is
+# open) take this lock instead.
+_HEADLESS_WRITE_LOCK = threading.Lock()
+
 
 def _get_pyghidra_context(ctx: Context) -> MCPContext:
     return cast(MCPContext, ctx.request_context.lifespan_context)
@@ -64,7 +72,8 @@ def _run_for_context(pyghidra_context: MCPContext, fn):
 
     if isinstance(pyghidra_context, GuiPyGhidraContext):
         return pyghidra_context.run_on_swing(fn)
-    return fn()
+    with _HEADLESS_WRITE_LOCK:
+        return fn()
 
 
 def _get_action_name(func_name: str) -> str:
@@ -396,7 +405,7 @@ def set_comment(
 
 
 @mcp_error_handler
-async def delete_project_binary(binary_name: str, ctx: Context) -> str:
+def delete_project_binary(binary_name: str, ctx: Context) -> str:
     """Delete a binary from the project."""
     pyghidra_context = _get_pyghidra_context(ctx)
     if pyghidra_context.delete_program(binary_name):
@@ -547,5 +556,6 @@ def import_binary(binary_path: str, ctx: Context) -> ImportRequestResult:
 def save(ctx: Context) -> SaveRequestResult:
     """Save all programs."""
     pyghidra_context = _get_pyghidra_context(ctx)
-    pyghidra_context.save()
+    with _HEADLESS_WRITE_LOCK:
+        pyghidra_context.save()
     return SaveRequestResult()
