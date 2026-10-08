@@ -47,6 +47,7 @@ DECOMPILE_TIMEOUT_GRACE_SECONDS = 1.0
 
 
 def _get_pyghidra_context(ctx: Context) -> MCPContext:
+    """Narrow the SDK's default dictionary lifespan type to our shared context."""
     return cast(MCPContext, ctx.request_context.lifespan_context)
 
 

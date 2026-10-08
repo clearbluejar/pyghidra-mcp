@@ -276,7 +276,6 @@ def init_gui_context(
 def run_mcp_server(
     mcp: MCPServer,
     transport: str,
-    *,
     host: str = "127.0.0.1",
     port: int = 8000,
 ) -> None:
@@ -391,7 +390,6 @@ def run_gui_server(
 def run_headless_server(
     mcp: MCPServer,
     transport: str,
-    *,
     host: str = "127.0.0.1",
     port: int = 8000,
 ) -> None:
