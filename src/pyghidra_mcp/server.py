@@ -13,9 +13,7 @@ from pathlib import Path
 import click
 import pyghidra
 from click_option_group import optgroup
-from mcp.server import Server
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.server import Settings as FastMCPSettings
+from mcp.server.mcpserver import MCPServer
 
 from pyghidra_mcp import __version__, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
@@ -108,7 +106,7 @@ def install_sigint_shutdown_handler() -> _SigintShutdownHandler:
 # Init Pyghidra
 # ---------------------------------------------------------------------------------
 @asynccontextmanager
-async def server_lifespan(server: Server) -> AsyncIterator[MCPContext]:
+async def server_lifespan(server: MCPServer) -> AsyncIterator[MCPContext]:
     """Manage server startup and shutdown lifecycle."""
     try:
         yield server._pyghidra_context  # type: ignore
@@ -117,14 +115,10 @@ async def server_lifespan(server: Server) -> AsyncIterator[MCPContext]:
         pass
 
 
-# MCP 1.x leaves Settings.lifespan as an unresolved forward reference until rebuilt.
-# Rebuild before FastMCP constructs Settings so pydantic-settings 2.15+ can inspect it.
-FastMCPSettings.model_rebuild()
-mcp = FastMCP("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
-mcp._mcp_server.version = __version__
+mcp = MCPServer("pyghidra-mcp", version=__version__, lifespan=server_lifespan)  # type: ignore
 
 
-def register_common_tools(server: FastMCP) -> None:
+def register_common_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.decompile_function)
     server.tool()(mcp_tools.search_symbols_by_name)
     server.tool()(mcp_tools.search_code)
@@ -147,7 +141,7 @@ def register_common_tools(server: FastMCP) -> None:
     server.tool()(mcp_tools.import_binary)
 
 
-def register_gui_tools(server: FastMCP) -> None:
+def register_gui_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.list_open_programs)
     server.tool()(mcp_tools.open_program_in_gui)
     server.tool()(mcp_tools.set_current_program)
@@ -159,7 +153,7 @@ register_common_tools(mcp)
 
 
 def init_pyghidra_context(  # noqa: C901
-    mcp: FastMCP,
+    mcp: MCPServer,
     *,
     transport: str,
     input_paths: list[Path],
@@ -179,7 +173,7 @@ def init_pyghidra_context(  # noqa: C901
     delete_project_binary: str | None,
     symbols_path: str | None,
     sym_file_path: str | None,
-) -> FastMCP:
+) -> MCPServer:
     bin_paths: list[str | Path] = [Path(p) for p in input_paths]
     logger.info(f"Project: {project_name}")
     logger.info(f"Project: Location {project_directory}")
@@ -263,11 +257,11 @@ def init_pyghidra_context(  # noqa: C901
 
 
 def init_gui_context(
-    mcp: FastMCP,
+    mcp: MCPServer,
     *,
     project_spec: ProjectSpec,
     input_paths: list[Path],
-) -> FastMCP:
+) -> MCPServer:
     logger.info("Waiting for Ghidra GUI project...")
     gui_context = GuiPyGhidraContext(project_spec=project_spec)
     if input_paths:
@@ -279,11 +273,16 @@ def init_gui_context(
     return mcp
 
 
-def run_mcp_server(mcp: FastMCP, transport: str) -> None:
+def run_mcp_server(
+    mcp: MCPServer,
+    transport: str,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+) -> None:
     if transport == "stdio":
         mcp.run(transport="stdio")
     elif transport in ["streamable-http", "http"]:
-        mcp.run(transport="streamable-http")
+        mcp.run(transport="streamable-http", host=host, port=port)
     elif transport == "sse":
         import warnings
 
@@ -293,7 +292,7 @@ def run_mcp_server(mcp: FastMCP, transport: str) -> None:
             DeprecationWarning,
             stacklevel=1,
         )
-        mcp.run(transport="sse")
+        mcp.run(transport="sse", host=host, port=port)
     else:
         raise ValueError(f"Invalid transport: {transport}")
 
@@ -328,9 +327,11 @@ def install_gui_console_ctrl_handler(
 
 
 def run_gui_server(
-    mcp: FastMCP,
+    mcp: MCPServer,
     *,
     transport: str,
+    host: str,
+    port: int,
     project_spec: ProjectSpec,
     input_paths: list[Path],
 ) -> None:
@@ -347,7 +348,7 @@ def run_gui_server(
     def gui_server_thread() -> None:
         try:
             init_gui_context(mcp=mcp, project_spec=project_spec, input_paths=input_paths)
-            run_mcp_server(mcp, transport)
+            run_mcp_server(mcp, transport, host=host, port=port)
         except BaseException as exc:
             gui_server_error.append(exc)
             logger.exception("GUI MCP server failed during startup or runtime.")
@@ -386,11 +387,16 @@ def run_gui_server(
         sys.exit(130)
 
 
-def run_headless_server(mcp: FastMCP, transport: str) -> None:
+def run_headless_server(
+    mcp: MCPServer,
+    transport: str,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+) -> None:
     """Run the MCP server and always release the project context on exit."""
     interrupted = False
     try:
-        run_mcp_server(mcp, transport)
+        run_mcp_server(mcp, transport, host=host, port=port)
     except KeyboardInterrupt:
         interrupted = True
         logger.info("Interrupted; starting clean shutdown.")
@@ -596,9 +602,6 @@ def main(
     project_directory = str(project_spec.project_directory)
     project_name = project_spec.project_name
     pyghidra_mcp_dir = project_spec.pyghidra_mcp_dir
-    mcp.settings.port = port
-    mcp.settings.host = host
-
     if gui:
         if transport == "stdio":
             raise click.UsageError("--gui requires --transport streamable-http or --transport http")
@@ -610,6 +613,8 @@ def main(
         run_gui_server(
             mcp,
             transport=transport,
+            host=host,
+            port=port,
             project_spec=project_spec,
             input_paths=input_paths,
         )
@@ -637,7 +642,7 @@ def main(
         symbols_path=symbols_path,
     )
 
-    run_headless_server(mcp, transport)
+    run_headless_server(mcp, transport, host=host, port=port)
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ async def test_list_xrefs(server_params, func_prefix, main_func_name):
                 {"binary_name": binary_name, "name_or_address": name_one},
             )
 
-            # FastMCP serializes each list item as a separate content block
+            # MCPServer serializes each list item as a separate content block
             assert len(response.content) >= 1
             cross_reference_infos = CrossReferenceInfos(**json.loads(response.content[0].text))
 
