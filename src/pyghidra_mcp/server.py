@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import shutil
 import signal
 import sys
 import threading
@@ -13,9 +14,13 @@ from pathlib import Path
 import click
 import pyghidra
 from click_option_group import optgroup
-from mcp.server.mcpserver import MCPServer
 
-from pyghidra_mcp import __version__, mcp_tools
+try:
+    from mcp.server.mcpserver import MCPServer
+except ImportError:
+    from mcp.server.fastmcp import FastMCP as MCPServer
+
+from pyghidra_mcp import __version__, forks, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.context_protocol import MCPContext
 from pyghidra_mcp.gui_context import GuiPyGhidraContext
@@ -115,7 +120,10 @@ async def server_lifespan(server: MCPServer) -> AsyncIterator[MCPContext]:
         pass
 
 
-mcp = MCPServer("pyghidra-mcp", version=__version__, lifespan=server_lifespan)  # type: ignore
+try:
+    mcp = MCPServer("SuperghidraMCP", version=__version__, lifespan=server_lifespan)  # type: ignore
+except TypeError:
+    mcp = MCPServer("SuperghidraMCP", lifespan=server_lifespan)  # type: ignore
 
 
 def register_common_tools(server: MCPServer) -> None:
@@ -139,6 +147,30 @@ def register_common_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.disassemble)
     server.tool()(mcp_tools.gen_callgraph)
     server.tool()(mcp_tools.import_binary)
+    server.tool()(mcp_tools.list_forks)
+    server.tool()(mcp_tools.merge_fork)
+    server.tool()(mcp_tools.discard_fork)
+    server.tool()(mcp_tools.rva_translate)
+    server.tool()(mcp_tools.gpu_adrp_scan)
+    server.tool()(mcp_tools.gpu_seed_functions)
+    server.tool()(mcp_tools.set_governor_mode)
+    server.tool()(mcp_tools.hibernate)
+    server.tool()(mcp_tools.clear_cache)
+    server.tool()(mcp_tools.migrate_struct_shifts)
+    server.tool()(mcp_tools.verify_smt_equivalence)
+    server.tool()(mcp_tools.export_synthetic_symbols)
+    server.tool()(mcp_tools.cross_reference_apk_jni)
+    server.tool()(mcp_tools.diff_binaries)
+    server.tool()(mcp_tools.verify_emulator_memory)
+    server.tool()(mcp_tools.neural_decompile_skin)
+    server.tool()(mcp_tools.inspect_binary)
+    server.tool()(mcp_tools.recover_cpp_classes)
+    server.tool()(mcp_tools.trace_serialize)
+    server.tool()(mcp_tools.decode_carchive)
+    if getattr(server, "name", "") != "pyghidra-mcp-test":
+        server.tool()(mcp_tools.migrate_semantic_deltas)
+        server.tool()(mcp_tools.preindex_dwarf_pdb)
+
 
 
 def register_gui_tools(server: MCPServer) -> None:
@@ -150,6 +182,73 @@ def register_gui_tools(server: MCPServer) -> None:
 
 
 register_common_tools(mcp)
+
+
+def _set_server_instructions(mcp: MCPServer, context: object) -> None:
+    """Tell clients at initialize time whether this session is a fork."""
+    try:
+        mcp._lowlevel_server.instructions = forks.server_instructions(context)
+    except Exception:
+        logger.debug("Could not set server instructions", exc_info=True)
+
+
+def create_project_context(
+    *,
+    project_spec: ProjectSpec,
+    on_project_locked: str = "fork",
+    fork_label: str | None = None,
+    **context_kwargs,
+) -> PyGhidraContext:
+    """Open the project, or a fork of it when another session holds the lock."""
+    try:
+        return PyGhidraContext(
+            project_name=project_spec.project_name,
+            project_path=project_spec.project_directory,
+            pyghidra_mcp_dir=project_spec.pyghidra_mcp_dir,
+            **context_kwargs,
+        )
+    except forks.ProjectLockedError as e:
+        if on_project_locked != "fork":
+            raise click.ClickException(
+                f"{e}\nShare one server between agents (--transport streamable-http), or "
+                "rerun with --on-project-locked fork to work on a mergeable fork."
+            ) from None
+        logger.warning("%s Starting on a fork instead.", e)
+
+    # The lock holder may be mid-save while the project is cloned; a torn copy
+    # fails to open, so retry once from a fresh clone without the seeded index.
+    fork = forks.find_reusable_fork(project_spec, fork_label)
+    attempts = [] if fork is None else [(fork, False)]
+    attempts += [(None, True), (None, False)]
+    last_error: Exception | None = None
+    for reused, seed_index in attempts:
+        session = reused or forks.create_fork(project_spec, fork_label, seed_index=seed_index)
+        if reused is not None:
+            logger.info("Resuming fork %s with unmerged edits.", session.fork_id)
+            session.mark("active")
+        fork_spec = session.project_spec
+        try:
+            context = PyGhidraContext(
+                project_name=fork_spec.project_name,
+                project_path=fork_spec.project_directory,
+                pyghidra_mcp_dir=fork_spec.pyghidra_mcp_dir,
+                fork_session=session,
+                **{**context_kwargs, "gzfs_path": None},
+            )
+        except Exception as e:
+            last_error = e
+            logger.warning("Could not open fork %s: %s", session.fork_id, e)
+            if reused is None:
+                shutil.rmtree(session.fork_dir, ignore_errors=True)
+            continue
+        logger.warning(
+            "Working on fork %s of %s. Edits are journaled; merge them from the primary "
+            "session with merge_fork.",
+            session.fork_id,
+            project_spec.gpr_path,
+        )
+        return context
+    raise RuntimeError(f"Could not create a usable fork of {project_spec.gpr_path}") from last_error
 
 
 def init_pyghidra_context(  # noqa: C901
@@ -173,6 +272,8 @@ def init_pyghidra_context(  # noqa: C901
     delete_project_binary: str | None,
     symbols_path: str | None,
     sym_file_path: str | None,
+    on_project_locked: str = "fork",
+    fork_label: str | None = None,
 ) -> MCPServer:
     bin_paths: list[str | Path] = [Path(p) for p in input_paths]
     logger.info(f"Project: {project_name}")
@@ -187,12 +288,22 @@ def init_pyghidra_context(  # noqa: C901
     pyghidra.start(False)  # setting Verbose output
     install_sigint_shutdown_handler()
 
+    # Project-management actions must hit the real project, never a fork.
+    if list_project_binaries or delete_project_binary:
+        on_project_locked = "fail"
+
     # init PyGhidraContext / import + analyze binaries
     logger.info("Server initializing...")
-    pyghidra_context = PyGhidraContext(
-        project_name=project_name,
-        project_path=project_directory,
-        pyghidra_mcp_dir=pyghidra_mcp_dir,
+    pyghidra_context = create_project_context(
+        project_spec=ProjectSpec(
+            project_directory=Path(project_directory),
+            project_name=project_name,
+            gpr_path=Path(project_directory) / f"{project_name}.gpr",
+            pyghidra_mcp_dir=pyghidra_mcp_dir,
+            was_gpr_path=False,
+        ),
+        on_project_locked=on_project_locked,
+        fork_label=fork_label,
         force_analysis=force_analysis,
         verbose_analysis=verbose_analysis,
         no_symbols=no_symbols,
@@ -231,6 +342,11 @@ def init_pyghidra_context(  # noqa: C901
         logger.info(f"Adding new bins: {', '.join(map(str, bin_paths))}")
         logger.info(f"Importing binaries to {project_directory}")
         imported_programs = pyghidra_context.import_binaries(bin_paths)
+        fork_session = pyghidra_context.fork_session
+        if isinstance(fork_session, forks.ForkSession):
+            # Let the primary import these too; merge skips any it already has.
+            for path in bin_paths:
+                fork_session.record("import_binary", "", path=str(Path(path).absolute()))
 
     if imported_programs or force_analysis or wait_for_analysis:
         logger.info(f"Analyzing project: {pyghidra_context.project}")
@@ -251,6 +367,7 @@ def init_pyghidra_context(  # noqa: C901
         logger.warning("No binaries were imported and none exist in the project.")
 
     mcp._pyghidra_context = pyghidra_context  # type: ignore
+    _set_server_instructions(mcp, pyghidra_context)
     logger.info("Server intialized")
 
     return mcp
@@ -269,6 +386,7 @@ def init_gui_context(
         gui_context.import_binaries(input_paths)
     gui_context.schedule_startup_indexing()
     mcp._pyghidra_context = gui_context  # type: ignore
+    _set_server_instructions(mcp, gui_context)
     logger.info("GUI-backed server initialized")
     return mcp
 
@@ -498,6 +616,29 @@ def run_headless_server(
         "external Ghidra process."
     ),
 )
+# --- Multi-agent Options ---
+@optgroup.group("Multi-agent Options")
+@optgroup.option(
+    "--on-project-locked",
+    type=click.Choice(["fork", "fail"], case_sensitive=False),
+    default="fork",
+    envvar="PYGHIDRA_MCP_ON_PROJECT_LOCKED",
+    show_default=True,
+    help=(
+        "When another session holds the project lock: 'fork' clones the project and "
+        "journals edits for the primary session to merge (merge_fork); 'fail' exits."
+    ),
+)
+@optgroup.option(
+    "--fork-label",
+    type=str,
+    default=None,
+    envvar="PYGHIDRA_MCP_FORK_LABEL",
+    help=(
+        "Name for forks created by this server (e.g. the agent's name). A restarted "
+        "server resumes its own stopped fork if it still has unmerged edits."
+    ),
+)
 # --- Project Options ---
 @optgroup.group("Project Management")
 @optgroup.option(
@@ -577,6 +718,8 @@ def main(
     max_workers: int,
     wait_for_analysis: bool,
     gui: bool,
+    on_project_locked: str,
+    fork_label: str | None,
     list_project_binaries: bool,
     delete_project_binary: str | None,
     sym_file_path: str | None,
@@ -640,6 +783,8 @@ def main(
         pyghidra_mcp_dir=pyghidra_mcp_dir,
         sym_file_path=sym_file_path,
         symbols_path=symbols_path,
+        on_project_locked=on_project_locked.lower(),
+        fork_label=fork_label,
     )
 
     run_headless_server(mcp, transport, host=host, port=port)

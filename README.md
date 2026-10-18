@@ -184,6 +184,7 @@ flowchart TD
       - [Opening by .gpr File](#opening-by-gpr-file)
     - [GUI Mode](#gui-mode)
     - [Startup Defaults and Large Projects](#startup-defaults-and-large-projects)
+    - [Multiple Agents on One Project](#multiple-agents-on-one-project)
   - [Development](#development)
     - [Setup](#setup)
     - [Testing and Quality](#testing-and-quality)
@@ -417,6 +418,49 @@ In practice:
 - if startup latency matters more than immediate search readiness, keep the default `--no-wait-for-analysis`
 - if immediate readiness matters more than startup time, use `--wait-for-analysis`
 
+### Multiple Agents on One Project
+
+Ghidra lets only one process open a project for writing. There are two ways for several agents to work on the same project:
+
+1. **Share one server (live).** Start one `--transport streamable-http` server and point every agent at its URL. All agents see each other's edits immediately. Prefer this whenever your clients can connect over HTTP.
+2. **Forks (automatic).** When each agent launches its own server (typical for stdio configs), the first server holds the project lock and becomes the **primary**. Any later server finds the project locked and, instead of failing, clones it into a **fork** and works there:
+
+```mermaid
+flowchart LR
+    A["Agent A<br/>(primary)"] --> P["main project<br/>shared.gpr"]
+    B["Agent B"] -->|"project locked"| F["fork<br/>shared-pyghidra-mcp/forks/&lt;id&gt;"]
+    F -->|"journal.jsonl:<br/>renames, types,<br/>prototypes, comments"| M["merge_fork<br/>(run by A)"]
+    M --> P
+```
+
+- Every edit made on a fork is appended to a journal as soon as it succeeds, with the value before and after the edit. Work survives even if the fork's server is killed before it saves.
+- The fork's agent is told it is on a fork (MCP `instructions` and the `session` field of `list_project_binaries`). The primary's `list_project_binaries` reports how many fork edits are waiting to be merged.
+- The primary merges with `merge_fork(fork_id)`. Each edit is matched by address (and by variable storage for locals and parameters), then:
+  - **applied** if the primary still has the fork's starting value,
+  - **already_applied** if the primary already has the fork's result,
+  - **conflict** if the primary changed the same item to something else. Conflicts are skipped and reported, or forced with `on_conflict="overwrite"`.
+- Use `dry_run=true` to preview. Merging is incremental: run it while the fork is still working, then again later; edits that are already resolved are not replayed.
+- Imports made on a fork are queued on the primary. Deletions are never replayed.
+- Give each agent a stable `--fork-label` (for example its name). If that agent's server restarts while its fork still has unmerged edits, it resumes that fork instead of starting a new clone.
+- `discard_fork` deletes a stopped fork. Use `--on-project-locked fail` to turn forking off and exit with an error instead.
+
+Example: two agents configured with the same stdio command, differing only in label:
+
+```json
+{
+  "mcpServers": {
+    "pyghidra": {
+      "command": "pyghidra-mcp",
+      "args": ["-t", "stdio", "--project-path", "/re/shared.gpr", "--fork-label", "claude"]
+    }
+  }
+}
+```
+
+Then ask the agent on the primary: *"list the forks and merge them; tell me about any conflicts."*
+
+A fork is a snapshot of the main project's last **saved** state, and it does not receive later changes from the primary. Conflict detection is what keeps that safe.
+
 
 ## Development
 
@@ -535,6 +579,14 @@ Per-item errors are returned inline (other targets still succeed):
 
 - `delete_project_binary(binary_name: str)`: Deletes a binary (program) from the Ghidra project.
 
+#### Multi-agent Fork Tools
+
+See [Multiple Agents on One Project](#multiple-agents-on-one-project).
+
+- `list_forks()`: List this project's forks with their status, whether their server is still running, and pending (unmerged) edit counts, plus this session's role (`primary` or `fork`).
+- `merge_fork(fork_id: str, dry_run: bool = False, on_conflict: str = "skip")`: Replay a fork's journaled edits into the main project. Runs only on the primary. `on_conflict` is `skip` or `overwrite`.
+- `discard_fork(fork_id: str)`: Delete a fork whose server has stopped, along with its unmerged edits.
+
 #### Edit / Mutation Tools
 
 - `rename_function(binary_name: str, name_or_address: str, new_name: str)`: Rename a function by name or address. In GUI mode this runs as a live Ghidra transaction and updates the open program.
@@ -587,6 +639,11 @@ Options:
                                       against GUI-open programs. Cannot attach to
                                       an already-running external Ghidra process.
                                       [default: no-gui]
+  --on-project-locked [fork|fail]     When another session holds the project
+                                      lock: fork and journal edits for merging,
+                                      or exit. [default: fork]
+  --fork-label TEXT                   Name for this server's forks; a restarted
+                                      server resumes its own unmerged fork.
   --list-project-binaries             List ingested project binaries and exit.
   --delete-project-binary TEXT        Delete a project binary by name and exit.
   --force-analysis / --no-force-analysis

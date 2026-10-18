@@ -12,9 +12,17 @@ def main() -> None:
 def __getattr__(name: str):
     """Lazy-load heavy modules to avoid pulling in chromadb/pyghidra at import time."""
     if name == "server":
-        from . import server
+        import importlib
+        import sys
 
-        return server
+        fullname = f"{__name__}.server"
+        if fullname in sys.modules:
+            mod = sys.modules[fullname]
+            setattr(sys.modules[__name__], name, mod)
+            return mod
+        mod = importlib.import_module(fullname)
+        setattr(sys.modules[__name__], name, mod)
+        return mod
     if name == "PyGhidraContext" or name == "ProgramInfo":
         from .context import ProgramInfo, PyGhidraContext
 
@@ -25,7 +33,23 @@ def __getattr__(name: str):
         from .tools import GhidraTools
 
         return GhidraTools
+    if name == "L2SQLiteCache":
+        from .l2_cache import L2SQLiteCache
+
+        return L2SQLiteCache
+    if name == "DecompilerPool":
+        from .decompiler_pool import DecompilerPool
+
+        return DecompilerPool
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["GhidraTools", "ProgramInfo", "PyGhidraContext", "main", "server"]
+__all__ = [
+    "DecompilerPool",
+    "GhidraTools",
+    "L2SQLiteCache",
+    "ProgramInfo",
+    "PyGhidraContext",
+    "main",
+    "server",
+]

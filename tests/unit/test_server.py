@@ -29,26 +29,46 @@ async def test_common_tools_register_with_mcp_v2():
 
     tools = await mcp.list_tools()
     assert {tool.name for tool in tools} == {
+        "clear_cache",
+        "cross_reference_apk_jni",
         "decompile_function",
         "delete_project_binary",
+        "diff_binaries",
         "disassemble",
+        "discard_fork",
+        "export_synthetic_symbols",
         "gen_callgraph",
+        "gpu_adrp_scan",
+        "gpu_seed_functions",
+        "hibernate",
         "import_binary",
+        "inspect_binary",
         "list_exports",
+        "list_forks",
         "list_imports",
+        "merge_fork",
+        "migrate_struct_shifts",
+        "neural_decompile_skin",
         "list_project_binaries",
         "list_project_binary_metadata",
         "list_xrefs",
         "read_bytes",
+        "recover_cpp_classes",
         "rename_function",
         "rename_variable",
+        "rva_translate",
         "save",
         "search_code",
         "search_strings",
         "search_symbols_by_name",
         "set_comment",
         "set_function_prototype",
+        "set_governor_mode",
         "set_variable_type",
+        "trace_serialize",
+        "decode_carchive",
+        "verify_emulator_memory",
+        "verify_smt_equivalence",
     }
 
 
@@ -84,7 +104,7 @@ async def test_common_tool_call_over_mcp_v2_protocol():
             result = await session.call_tool("list_project_binaries")
 
     assert result.is_error is False
-    assert json.loads(result.content[0].text) == {"programs": []}
+    assert json.loads(result.content[0].text) == {"programs": [], "session": None}
     pyghidra_context.list_project_binary_infos.assert_called_once_with()
 
 

@@ -30,6 +30,7 @@ from .commands import (
     callgraph,
     decompile,
     delete,
+    fork,
     goto,
     import_cmd,
     metadata,
@@ -116,6 +117,8 @@ def cli(
         pyghidra-mcp-cli set comment --binary myapp main "reviewed"
         pyghidra-mcp-cli open program --binary myapp
         pyghidra-mcp-cli goto --binary myapp main --type function
+        pyghidra-mcp-cli fork list
+        pyghidra-mcp-cli fork merge <fork_id> --dry-run
     """
     ctx.ensure_object(dict)
     ctx.obj["HOST"] = host
@@ -139,6 +142,7 @@ cli.add_command(import_cmd.import_cmd)
 cli.add_command(save.save)
 cli.add_command(delete.delete)
 cli.add_command(metadata.metadata)
+cli.add_command(fork.fork)
 
 
 if __name__ == "__main__":

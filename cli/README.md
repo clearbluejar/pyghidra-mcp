@@ -104,6 +104,7 @@ Commands:
   import       Import a binary
   delete       Delete a binary
   metadata     Show binary metadata
+  fork         List, merge, or discard forks of a shared project
 ```
 
 ## Command Reference
@@ -241,6 +242,19 @@ Show metadata for a binary.
 
 ```bash
 pyghidra-mcp-cli metadata --binary <binary_name>
+```
+
+### fork
+
+When another server opens a project this server already holds, it works on a fork
+and journals its edits. Run these against the primary server to bring them in.
+
+```bash
+pyghidra-mcp-cli fork list                          # forks and pending edit counts
+pyghidra-mcp-cli fork merge <fork_id> --dry-run     # preview: would_apply / conflict
+pyghidra-mcp-cli fork merge <fork_id>               # apply; conflicts are skipped
+pyghidra-mcp-cli fork merge <fork_id> --overwrite   # apply conflicting edits too
+pyghidra-mcp-cli fork discard <fork_id>             # delete a stopped fork
 ```
 
 ### rename

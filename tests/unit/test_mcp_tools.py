@@ -8,6 +8,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pyghidra_mcp.gui_context import GuiPyGhidraContext
 from pyghidra_mcp.mcp_tools import (
     decompile_function,
+    gen_callgraph,
     goto,
     list_project_binaries,
     mcp_error_handler,
@@ -322,6 +323,37 @@ async def test_decompile_does_not_block_other_tool_calls(monkeypatch):
     release_decompile.set()
     response = await decompile_task
     assert response == [decompiled]
+
+
+@pytest.mark.asyncio
+async def test_gen_callgraph_returns_error_when_traversal_overruns(monkeypatch):
+    pyghidra_context = Mock()
+    pyghidra_context.get_program_info.return_value = Mock()
+
+    release_worker = threading.Event()
+    fake_tools = Mock()
+    fake_tools.gen_callgraph.side_effect = lambda **_kwargs: release_worker.wait(timeout=5)
+    monkeypatch.setattr("pyghidra_mcp.mcp_tools.GhidraTools", lambda _program_info: fake_tools)
+    monkeypatch.setattr("pyghidra_mcp.mcp_tools.CALLGRAPH_TIMEOUT_GRACE_SECONDS", -0.9)
+
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(ToolError, match="did not finish within 1s"):
+        await gen_callgraph(
+            binary_name="sample",
+            function_name="entry",
+            direction="called",
+            max_run_time=1,
+            ctx=_ctx(pyghidra_context),
+        )
+
+    assert asyncio.get_running_loop().time() - started < 1
+    release_worker.set()
+
+
+def _ctx(pyghidra_context):
+    ctx = Mock()
+    ctx.request_context.lifespan_context = pyghidra_context
+    return ctx
 
 
 def test_goto_uses_gui_context():

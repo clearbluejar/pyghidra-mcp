@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Union
 import chromadb
 
 from pyghidra_mcp.decompiler_pool import DecompilerPool
+from pyghidra_mcp.forks import ForkSession, ProjectLockedError
 from pyghidra_mcp.import_detection import is_ghidra_importable
 from pyghidra_mcp.import_planning import ImportCandidate, build_import_plan
 from pyghidra_mcp.indexing_mixin import IndexingMixin
@@ -59,6 +60,7 @@ class PyGhidraContext(IndexingMixin):
     """
 
     _analysis_bundle_host_lock = threading.RLock()
+    fork_session: ForkSession | None = None
 
     def __init__(
         self,
@@ -76,6 +78,7 @@ class PyGhidraContext(IndexingMixin):
         wait_for_analysis: bool = False,
         symbols_path: str | Path | None = None,
         sym_file_path: str | Path | None = None,
+        fork_session: ForkSession | None = None,
     ):
         """
         Initializes a new Ghidra project context.
@@ -94,13 +97,54 @@ class PyGhidraContext(IndexingMixin):
             wait_for_analysis: Wait for initial project analysis to complete.
             symbols_path: Path to local symbol store.
             sym_file_path: Path to a specific PDB file.
+            fork_session: Journal for edits when this context works on a project fork.
+
+        Raises:
+            ProjectLockedError: another process holds the project lock.
         """
         from ghidra.base.project import GhidraProject
 
         self.project_name = project_name
         self.project_path = Path(project_path)
+        self.fork_session = fork_session
         self.project: GhidraProject = self._get_or_create_project()
+        try:
+            self._init_after_project_open(
+                pyghidra_mcp_dir=pyghidra_mcp_dir,
+                force_analysis=force_analysis,
+                verbose_analysis=verbose_analysis,
+                no_symbols=no_symbols,
+                gdts=gdts,
+                program_options=program_options,
+                gzfs_path=gzfs_path,
+                threaded=threaded,
+                max_workers=max_workers,
+                wait_for_analysis=wait_for_analysis,
+                symbols_path=symbols_path,
+                sym_file_path=sym_file_path,
+            )
+        except BaseException:
+            # Release the project lock so a caller can retry (e.g. on a fresh fork).
+            self.project.close()
+            raise
 
+    def _init_after_project_open(
+        self,
+        *,
+        pyghidra_mcp_dir: Path | None,
+        force_analysis: bool,
+        verbose_analysis: bool,
+        no_symbols: bool,
+        gdts: list | None,
+        program_options: dict | None,
+        gzfs_path: str | Path | None,
+        threaded: bool,
+        max_workers: int | None,
+        wait_for_analysis: bool,
+        symbols_path: str | Path | None,
+        sym_file_path: str | Path | None,
+    ) -> None:
+        """Set up MCP state and load programs once the project is open (and locked)."""
         # Use provided pyghidra-mcp directory or create default
         if pyghidra_mcp_dir:
             self.pyghidra_mcp_dir = pyghidra_mcp_dir
@@ -183,6 +227,11 @@ class PyGhidraContext(IndexingMixin):
                 logger.error("Failed to save/close %s.", program_name, exc_info=True)
 
         self.project.close()
+        if self.fork_session is not None:
+            try:
+                self.fork_session.mark("closed")
+            except Exception:
+                logger.warning("Could not mark fork %s closed.", self.fork_session.fork_id)
         if failed:
             logger.error(
                 "Project %s closed in %.1fs, but %s of %s program(s) failed to save: %s",
@@ -216,6 +265,7 @@ class PyGhidraContext(IndexingMixin):
 
         from ghidra.base.project import GhidraProject
         from ghidra.framework.model import ProjectLocator
+        from ghidra.framework.store import LockException
 
         # For standard Ghidra projects, use directory containing .gpr file
         project_dir = self.project_path
@@ -226,7 +276,13 @@ class PyGhidraContext(IndexingMixin):
 
         if locator.exists():
             logger.info(f"Opening existing project: {self.project_name}")
-            return GhidraProject.openProject(project_dir_str, self.project_name, True)
+            try:
+                return GhidraProject.openProject(project_dir_str, self.project_name, True)
+            except LockException as e:
+                raise ProjectLockedError(
+                    f"Ghidra project '{self.project_name}' in {project_dir_str} is locked by "
+                    f"another process: {e.getMessage()}"
+                ) from None
         else:
             logger.info(f"Creating new project: {self.project_name}")
             return GhidraProject.createProject(project_dir_str, self.project_name, False)
@@ -708,13 +764,15 @@ class PyGhidraContext(IndexingMixin):
         verbose_analysis: bool = False,
     ):
         # Import symbol utilities from ghidrecomp
+        from ghidra.app.plugin.core.analysis import PdbUniversalAnalyzer  # type: ignore
         from ghidra.app.script import GhidraScriptUtil
         from ghidra.framework.model import DomainFile
         from ghidra.program.flatapi import FlatProgramAPI
         from ghidra.program.model.listing import Program
         from ghidra.program.util import GhidraProgramUtilities
         from ghidra.util.task import ConsoleTaskMonitor
-        from ghidrecomp.utility import get_pdb, set_pdb, set_remote_pdbs, setup_symbol_server
+        from ghidrecomp.utility import get_pdb, set_remote_pdbs, setup_symbol_server
+        from java.io import File  # type: ignore
 
         df = df_or_prog
         if not isinstance(df_or_prog, DomainFile):
@@ -756,6 +814,12 @@ class PyGhidraContext(IndexingMixin):
             with self._analysis_bundle_host_lock:
                 GhidraScriptUtil.acquireBundleHostReference()
 
+                try:
+                    self.set_analysis_option(program, "Non-Returning Functions - Discovered", False)
+                    self.set_analysis_option(program, "Repair Flow Damage", False)
+                except Exception:
+                    pass
+
                 if program and program.getFunctionManager().getFunctionCount() > 1000:
                     # Force Decomp Param ID is not set
                     if (
@@ -781,15 +845,17 @@ class PyGhidraContext(IndexingMixin):
                     )
                     self.set_analysis_option(program, "PDB Universal", False)
 
+                elif self.sym_file_path:
+                    # Set the analyzer option directly: ghidrecomp's set_pdb (<= 0.5.9)
+                    # reads its path variable before assigning it and always raises.
+                    logger.info(f"Setting PDB file: {self.sym_file_path}")
+                    PdbUniversalAnalyzer.setPdbFileOption(
+                        program, File(str(Path(self.sym_file_path).absolute()))
+                    )
                 else:
-                    # Configure symbols if enabled
-                    if self.sym_file_path:
-                        logger.info(f"Setting PDB file: {self.sym_file_path}")
-                        set_pdb(program, self.sym_file_path)
-                    else:
-                        logger.info(f"Setting up symbol server at {self.symbols_path}")
-                        setup_symbol_server(self.symbols_path)
-                        set_remote_pdbs(program, True)
+                    logger.info(f"Setting up symbol server at {self.symbols_path}")
+                    setup_symbol_server(self.symbols_path)
+                    set_remote_pdbs(program, True)
 
                     # Verify PDB loaded
                     pdb = get_pdb(program)
@@ -815,8 +881,6 @@ class PyGhidraContext(IndexingMixin):
 
         # Save program as gzfs
         if self.gzfs_path is not None:
-            from java.io import File  # type: ignore
-
             pathname = df.pathname.replace("/", "_")
             gzf_file = self.gzfs_path / f"{pathname}.gzf"
             self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)

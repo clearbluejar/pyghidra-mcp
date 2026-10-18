@@ -77,6 +77,8 @@ dev = [
 
 [project.scripts]
 pyghidra-mcp = "pyghidra_mcp.server:main"
+superghidra-mcp = "pyghidra_mcp.server:main"
+SuperghidraMCP = "pyghidra_mcp.server:main"
 
 [tool.hatch.build]
 include = [

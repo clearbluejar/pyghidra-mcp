@@ -442,6 +442,35 @@ class PyGhidraMcpClient:
         )
         return self._extract_result(result)
 
+    async def list_forks(self) -> dict[str, Any]:
+        """List forks of the shared project and this session's role."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool("list_forks", {})
+        return self._extract_result(result)
+
+    async def merge_fork(
+        self, fork_id: str, dry_run: bool = False, on_conflict: str = "skip"
+    ) -> dict[str, Any]:
+        """Replay a fork's journaled edits into the primary project."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "merge_fork",
+            {"fork_id": fork_id, "dry_run": dry_run, "on_conflict": on_conflict},
+        )
+        return self._extract_result(result)
+
+    async def discard_fork(self, fork_id: str) -> dict[str, Any]:
+        """Delete a stopped fork and its journal."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool("discard_fork", {"fork_id": fork_id})
+        return self._extract_result(result)
+
     async def list_project_binary_metadata(self, binary_name: str) -> dict[str, Any]:
         """Get metadata for a binary."""
         if not self._connected:
