@@ -21,6 +21,7 @@ from pyghidra_mcp.models import (
     CallGraphResult,
     CodeSearchResults,
     CommentResponse,
+    CreateFunctionResponse,
     CrossReferenceInfos,
     DecompiledFunction,
     DisassembleResult,
@@ -288,6 +289,31 @@ def get_gui_context(ctx: Context) -> GuiContextResponse:
     """
     gui_context = _require_gui_context(ctx)
     return GuiContextResponse(**gui_context.get_active_gui_context())
+
+
+@mcp_error_handler
+def create_function(
+    binary_name: str,
+    address: str,
+    ctx: Context,
+    name: str | None = None,
+    thumb: bool | None = None,
+) -> CreateFunctionResponse:
+    """Define a function at an address that analysis missed (disassembles first).
+
+    On ARM/Cortex-M an odd address (e.g. a vector-table entry 0x08031C05) is
+    treated as Thumb and bit 0 is cleared. Pass `thumb` to force the mode.
+    Optional `name` sets the function name. Call `save` afterwards to persist.
+    """
+    pyghidra_context = _get_pyghidra_context(ctx)
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.create_function(address, name=name, thumb=thumb),
+    )
+    result = cast(dict, result)
+    return CreateFunctionResponse(binary_name=binary_name, **result)
 
 
 @mcp_error_handler

@@ -80,6 +80,18 @@ class GuiContextResponse(BaseModel):
     location_type: str | None = None
 
 
+class CreateFunctionResponse(BaseModel):
+    binary_name: str
+    address: str
+    name: str
+    created: bool
+    thumb: bool | None = None
+    body_start: str | None = None
+    body_end: str | None = None
+    instruction_count: int = 0
+    message: str = ""
+
+
 class RenameResponse(BaseModel):
     binary_name: str
     address: str

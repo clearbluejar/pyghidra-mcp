@@ -966,6 +966,95 @@ class GhidraTools:
         )
 
     @handle_exceptions
+    def create_function(
+        self, address: str, name: str | None = None, thumb: bool | None = None
+    ) -> dict:
+        """Disassemble from an entry point and define a function there.
+
+        On ARM, an odd address (bit 0 set, as in Cortex-M vector tables and
+        function pointers) means Thumb; the bit is cleared before use.
+        """
+        from java.math import BigInteger  # type: ignore
+        from ghidra.app.cmd.disassemble import DisassembleCommand  # type: ignore
+        from ghidra.app.cmd.function import CreateFunctionCmd  # type: ignore
+        from ghidra.program.model.symbol import SourceType  # type: ignore
+        from ghidra.util.task import TaskMonitor  # type: ignore
+
+        raw = address.strip().lower()
+        if raw.startswith("0x"):
+            raw = raw[2:]
+        try:
+            value = int(raw.replace("_", ""), 16)
+        except ValueError as e:
+            raise ValueError(f"Invalid address format '{address}'") from e
+
+        program = self.program
+        is_arm = "ARM" in str(program.getLanguage().getProcessor())
+        if is_arm and value & 1:
+            value &= ~1
+            if thumb is None:
+                thumb = True
+
+        addr = program.getAddressFactory().getDefaultAddressSpace().getAddress(value)
+        if not program.getMemory().contains(addr):
+            raise ValueError(f"Address {addr} is not in mapped memory")
+
+        fm = program.getFunctionManager()
+        existing = fm.getFunctionAt(addr)
+        if existing is not None:
+            return self._function_summary(existing, created=False, thumb=thumb,
+                                          message="Function already exists")
+        containing = fm.getFunctionContaining(addr)
+        if containing is not None:
+            raise ValueError(
+                f"{addr} is inside existing function {containing.getName()} "
+                f"@ {containing.getEntryPoint()}; rename or delete that one first"
+            )
+
+        monitor = TaskMonitor.DUMMY
+        with ghidra_transaction(program, f"pyghidra-mcp: create function @ {addr}"):
+            if is_arm and thumb is not None:
+                tmode = program.getRegister("TMode")
+                if tmode is not None:
+                    program.getProgramContext().setValue(
+                        tmode, addr, addr, BigInteger.valueOf(1 if thumb else 0)
+                    )
+            if program.getListing().getInstructionAt(addr) is None:
+                dis = DisassembleCommand(addr, None, True)
+                if not dis.applyTo(program, monitor):
+                    raise ValueError(f"Disassembly failed at {addr}: {dis.getStatusMsg()}")
+            if name:
+                cmd = CreateFunctionCmd(name, addr, None, SourceType.USER_DEFINED)
+            else:
+                cmd = CreateFunctionCmd(addr)
+            if not cmd.applyTo(program, monitor):
+                raise ValueError(f"Function creation failed at {addr}: {cmd.getStatusMsg()}")
+
+        func = fm.getFunctionAt(addr)
+        if func is None:
+            raise ValueError(f"No function at {addr} after creation")
+        self.invalidate_decompiler_cache()
+        return self._function_summary(func, created=True, thumb=thumb, message="Created")
+
+    def _function_summary(self, func, created: bool, thumb, message: str) -> dict:
+        body = func.getBody()
+        count = 0
+        it = self.program.getListing().getInstructions(body, True)
+        while it.hasNext():
+            it.next()
+            count += 1
+        return {
+            "address": str(func.getEntryPoint()),
+            "name": str(func.getName()),
+            "created": created,
+            "thumb": thumb,
+            "body_start": str(body.getMinAddress()),
+            "body_end": str(body.getMaxAddress()),
+            "instruction_count": count,
+            "message": message,
+        }
+
+    @handle_exceptions
     def rename_function(self, name_or_address: str, new_name: str) -> dict:
         from ghidra.program.model.symbol import SourceType
 
