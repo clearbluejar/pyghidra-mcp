@@ -11,20 +11,19 @@ from unittest.mock import Mock
 import click.testing
 import pytest
 from mcp import ClientSession
-from mcp.client._memory import InMemoryTransport
-from mcp.server.mcpserver import MCPServer
 
 import pyghidra_mcp.server as server
 from pyghidra_mcp.indexing_mixin import IndexingMixin
+from pyghidra_mcp.mcp_compat import IS_MCP_V2, MCPServer, create_server
 
 
-def test_server_uses_mcp_v2_api():
+def test_server_uses_installed_mcp_api():
     assert isinstance(server.mcp, MCPServer)
 
 
 @pytest.mark.asyncio
-async def test_common_tools_register_with_mcp_v2():
-    mcp = MCPServer("pyghidra-mcp-test")
+async def test_common_tools_register_with_installed_sdk():
+    mcp = create_server("pyghidra-mcp-test")
     server.register_common_tools(mcp)
 
     tools = await mcp.list_tools()
@@ -53,11 +52,11 @@ async def test_common_tools_register_with_mcp_v2():
 
 
 @pytest.mark.asyncio
-async def test_common_tools_list_over_mcp_v2_protocol():
-    mcp = MCPServer("pyghidra-mcp-test")
+async def test_common_tools_list_over_mcp_protocol(mcp_transport):
+    mcp = create_server("pyghidra-mcp-test")
     server.register_common_tools(mcp)
 
-    async with InMemoryTransport(mcp) as (read, write):
+    async with mcp_transport(mcp) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await session.list_tools()
@@ -67,7 +66,7 @@ async def test_common_tools_list_over_mcp_v2_protocol():
 
 
 @pytest.mark.asyncio
-async def test_common_tool_call_over_mcp_v2_protocol():
+async def test_common_tool_call_over_mcp_protocol(mcp_transport):
     pyghidra_context = Mock()
     pyghidra_context.list_project_binary_infos.return_value = []
 
@@ -75,25 +74,25 @@ async def test_common_tool_call_over_mcp_v2_protocol():
     async def lifespan(_mcp):
         yield pyghidra_context
 
-    mcp = MCPServer("pyghidra-mcp-test", lifespan=lifespan)
+    mcp = create_server("pyghidra-mcp-test", lifespan=lifespan)
     server.register_common_tools(mcp)
 
-    async with InMemoryTransport(mcp) as (read, write):
+    async with mcp_transport(mcp) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool("list_project_binaries")
 
-    assert result.is_error is False
+    assert result.model_dump(by_alias=True)["isError"] is False
     assert json.loads(result.content[0].text) == {"programs": []}
     pyghidra_context.list_project_binary_infos.assert_called_once_with()
 
 
 @pytest.mark.asyncio
-async def test_tool_validation_failure_is_a_tool_result_error():
-    mcp = MCPServer("pyghidra-mcp-test")
+async def test_tool_validation_failure_is_a_tool_result_error(mcp_transport):
+    mcp = create_server("pyghidra-mcp-test")
     server.register_common_tools(mcp)
 
-    async with InMemoryTransport(mcp) as (read, write):
+    async with mcp_transport(mcp) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(
@@ -101,7 +100,7 @@ async def test_tool_validation_failure_is_a_tool_result_error():
                 {"binary_name": "sample", "address": "1000", "count": 201},
             )
 
-    assert result.is_error is True
+    assert result.model_dump(by_alias=True)["isError"] is True
     assert "count must be <= 200" in result.content[0].text
 
 
@@ -121,7 +120,12 @@ def test_run_mcp_server_dispatches_supported_transports(transport, expected_kwar
 
     server.run_mcp_server(mcp, transport, host="0.0.0.0", port=9000)
 
-    mcp.run.assert_called_once_with(**expected_kwargs)
+    if IS_MCP_V2 or transport == "stdio":
+        mcp.run.assert_called_once_with(**expected_kwargs)
+    else:
+        mcp.run.assert_called_once_with(transport="streamable-http")
+        assert mcp.settings.host == "0.0.0.0"
+        assert mcp.settings.port == 9000
 
 
 def test_run_mcp_server_dispatches_sse_with_deprecation_warning():
@@ -130,7 +134,12 @@ def test_run_mcp_server_dispatches_sse_with_deprecation_warning():
     with pytest.warns(DeprecationWarning, match="SSE transport is deprecated"):
         server.run_mcp_server(mcp, "sse", host="0.0.0.0", port=9000)
 
-    mcp.run.assert_called_once_with(transport="sse", host="0.0.0.0", port=9000)
+    if IS_MCP_V2:
+        mcp.run.assert_called_once_with(transport="sse", host="0.0.0.0", port=9000)
+    else:
+        mcp.run.assert_called_once_with(transport="sse")
+        assert mcp.settings.host == "0.0.0.0"
+        assert mcp.settings.port == 9000
 
 
 def test_run_mcp_server_rejects_invalid_transport():

@@ -304,6 +304,23 @@ pyghidra-mcp-cli search symbols --binary ls printf -l 10
 
 ## Project Creation, Management, and Opening Existing Projects
 
+### MCP Python SDK compatibility
+
+The server and optional CLI support `mcp>=1.26.0,<3`. Install the same packages
+with either SDK major; no SDK-specific edition or runtime flag is required.
+The server selects SDK 1's `FastMCP` or SDK 2's `MCPServer` from the installed
+dependency, and the CLI accepts both HTTP transport return formats.
+
+Fresh installations normally resolve to the latest compatible SDK. To keep an
+existing SDK 1 environment, install with an explicit constraint:
+
+```bash
+pip install pyghidra-mcp 'mcp>=1.26.0,<2'
+```
+
+Python SDK versions are separate from the MCP protocol versions negotiated by
+clients and servers.
+
 ### Creating New Projects
 
 You can create new projects in several ways, depending on your workflow:

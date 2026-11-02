@@ -13,7 +13,7 @@ async def test_stdio_client_initialization(server_params):
 
             # Check that we got a proper response
             assert result is not None
-            assert result.protocol_version
+            assert result.model_dump(by_alias=True)["protocolVersion"]
 
 
 @pytest.mark.asyncio
