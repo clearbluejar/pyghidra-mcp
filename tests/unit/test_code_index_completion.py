@@ -29,9 +29,9 @@ def _reopen(path):
     return _Probe(path)
 
 
-def test_open_complete_collection_returns_none_when_missing(tmp_path):
+def test_open_collection_returns_none_when_missing(tmp_path):
     probe = _Probe(tmp_path)
-    assert probe._open_complete_collection("bin_missing") is None
+    assert probe._open_collection("bin_missing") is None
 
 
 def test_normalize_collection_name_satisfies_chroma_validation(tmp_path):
@@ -54,22 +54,24 @@ def test_normalize_collection_name_satisfies_chroma_validation(tmp_path):
         )
 
 
-def test_incomplete_collection_is_deleted_and_rebuilt(tmp_path):
+def test_incomplete_collection_is_resumed_not_deleted(tmp_path):
     # Simulate an interrupted index: collection created + partially populated,
-    # but never marked complete.
+    # but never marked complete. Those rows cost decompilation, so a restart must
+    # keep them and continue instead of starting over.
     probe = _Probe(tmp_path)
     collection = probe.chroma_client.create_collection(
         name="bin_partial", metadata={COLLECTION_COMPLETE_KEY: False}
     )
     collection.add(documents=["partial"], ids=["1"])
 
-    # Reopen from disk: the gate must reject and delete the partial collection.
     probe2 = _reopen(tmp_path)
-    assert probe2._open_complete_collection("bin_partial") is None
+    resumed = probe2._open_collection("bin_partial")
 
-    # It must actually be gone so the next run rebuilds from scratch.
-    probe3 = _reopen(tmp_path)
-    assert "bin_partial" not in [c.name for c in probe3.chroma_client.list_collections()]
+    assert resumed is not None
+    assert resumed.count() == 1
+    # Still not searchable: only the completion marker may unlock that.
+    assert probe2._collection_is_complete(resumed) is False
+    assert "bin_partial" in [c.name for c in probe2.chroma_client.list_collections()]
 
 
 def test_complete_collection_is_reused(tmp_path):
@@ -82,7 +84,8 @@ def test_complete_collection_is_reused(tmp_path):
 
     # Reopen from disk: a properly finalized collection is reused, data intact.
     probe2 = _reopen(tmp_path)
-    reused = probe2._open_complete_collection("bin_complete")
+    reused = probe2._open_collection("bin_complete")
+    assert probe2._collection_is_complete(reused) is True
     assert reused is not None
     assert reused.count() == 2
     assert reused.metadata[COLLECTION_COMPLETE_KEY] is True
@@ -95,7 +98,9 @@ def test_collection_without_marker_is_treated_as_incomplete(tmp_path):
     probe.chroma_client.create_collection(name="bin_legacy")
 
     probe2 = _reopen(tmp_path)
-    assert probe2._open_complete_collection("bin_legacy") is None
+    legacy = probe2._open_collection("bin_legacy")
+    assert legacy is not None
+    assert probe2._collection_is_complete(legacy) is False
 
 
 def test_code_indexing_uses_a_finite_decompile_timeout(monkeypatch):
@@ -119,9 +124,10 @@ def test_code_indexing_uses_a_finite_decompile_timeout(monkeypatch):
     monkeypatch.setattr("pyghidra_mcp.indexing_mixin.GhidraTools", Mock(return_value=tools))
 
     probe = IndexingMixin.__new__(IndexingMixin)
-    probe._open_complete_collection = Mock(return_value=None)
+    probe._open_collection = Mock(return_value=None)
     probe._mark_collection_complete = Mock()
     collection = Mock()
+    collection.get.return_value = {"ids": []}
     probe.chroma_client = Mock()
     probe.chroma_client.create_collection.return_value = collection
     program_info = Mock(name="sample", code_collection=None)
@@ -137,3 +143,53 @@ def test_code_indexing_uses_a_finite_decompile_timeout(monkeypatch):
         metadatas=[{"function_name": "entry-1000", "entry_point": "1000"}],
         ids=["entry-1000"],
     )
+
+
+def test_resume_skips_ids_already_stored(tmp_path, monkeypatch):
+    """A resumed run adds only what the interrupted run did not reach."""
+    ghidra_module = types.ModuleType("ghidra")
+    program_module = types.ModuleType("ghidra.program")
+    model_module = types.ModuleType("ghidra.program.model")
+    listing_module = types.ModuleType("ghidra.program.model.listing")
+    listing_module.Function = object
+    monkeypatch.setitem(sys.modules, "ghidra", ghidra_module)
+    monkeypatch.setitem(sys.modules, "ghidra.program", program_module)
+    monkeypatch.setitem(sys.modules, "ghidra.program.model", model_module)
+    monkeypatch.setitem(sys.modules, "ghidra.program.model.listing", listing_module)
+
+    functions = [Mock(), Mock()]
+    for func, entry in zip(functions, ("1000", "2000")):
+        func.getEntryPoint.return_value = entry
+        func.getSymbol.return_value.getName.return_value = f"fun_{entry}"
+
+    def _decompile(func, timeout=None):
+        entry = str(func.getEntryPoint())
+        decompiled = Mock(code=f"void fun_{entry}(void) {{}}")
+        decompiled.name = f"fun_{entry}"
+        return decompiled
+
+    tools = Mock()
+    tools.get_all_functions.return_value = functions
+    tools.decompile_function.side_effect = _decompile
+    monkeypatch.setattr("pyghidra_mcp.indexing_mixin.GhidraTools", Mock(return_value=tools))
+
+    probe = _Probe(tmp_path)
+    collection = probe.chroma_client.create_collection(
+        name="sample", metadata={COLLECTION_COMPLETE_KEY: False}
+    )
+    collection.add(
+        documents=["old"], ids=["fun_1000"], metadatas=[{"function_name": "fun_1000"}]
+    )
+
+    program_info = Mock()
+    program_info.name = "sample"
+    program_info.code_collection = None
+
+    probe._init_chroma_code_collection_for_program(program_info)
+
+    names = [c.name for c in probe.chroma_client.list_collections()]
+    assert "sample" in names
+    resumed = probe.chroma_client.get_collection("sample")
+    assert resumed.count() == 2
+    assert set(resumed.get()["ids"]) == {"fun_1000", "fun_2000"}
+    assert resumed.metadata[COLLECTION_COMPLETE_KEY] is True

@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 # interrupted/partial index) is rebuilt rather than trusted on restart.
 COLLECTION_COMPLETE_KEY = "pyghidra_index_complete"
 
+# Functions decompiled and written per collection.add(). A large binary has
+# hundreds of thousands of functions, and holding every decompiled body until
+# the end of the index is what makes that index need gigabytes of RAM; a window
+# keeps only its own batch alive and gives an interruption something to resume
+# from.
+CODE_INGEST_WINDOW = 2000
+
 
 class IndexingMixin:
     """Shared MCP-side indexing behavior for headless and GUI contexts."""
@@ -139,30 +146,29 @@ class IndexingMixin:
         # start with ".").
         return name.strip("._-")
 
-    def _open_complete_collection(self, name: str) -> Any | None:
-        """Return an existing, fully-indexed collection, or None.
+    def _open_collection(self, name: str) -> Any | None:
+        """Return the collection for *name* in whatever state it is in, or None.
 
         Completion is decided by the ``COLLECTION_COMPLETE_KEY`` marker, not by
         mere existence: chromadb persists a collection the moment it is created,
         so an index interrupted partway through leaves an empty/partial
-        collection on disk. Such a collection (and any legacy one lacking the
-        marker) is deleted here so the caller rebuilds it from scratch.
+        collection on disk.
+
+        A partial collection is not deleted here. It has already paid for every
+        window it holds, and rebuilding a large one costs hours of decompilation;
+        the caller resumes it by skipping the ids that are already stored. The
+        marker still decides whether the collection may be searched, so a
+        resumed collection is never mistaken for a finished index.
         """
         name = self._normalize_collection_name(name)
         try:
-            collection = self.chroma_client.get_collection(name=name)
+            return self.chroma_client.get_collection(name=name)
         except Exception:
             return None
 
-        metadata = collection.metadata or {}
-        if metadata.get(COLLECTION_COMPLETE_KEY):
-            return collection
-
-        logger.warning(
-            "Collection '%s' is incomplete (interrupted index?); deleting to rebuild.", name
-        )
-        self.chroma_client.delete_collection(name=name)
-        return None
+    @staticmethod
+    def _collection_is_complete(collection: Any) -> bool:
+        return bool((collection.metadata or {}).get(COLLECTION_COMPLETE_KEY))
 
     def _mark_collection_complete(self, collection: Any, function_count: int) -> None:
         """Flip a fully-populated collection's completion marker on disk."""
@@ -174,61 +180,105 @@ class IndexingMixin:
         from ghidra.program.model.listing import Function
 
         logger.info("Initializing Chroma code collection for %s", program_info.name)
-        existing = self._open_complete_collection(
+        collection = self._open_collection(
             self._normalize_collection_name(program_info.name)
         )
-        if existing is not None:
+        if collection is not None and self._collection_is_complete(collection):
             logger.info(
                 "Collection '%s' already complete; skipping code ingest.", program_info.name
             )
-            program_info.code_collection = existing
+            program_info.code_collection = collection
             return
 
-        logger.info("Creating new code collection '%s'", program_info.name)
+        if collection is not None:
+            logger.info(
+                "Resuming code collection '%s': %s functions already indexed",
+                program_info.name,
+                collection.count(),
+            )
+        else:
+            logger.info("Creating new code collection '%s'", program_info.name)
+
+        # The marker stays off while windows are written, resumed or not, so a
+        # search can never run against a partial index. The add failure is
+        # intentionally not swallowed: a partial index must fail loudly so it is
+        # not marked done.
+        if collection is None:
+            collection = self.chroma_client.create_collection(
+                name=self._normalize_collection_name(program_info.name),
+                metadata={COLLECTION_COMPLETE_KEY: False},
+            )
+        else:
+            collection.modify(metadata={COLLECTION_COMPLETE_KEY: False})
+
         tools = GhidraTools(program_info)
         functions = tools.get_all_functions()
-        decompiles = []
-        ids = []
-        metadatas = []
+        total = len(functions)
+        indexed = 0
+        reused = 0
+        failed = 0
 
-        for i, func in enumerate(functions):
-            func: Function
-            try:
-                if i % 10 == 0:
-                    logger.debug("Decompiling %s/%s", i, len(functions))
-                decompiled = tools.decompile_function(
-                    func, timeout=DEFAULT_DECOMPILE_TIMEOUT_SECONDS
-                )
-                decompiles.append(decompiled.code)
-                ids.append(decompiled.name)
-                metadatas.append(
-                    {
-                        "function_name": decompiled.name,
-                        "entry_point": str(func.getEntryPoint()),
-                    }
-                )
-            except Exception as e:
-                logger.error("Failed to decompile %s: %s", func.getSymbol().getName(True), e)
+        for start in range(0, total, CODE_INGEST_WINDOW):
+            window = functions[start : start + CODE_INGEST_WINDOW]
+            documents = []
+            ids = []
+            metadatas = []
 
-        # Created with the completion marker off; an interruption before the
-        # marker is flipped below leaves a collection that reads as incomplete
-        # and is rebuilt on the next run. The add failure is intentionally not
-        # swallowed: a partial index must fail loudly so it is not marked done.
-        collection = self.chroma_client.create_collection(
-            name=self._normalize_collection_name(program_info.name),
-            metadata={COLLECTION_COMPLETE_KEY: False},
-        )
-        batch_size = 5000
-        for i in range(0, len(decompiles), batch_size):
-            end = min(i + batch_size, len(decompiles))
-            collection.add(
-                documents=decompiles[i:end],
-                metadatas=metadatas[i:end],
-                ids=ids[i:end],
+            for offset, func in enumerate(window):
+                func: Function
+                try:
+                    if offset % 10 == 0:
+                        logger.debug("Decompiling %s/%s", start + offset, total)
+                    decompiled = tools.decompile_function(
+                        func, timeout=DEFAULT_DECOMPILE_TIMEOUT_SECONDS
+                    )
+                    documents.append(decompiled.code)
+                    ids.append(decompiled.name)
+                    metadatas.append(
+                        {
+                            "function_name": decompiled.name,
+                            "entry_point": str(func.getEntryPoint()),
+                        }
+                    )
+                except Exception as e:
+                    failed += 1
+                    logger.error(
+                        "Failed to decompile %s: %s", func.getSymbol().getName(True), e
+                    )
+
+            if ids:
+                # Ids already stored belong to an earlier, interrupted run; adding
+                # them again fails on the duplicate key, and re-decompiling them is
+                # the cost this resume exists to avoid.
+                known = set(collection.get(ids=ids, include=[])["ids"])
+                if known:
+                    keep = [i for i, doc_id in enumerate(ids) if doc_id not in known]
+                    reused += len(ids) - len(keep)
+                    documents = [documents[i] for i in keep]
+                    metadatas = [metadatas[i] for i in keep]
+                    ids = [ids[i] for i in keep]
+
+            if documents:
+                # Only this window is alive in the heap at this point.
+                collection.add(documents=documents, metadatas=metadatas, ids=ids)
+                indexed += len(documents)
+
+            logger.info(
+                "Indexed %s/%s functions (%s reused, %s failed so far)",
+                indexed + reused,
+                total,
+                reused,
+                failed,
             )
 
-        self._mark_collection_complete(collection, len(ids))
-        logger.info("Code analysis complete for collection '%s'", program_info.name)
+        self._mark_collection_complete(collection, collection.count())
+        logger.info(
+            "Code analysis complete for collection '%s' (%s indexed, %s reused, %s failed)",
+            program_info.name,
+            indexed,
+            reused,
+            failed,
+        )
         program_info.code_collection = collection
 
     def _init_strings_for_program(self, program_info: Any) -> None:
