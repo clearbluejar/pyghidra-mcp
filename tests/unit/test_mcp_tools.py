@@ -3,9 +3,9 @@ import threading
 from unittest.mock import Mock
 
 import pytest
-from mcp.server.mcpserver.exceptions import ToolError
 
 from pyghidra_mcp.gui_context import GuiPyGhidraContext
+from pyghidra_mcp.mcp_compat import ToolError
 from pyghidra_mcp.mcp_tools import (
     decompile_function,
     goto,

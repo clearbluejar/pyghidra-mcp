@@ -30,6 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        sdk: ["2.x"]
         image: [
           "latest",
           "12.1.2ghidra3.13python-bookworm",
@@ -41,6 +42,13 @@ jobs:
           "11.4.1ghidra3.11python-bookworm",
           "11.3ghidra3.10python-bookworm",
         ]
+        include:
+          - image: "12.1.2ghidra3.13python-trixie"
+            sdk: "1.26.0"
+            mcp: "mcp==1.26.0"
+          - image: "11.3ghidra3.10python-bookworm"
+            sdk: "1.x"
+            mcp: "mcp>=1.26.0,<2"
 
     steps:
     - uses: actions/checkout@v4
@@ -70,7 +78,7 @@ jobs:
           fi
 
           # Install your package in editable mode with dev extras
-          pip install -e .[dev]
+          pip install -e '.[dev]' '${{ matrix.mcp || 'mcp>=2,<3' }}'
 
           mkdir -p junit
 
@@ -81,8 +89,8 @@ jobs:
             -rA \
             -vv \
             --durations=20 \
-            --junitxml=junit/unit-test-results-${{ matrix.image }}.xml \
-            2>&1 | tee junit/unit-test-results-${{ matrix.image }}.log
+            --junitxml=junit/unit-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.xml \
+            2>&1 | tee junit/unit-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.log
 
           python -m pytest \
             tests/integration/ \
@@ -90,31 +98,39 @@ jobs:
             -rA \
             -vv \
             --durations=20 \
-            --junitxml=junit/integration-test-results-${{ matrix.image }}.xml \
-            2>&1 | tee junit/integration-test-results-${{ matrix.image }}.log
+            --junitxml=junit/integration-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.xml \
+            2>&1 | tee junit/integration-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.log
 
     - name: Upload unit test results
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
-        name: unit-test-results-${{ matrix.image }}
+        name: unit-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}
         path: |
-          junit/unit-test-results-${{ matrix.image }}.xml
-          junit/unit-test-results-${{ matrix.image }}.log
+          junit/unit-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.xml
+          junit/unit-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.log
         retention-days: 7
 
     - name: Upload integration test results
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
-        name: integration-test-results-${{ matrix.image }}
+        name: integration-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}
         path: |
-          junit/integration-test-results-${{ matrix.image }}.xml
-          junit/integration-test-results-${{ matrix.image }}.log
+          junit/integration-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.xml
+          junit/integration-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.log
         retention-days: 7
 
   test-linux-gui:
-    name: test-linux-gui (12.1.2ghidra3.13python-trixie)
+    name: test-linux-gui (SDK ${{ matrix.sdk }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: "1.x"
+            mcp: "mcp>=1.26.0,<2"
+          - sdk: "2.x"
+            mcp: "mcp>=2,<3"
     runs-on: ubuntu-latest
 
     steps:
@@ -140,7 +156,7 @@ jobs:
           pip install --upgrade pip
           python -m venv .venv
           source .venv/bin/activate
-          pip install -e .[dev]
+          pip install -e '.[dev]' '${{ matrix.mcp }}'
 
           command -v Xvfb
           sudo mkdir -p /tmp/.X11-unix
@@ -156,15 +172,15 @@ jobs:
             -vv \
             -s \
             --durations=10 \
-            --junitxml=junit/gui-integration-test-results.xml \
-            2>&1 | tee junit/gui-integration-test.log
+            --junitxml=junit/gui-integration-test-results-sdk${{ matrix.sdk }}.xml \
+            2>&1 | tee junit/gui-integration-test-sdk${{ matrix.sdk }}.log
 
     - name: Upload GUI integration test results
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
-        name: gui-integration-test-results
+        name: gui-integration-test-results-sdk${{ matrix.sdk }}
         path: |
-          junit/gui-integration-test-results.xml
-          junit/gui-integration-test.log
+          junit/gui-integration-test-results-sdk${{ matrix.sdk }}.xml
+          junit/gui-integration-test-sdk${{ matrix.sdk }}.log
         retention-days: 7

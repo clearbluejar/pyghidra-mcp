@@ -13,7 +13,6 @@ from pathlib import Path
 import click
 import pyghidra
 from click_option_group import optgroup
-from mcp.server.mcpserver import MCPServer
 
 from pyghidra_mcp import __version__, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
@@ -25,6 +24,7 @@ from pyghidra_mcp.gui_launcher import (
     install_console_ctrl_handler,
     remove_console_ctrl_handler,
 )
+from pyghidra_mcp.mcp_compat import MCPServer, create_server, run_server
 from pyghidra_mcp.project_spec import DEFAULT_PROJECT_NAME, ProjectSpec
 
 logging.basicConfig(
@@ -115,7 +115,7 @@ async def server_lifespan(server: MCPServer) -> AsyncIterator[MCPContext]:
         pass
 
 
-mcp = MCPServer("pyghidra-mcp", version=__version__, lifespan=server_lifespan)  # type: ignore
+mcp = create_server("pyghidra-mcp", version=__version__, lifespan=server_lifespan)
 
 
 def register_common_tools(server: MCPServer) -> None:
@@ -280,9 +280,9 @@ def run_mcp_server(
     port: int = 8000,
 ) -> None:
     if transport == "stdio":
-        mcp.run(transport="stdio")
+        run_server(mcp, "stdio", host, port)
     elif transport in ["streamable-http", "http"]:
-        mcp.run(transport="streamable-http", host=host, port=port)
+        run_server(mcp, "streamable-http", host, port)
     elif transport == "sse":
         import warnings
 
@@ -292,7 +292,7 @@ def run_mcp_server(
             DeprecationWarning,
             stacklevel=1,
         )
-        mcp.run(transport="sse", host=host, port=port)
+        run_server(mcp, "sse", host, port)
     else:
         raise ValueError(f"Invalid transport: {transport}")
 

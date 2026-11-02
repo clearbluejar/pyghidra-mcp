@@ -304,5 +304,5 @@ async def test_set_function_prototype_surfaces_parser_errors(
                 },
             )
 
-            assert result.is_error is True
+            assert result.model_dump(by_alias=True)["isError"] is True
             assert "Can't resolve datatype: size_t" in result.content[0].text

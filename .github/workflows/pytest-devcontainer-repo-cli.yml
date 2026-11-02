@@ -35,6 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        sdk: ["2.x"]
         image: [
           "latest",
           "12.1.2ghidra3.13python-bookworm",
@@ -45,6 +46,13 @@ jobs:
           "11.3.2ghidra3.12python-bookworm",
           "11.4.1ghidra3.11python-bookworm",
         ]
+        include:
+          - image: "12.1.2ghidra3.13python-trixie"
+            sdk: "1.26.0"
+            mcp: "mcp==1.26.0"
+          - image: "11.4.1ghidra3.11python-bookworm"
+            sdk: "1.x"
+            mcp: "mcp>=1.26.0,<2"
 
     steps:
     - uses: actions/checkout@v4
@@ -81,25 +89,26 @@ jobs:
 
           # Override PyPI pyghidra-mcp with the local repo version
           uv pip install --reinstall --no-deps -e /workspaces/pyghidra-mcp
+          uv pip install '${{ matrix.mcp || 'mcp>=2,<3' }}'
 
           # Run CLI tests using the CLI's test approach
-          UV_NO_SYNC=1 uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
-          UV_NO_SYNC=1 uv run pytest tests/integration/ -v --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
+          UV_NO_SYNC=1 uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.xml
+          UV_NO_SYNC=1 uv run pytest tests/integration/ -v --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.xml
 
     - name: Upload unit test results
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
-        name: cli-unit-test-results-${{ matrix.image }}
-        path: junit/unit-test-results-${{ matrix.image }}.xml
+        name: cli-unit-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}
+        path: junit/unit-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.xml
         retention-days: 7
 
     - name: Upload integration test results
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
-        name: cli-integration-test-results-${{ matrix.image }}
-        path: junit/integration-test-results-${{ matrix.image }}.xml
+        name: cli-integration-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}
+        path: junit/integration-test-results-${{ matrix.image }}-sdk${{ matrix.sdk }}.xml
         retention-days: 7
 
   cli-test-macos:

@@ -9,10 +9,8 @@ import functools
 import logging
 from typing import Literal, cast
 
-from mcp.server.mcpserver import Context
-from mcp.server.mcpserver.exceptions import ToolError
-
 from pyghidra_mcp.context_protocol import MCPContext
+from pyghidra_mcp.mcp_compat import Context, ToolError
 from pyghidra_mcp.models import (
     BytesReadResult,
     CallGraphDirection,

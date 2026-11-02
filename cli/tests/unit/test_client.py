@@ -70,18 +70,18 @@ def test_client_has_gui_methods():
     assert callable(client.goto)
 
 
-def test_client_extracts_mcp_v2_structured_content():
-    """Test extraction from an MCP 2 result using Python field names."""
+def test_client_extracts_structured_content():
+    """Test extraction with the wire field names shared by both SDKs."""
     from mcp.types import CallToolResult
 
     from pyghidra_mcp_cli.client import PyGhidraMcpClient
 
-    result = CallToolResult(content=[], structured_content={"programs": []})
+    result = CallToolResult.model_validate({"content": [], "structuredContent": {"programs": []}})
 
     assert PyGhidraMcpClient()._extract_result(result) == {"programs": []}
 
 
-def test_client_extracts_mcp_v2_tool_errors():
+def test_client_extracts_tool_errors():
     """Test that MCP tool execution errors remain actionable CLI errors."""
     from mcp.types import CallToolResult, TextContent
 
@@ -89,11 +89,35 @@ def test_client_extracts_mcp_v2_tool_errors():
 
     result = CallToolResult(
         content=[TextContent(type="text", text="count must be <= 200")],
-        is_error=True,
+        isError=True,
     )
 
     with pytest.raises(ClientError, match="count must be <= 200"):
         PyGhidraMcpClient()._extract_result(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_count", [2, 3])
+async def test_client_connects_with_both_sdk_transport_shapes(monkeypatch, stream_count):
+    """SDK 1's third session-ID callback must not break connection or cleanup."""
+    from pyghidra_mcp_cli.client import PyGhidraMcpClient
+
+    streams = tuple(object() for _ in range(stream_count))
+    transport = AsyncMock()
+    transport.__aenter__.return_value = streams
+    session_context = AsyncMock()
+    session = session_context.__aenter__.return_value
+    session_factory = Mock(return_value=session_context)
+    monkeypatch.setattr("mcp.client.streamable_http.streamable_http_client", lambda url: transport)
+    monkeypatch.setattr("mcp.client.session.ClientSession", session_factory)
+
+    async with PyGhidraMcpClient() as client:
+        assert client._connected
+        session_factory.assert_called_once_with(*streams[:2])
+        session.initialize.assert_awaited_once()
+
+    session_context.__aexit__.assert_awaited_once()
+    transport.__aexit__.assert_awaited_once()
 
 
 @pytest.mark.asyncio
