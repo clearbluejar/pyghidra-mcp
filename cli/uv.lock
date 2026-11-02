@@ -2408,7 +2408,7 @@ wheels = [
 
 [[package]]
 name = "pyghidra-mcp"
-version = "0.2.7"
+version = "0.3.0"
 source = { editable = "../" }
 dependencies = [
     { name = "chromadb" },
@@ -2460,7 +2460,7 @@ dev = [
 
 [[package]]
 name = "pyghidra-mcp-cli"
-version = "0.2.7"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
