@@ -53,6 +53,42 @@ class ProgramInfo:
         return self.ghidra_analysis_complete
 
 
+def _analyze_all(program) -> bool:
+    """Run auto-analysis under a monitor that shutdown can cancel.
+
+    ``FlatProgramAPI.analyzeAll()`` takes no monitor, and ``AutoAnalysisManager``
+    cannot cancel an analysis it is already running (``cancelQueuedTasks()`` only
+    drops work that has not started). The run therefore goes through the same
+    calls ``analyzeAll`` makes, with a monitor every analyzer polls at its own
+    checkpoints. ``DummyCancellableTaskMonitor`` never fires on its own (there is
+    no budget here) but is cancellable: a plain ``TaskMonitorAdapter`` starts
+    with cancellation disabled, and ``cancel()`` on one is a no-op.
+
+    The monitor is registered so shutdown can end the run early instead of
+    waiting for a multi-hour pass.
+
+    Returns True when analysis finished, False when it was cancelled.
+    """
+    from ghidra.app.plugin.core.analysis import AutoAnalysisManager
+    from ghidra.util.task import DummyCancellableTaskMonitor
+
+    from pyghidra_mcp.indexing_mixin import (
+        register_analysis_monitor,
+        unregister_analysis_monitor,
+    )
+
+    monitor = DummyCancellableTaskMonitor()
+    register_analysis_monitor(monitor)
+    try:
+        manager = AutoAnalysisManager.getAnalysisManager(program)
+        manager.initializeOptions()
+        manager.reAnalyzeAll(None)
+        manager.startAnalysis(monitor, True)
+    finally:
+        unregister_analysis_monitor(monitor)
+    return not monitor.isCancelled()
+
+
 class PyGhidraContext(IndexingMixin):
     """
     Manages a Ghidra project, including its creation, program imports, and cleanup.
@@ -800,7 +836,13 @@ class PyGhidraContext(IndexingMixin):
 
                 logger.info(f"Starting Ghidra analysis of {program}...")
                 try:
-                    flat_api.analyzeAll(program)
+                    if not _analyze_all(program):
+                        logger.warning(
+                            "Analysis of %s was cancelled by shutdown; the finished part is "
+                            "saved and the program is left unmarked as analyzed.",
+                            program,
+                        )
+                        return
                     if hasattr(GhidraProgramUtilities, "setAnalyzedFlag"):
                         GhidraProgramUtilities.setAnalyzedFlag(program, True)
                     elif hasattr(GhidraProgramUtilities, "markProgramAnalyzed"):
