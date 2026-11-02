@@ -19,6 +19,38 @@ logger = logging.getLogger(__name__)
 COLLECTION_COMPLETE_KEY = "pyghidra_index_complete"
 
 
+# Monitors of the analyses that are running right now.
+
+# A task already inside Ghidra cannot be interrupted from Python, but the monitor
+# it polls can be cancelled, and every analyzer checks it at its own checkpoints.
+# Registering the monitor is what lets shutdown ask an in-flight analysis to stop
+# instead of waiting for the whole pass (hours on a large binary).
+_ACTIVE_ANALYSIS_MONITORS: set[Any] = set()
+_ACTIVE_ANALYSIS_LOCK = threading.Lock()
+
+
+def register_analysis_monitor(monitor: Any) -> None:
+    with _ACTIVE_ANALYSIS_LOCK:
+        _ACTIVE_ANALYSIS_MONITORS.add(monitor)
+
+
+def unregister_analysis_monitor(monitor: Any) -> None:
+    with _ACTIVE_ANALYSIS_LOCK:
+        _ACTIVE_ANALYSIS_MONITORS.discard(monitor)
+
+
+def cancel_active_analyses() -> int:
+    """Cancel every running analysis; each stops at its next analyzer checkpoint."""
+    with _ACTIVE_ANALYSIS_LOCK:
+        monitors = list(_ACTIVE_ANALYSIS_MONITORS)
+    for monitor in monitors:
+        try:
+            monitor.cancel()
+        except Exception:  # cancelling must never abort a shutdown
+            logger.exception("Failed to cancel a running analysis")
+    return len(monitors)
+
+
 class IndexingMixin:
     """Shared MCP-side indexing behavior for headless and GUI contexts."""
 
@@ -41,15 +73,26 @@ class IndexingMixin:
         label: str,
         executor: concurrent.futures.ThreadPoolExecutor | None,
     ) -> None:
-        """Drop queued work, then wait -- without a deadline -- for in-flight work.
+        """Drop queued work, cancel running analysis, then wait for in-flight work.
 
         ``cancel_futures`` is what makes Ctrl+C responsive: tasks that have not
-        started are dropped instead of run. The wait is deliberately unbounded,
-        because a task already inside Ghidra cannot be interrupted from Python
-        and abandoning it mid-write risks a corrupt program database.
+        started are dropped instead of run. A task already inside Ghidra cannot
+        be interrupted from Python, and abandoning it mid-write risks a corrupt
+        program database, so the wait stays unbounded -- but auto-analysis is
+        asked to stop first, through the monitor it polls. Without that request,
+        a stop during analysis only returns when the analysis would have finished
+        anyway, which on a large binary is hours.
         """
         if executor is None:
             return
+
+        if label == "analysis":
+            cancelled = cancel_active_analyses()
+            if cancelled:
+                logger.info(
+                    "Asked %s running analysis task(s) to stop at their next checkpoint.",
+                    cancelled,
+                )
 
         logger.info("Stopping %s tasks (queued work cancelled, in-flight work awaited)...", label)
         start = time.monotonic()
