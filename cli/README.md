@@ -92,7 +92,7 @@ Options:
 
 Commands:
   decompile    Decompile a function
-  search       Search symbols, code, strings
+  search       Search symbols, code, strings, bytes
   list         List binaries, imports, exports, GUI programs
   rename       Rename functions and variables
   set          Set types, prototypes, and comments
@@ -148,6 +148,25 @@ pyghidra-mcp-cli search strings --binary <binary_name> <query> [options]
 
 Options:
   -l, --limit INTEGER     Maximum results (default: 100)
+```
+
+**Search memory for bytes or a value:**
+```bash
+pyghidra-mcp-cli search bytes --binary <binary_name> [PATTERN] [options]
+
+PATTERN is hex byte pairs with optional spaces; ?? matches any byte.
+Give either PATTERN or --value, not both.
+
+Options:
+  --value TEXT            Unsigned value, decimal or 0x hex
+  --width INTEGER         Value width in bytes: 1, 2, 4 or 8 (default: 4)
+  --endian [little|big]   Value byte order (default: little)
+  --thumb                 Also match the value with its low bit set
+  --start TEXT            Inclusive start address (hex)
+  --end TEXT              Inclusive end address (hex)
+  --alignment INTEGER     Match alignment: 1, 2, 4 or 8 (default: 1)
+  -l, --limit INTEGER     Maximum results, 1-1000 (default: 50)
+  --context INTEGER       Bytes of context each side, 0-16 (default: 0)
 ```
 
 ### list
@@ -416,6 +435,12 @@ pyghidra-mcp-cli search code --binary test_binary "error handling" -t 0.7 -l 10
 
 # Symbol search with offset for pagination
 pyghidra-mcp-cli search symbols --binary test_binary "func" -o 10 -l 20
+
+# Byte pattern with a wildcard, quoted so the shell passes it as one argument
+pyghidra-mcp-cli search bytes --binary test_binary "48 65 ?? 6c 6f" -l 10
+
+# A 32-bit Thumb function pointer at aligned addresses
+pyghidra-mcp-cli search bytes --binary firmware.bin --value 0x47b6 --thumb --alignment 4
 ```
 
 ### Call Graph Examples
@@ -499,6 +524,7 @@ netstat -tlnp | grep 8000
 |------|---------|
 | List binaries | `pyghidra-mcp-cli list binaries` |
 | Search symbols | `pyghidra-mcp-cli search symbols --binary BINARY QUERY -l LIMIT` |
+| Search bytes | `pyghidra-mcp-cli search bytes --binary BINARY PATTERN -l LIMIT` |
 | Decompile function | `pyghidra-mcp-cli decompile --binary BINARY FUNCTION` |
 | List imports | `pyghidra-mcp-cli list imports --binary BINARY -l LIMIT` |
 | List exports | `pyghidra-mcp-cli list exports --binary BINARY -l LIMIT` |

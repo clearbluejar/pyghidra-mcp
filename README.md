@@ -536,7 +536,17 @@ Per-item errors are returned inline (other targets still succeed):
 
 - `list_imports(binary_name: str, query: str = ".*", offset: int = 0, limit: int = 25)`: Lists all imported functions and symbols for a specified binary (regex supported for query).
 
-- `read_bytes(binary_name: str, address: str, size: int = 32)`: Reads raw bytes from memory at a specified address. Hex addresses may include or omit the `0x` prefix.
+- `read_bytes(binary_name: str, address: str, size: int = 32)`: Reads 1–8192 raw bytes from memory. Hex addresses may include or omit the `0x` prefix. Chunk larger reads into at most 8192 bytes per call, or use `search_bytes` to find patterns.
+
+- `search_bytes(binary_name: str, pattern: str | None = None, start: str | None = None, end: str | None = None, alignment: int = 1, max_results: int = 50, context_bytes: int = 0, value: int | str | None = None, width: int = 4, endian: str = "little", thumb: bool = False)`: Searches initialized memory and returns addresses and block names. Supply exactly one of `pattern` (hex pairs, optional spaces, `??` wildcard) or unsigned `value` (integer or decimal/`0x` string). Value searches accept width 1/2/4/8 and little/big endian; `thumb=True` also finds `value | 1`. Optional hex `start`/`end` are inclusive and must share an address space; matches stay within one block. Alignment is 1/2/4/8 relative to address zero. Results are capped at `max_results` (1–1000); `truncated` signals additional hits, `returned_count` counts returned hits, and `total_matches` is exact unless truncated (then null). `searched_blocks` lists blocks visited before stopping. Optional `context_bytes` (0–16 per side) returns only neighboring bytes, clipped to the block and range; no bytes are returned by default.
+
+```jsonc
+// Find an exact pattern with a wildcard byte
+{"binary_name": "firmware.bin", "pattern": "b7 47 ?? 00"}
+
+// Find a 32-bit little-endian value and its Thumb form, at aligned addresses
+{"binary_name": "firmware.bin", "value": "0x12345678", "width": 4, "thumb": true, "alignment": 4}
+```
 
 - `search_strings(binary_name: str, query: str, limit: int = 100)`: Searches strings within a binary.
 

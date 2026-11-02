@@ -381,6 +381,42 @@ class PyGhidraMcpClient:
         )
         return self._extract_result(result)
 
+    async def search_bytes(
+        self,
+        binary_name: str,
+        pattern: str | None = None,
+        value: int | str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        width: int = 4,
+        endian: str = "little",
+        thumb: bool = False,
+        alignment: int = 1,
+        max_results: int = 50,
+        context_bytes: int = 0,
+    ) -> dict[str, Any]:
+        """Search initialized memory for a byte pattern or value."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "search_bytes",
+            {
+                "binary_name": binary_name,
+                "pattern": pattern,
+                "value": value,
+                "start": start,
+                "end": end,
+                "width": width,
+                "endian": endian,
+                "thumb": thumb,
+                "alignment": alignment,
+                "max_results": max_results,
+                "context_bytes": context_bytes,
+            },
+        )
+        return self._extract_result(result)
+
     async def gen_callgraph(
         self,
         binary_name: str,
