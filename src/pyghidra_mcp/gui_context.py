@@ -60,6 +60,7 @@ def _open_gui_project(front_end_tool, project_spec):
         opened_project = project_manager.openProject(locator, True, False)
     else:
         opened_project = project_manager.createProject(locator, None, True)
+    front_end_tool.setActiveProject(opened_project)
     return opened_project
 
 
