@@ -145,6 +145,15 @@ class PyGhidraContext(IndexingMixin):
         self.programs: dict[str, ProgramInfo] = {}
         self._init_project_programs()
 
+        # PyGhidra's import hook also acquires scripting-host references. Keep
+        # one alive between analyses so an indexing import cannot race the
+        # host's final disposal against the next analysis's initialization.
+        from ghidra.app.script import GhidraScriptUtil
+
+        with self._analysis_bundle_host_lock:
+            GhidraScriptUtil.acquireBundleHostReference()
+            self._bundle_host_acquired = True
+
     def close(self, save: bool = True):
         """
         Saves changes to all open programs and closes the project.
@@ -182,7 +191,15 @@ class PyGhidraContext(IndexingMixin):
                 failed.append(program_name)
                 logger.error("Failed to save/close %s.", program_name, exc_info=True)
 
-        self.project.close()
+        try:
+            self.project.close()
+        finally:
+            from ghidra.app.script import GhidraScriptUtil
+
+            with self._analysis_bundle_host_lock:
+                if self._bundle_host_acquired:
+                    self._bundle_host_acquired = False
+                    GhidraScriptUtil.releaseBundleHostReference()
         if failed:
             logger.error(
                 "Project %s closed in %.1fs, but %s of %s program(s) failed to save: %s",

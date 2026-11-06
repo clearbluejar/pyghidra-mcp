@@ -2,6 +2,8 @@ import sys
 import types
 from unittest.mock import Mock, call
 
+import pytest
+
 import pyghidra_mcp.context as context_module
 from pyghidra_mcp.context import PyGhidraContext
 
@@ -134,3 +136,38 @@ def test_analysis_done_callback_skips_startup_indexing_when_waiting():
     context._analysis_done_callback(future)
 
     context.schedule_startup_indexing.assert_not_called()
+
+
+@pytest.mark.parametrize("close_fails", [False, True])
+def test_close_releases_scripting_host_after_workers_and_project(monkeypatch, close_fails):
+    events = []
+    script_util = Mock()
+    script_util.releaseBundleHostReference.side_effect = lambda: events.append("release-host")
+    script_module = types.ModuleType("ghidra.app.script")
+    script_module.GhidraScriptUtil = script_util
+    monkeypatch.setitem(sys.modules, "ghidra.app.script", script_module)
+
+    context = PyGhidraContext.__new__(PyGhidraContext)
+    context.project_name = "test"
+    context.programs = {}
+    context.executor = Mock()
+    context.import_executor = Mock()
+    context._bundle_host_acquired = True
+    context.shutdown_executor = Mock(side_effect=lambda label, _: events.append(label))
+    context.shutdown_indexing = Mock(side_effect=lambda: events.append("indexing"))
+
+    def close_project():
+        events.append("project")
+        if close_fails:
+            raise RuntimeError("project close failed")
+
+    context.project = Mock(close=close_project)
+    if close_fails:
+        with pytest.raises(RuntimeError, match="project close failed"):
+            context.close()
+    else:
+        context.close()
+
+    assert events == ["analysis", "indexing", "import", "project", "release-host"]
+    assert context._bundle_host_acquired is False
+    script_util.releaseBundleHostReference.assert_called_once_with()
