@@ -1,6 +1,9 @@
 import asyncio
 import os
+import subprocess
+import sys
 import tempfile
+import textwrap
 import zipfile
 from pathlib import Path
 
@@ -66,6 +69,53 @@ void hello() {
         archive.unlink(missing_ok=True)
         bin_file_1.unlink(missing_ok=True)
         bin_file_2.unlink(missing_ok=True)
+
+
+def test_scripting_host_survives_background_import_and_indexing(
+    binaries_in_directory, ghidra_env, isolated_project_root
+):
+    """Import hooks and analysis must share one live scripting host until shutdown."""
+    filesystem_root, _, _ = binaries_in_directory
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            textwrap.dedent(
+                """
+                import sys
+                import pyghidra
+
+                pyghidra.start(False)
+                from ghidra.app.script import GhidraScriptUtil
+                from pyghidra_mcp.context import PyGhidraContext
+
+                context = PyGhidraContext("scripting-host", sys.argv[1])
+                try:
+                    host = GhidraScriptUtil.getBundleHost()
+                    assert host is not None, "No scripting host retained for background workers"
+                    imported = context.import_binaries([sys.argv[2]], analyze=True)
+                    assert len(imported) == 2, imported
+                    for future in list(context._index_futures.values()):
+                        future.result(timeout=60)
+                    for info in context.programs.values():
+                        assert info.analysis_complete
+                        assert info.code_collection is not None
+                        assert info.strings is not None
+                    assert GhidraScriptUtil.getBundleHost() == host
+                finally:
+                    context.close()
+                assert GhidraScriptUtil.getBundleHost() is None
+                """
+            ),
+            str(isolated_project_root / "scripting-host"),
+            str(filesystem_root),
+        ],
+        env=ghidra_env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.asyncio
