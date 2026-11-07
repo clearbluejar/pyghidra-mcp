@@ -125,6 +125,7 @@ def register_common_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.list_project_binaries)
     server.tool()(mcp_tools.list_project_binary_metadata)
     server.tool()(mcp_tools.rename_function)
+    server.tool()(mcp_tools.rename_symbol)
     server.tool()(mcp_tools.rename_variable)
     server.tool()(mcp_tools.save)
     server.tool()(mcp_tools.set_variable_type)

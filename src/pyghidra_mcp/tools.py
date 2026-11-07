@@ -987,6 +987,29 @@ class GhidraTools:
         }
 
     @handle_exceptions
+    def rename_symbol(self, name_or_address: str, new_name: str) -> dict:
+        """Rename a symbol by name or address. Unnamed DAT_* labels resolve by address only."""
+        from ghidra.program.model.symbol import SourceType
+
+        symbol = self.find_symbol(name_or_address)
+        old_name = str(symbol.getName())
+        address = str(symbol.getAddress())
+
+        with ghidra_transaction(
+            self.program,
+            f"pyghidra-mcp: rename symbol {old_name} -> {new_name}",
+        ):
+            symbol.setName(new_name, SourceType.USER_DEFINED)
+
+        self.invalidate_decompiler_cache()
+
+        return {
+            "address": address,
+            "old_name": old_name,
+            "new_name": new_name,
+        }
+
+    @handle_exceptions
     def rename_variable(
         self,
         function_name_or_address: str,

@@ -471,6 +471,23 @@ class PyGhidraMcpClient:
         )
         return self._extract_result(result)
 
+    async def rename_symbol(
+        self, binary_name: str, name_or_address: str, new_name: str
+    ) -> dict[str, Any]:
+        """Rename a symbol by name or address. Unnamed DAT_* labels resolve by address only."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "rename_symbol",
+            {
+                "binary_name": binary_name,
+                "name_or_address": name_or_address,
+                "new_name": new_name,
+            },
+        )
+        return self._extract_result(result)
+
     async def rename_variable(
         self,
         binary_name: str,
