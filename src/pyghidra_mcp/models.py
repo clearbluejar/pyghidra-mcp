@@ -219,6 +219,25 @@ class BytesReadResult(BaseModel):
     data: str = Field(..., description="hex string")
 
 
+class BytesSearchHit(BaseModel):
+    address: str
+    block: str
+    context_before: str | None = Field(
+        default=None, description="Hex bytes before the match, if requested"
+    )
+    context_after: str | None = Field(
+        default=None, description="Hex bytes after the match, if requested"
+    )
+
+
+class BytesSearchResults(BaseModel):
+    hits: list[BytesSearchHit]
+    returned_count: int
+    total_matches: int | None = Field(..., description="Exact count, or null when truncated")
+    truncated: bool
+    searched_blocks: list[str] = Field(..., description="Blocks visited before the search stopped")
+
+
 class DisassembleResult(BaseModel):
     address: str
     count: int

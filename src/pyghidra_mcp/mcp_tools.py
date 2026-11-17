@@ -13,6 +13,7 @@ from pyghidra_mcp.context_protocol import MCPContext
 from pyghidra_mcp.mcp_compat import Context, ToolError
 from pyghidra_mcp.models import (
     BytesReadResult,
+    BytesSearchResults,
     CallGraphDirection,
     CallGraphDisplayType,
     CallGraphResult,
@@ -476,11 +477,56 @@ def search_strings(
 
 @mcp_error_handler
 def read_bytes(binary_name: str, ctx: Context, address: str, size: int = 32) -> BytesReadResult:
-    """Read raw bytes at an address. Hex format supported (0x prefix optional)."""
+    """Read 1-8192 raw bytes at a hex address (0x optional).
+
+    For larger reads, use chunks of at most 8192 bytes; use search_bytes to find patterns.
+    """
     pyghidra_context = _get_pyghidra_context(ctx)
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
     return tools.read_bytes(address=address, size=size)
+
+
+@mcp_error_handler
+def search_bytes(
+    binary_name: str,
+    ctx: Context,
+    pattern: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    alignment: Literal[1, 2, 4, 8] = 1,
+    max_results: int = 50,
+    context_bytes: int = 0,
+    value: int | str | None = None,
+    width: Literal[1, 2, 4, 8] = 4,
+    endian: Literal["little", "big"] = "little",
+    thumb: bool = False,
+) -> BytesSearchResults:
+    """Find bytes in initialized memory; return addresses and block names.
+
+    Supply either hex pattern (spaces allowed, ?? wildcard) or unsigned value
+    (integer or decimal/0x string), width 1/2/4/8 (default 4), endian little/big.
+    thumb also searches value|1. start/end are inclusive hex addresses in one
+    address space; matches stay within one block. alignment is 1/2/4/8.
+    max_results is 1-1000 (default 50); truncated means more hits exist and
+    total_matches is null. searched_blocks lists visited blocks. context_bytes
+    is 0-16 per side (default 0), clipped to the block and range.
+    """
+    pyghidra_context = _get_pyghidra_context(ctx)
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    return tools.search_bytes(
+        pattern=pattern,
+        start=start,
+        end=end,
+        alignment=alignment,
+        max_results=max_results,
+        context_bytes=context_bytes,
+        value=value,
+        width=width,
+        endian=endian,
+        thumb=thumb,
+    )
 
 
 @mcp_error_handler

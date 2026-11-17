@@ -15,6 +15,8 @@ from jpype import JByte
 
 from pyghidra_mcp.models import (
     BytesReadResult,
+    BytesSearchHit,
+    BytesSearchResults,
     CallGraphDirection,
     CallGraphDisplayType,
     CallGraphResult,
@@ -42,6 +44,39 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 DEFAULT_DECOMPILE_TIMEOUT_SECONDS = 30
+
+
+def _byte_search_pattern(pattern, value, width, endian, thumb):
+    """Compile byte wildcards and the optional Thumb bit to a single masked pattern."""
+    if (pattern is None) == (value is None):
+        raise ValueError("Supply exactly one of pattern or value")
+    if width not in (1, 2, 4, 8) or endian not in ("little", "big"):
+        raise ValueError("width must be 1, 2, 4 or 8; endian must be little or big")
+    if pattern is not None:
+        if thumb or width != 4 or endian != "little":
+            raise ValueError("width, endian and thumb apply only to value searches")
+        compact = "".join(pattern.split())
+        if not compact or re.fullmatch(r"(?:[0-9a-fA-F]{2}|\?\?)+", compact) is None:
+            raise ValueError("pattern must contain hex byte pairs or ?? wildcards")
+        pairs = [compact[i : i + 2] for i in range(0, len(compact), 2)]
+        return (
+            bytes(0 if pair == "??" else int(pair, 16) for pair in pairs),
+            bytes(0 if pair == "??" else 255 for pair in pairs),
+        )
+
+    try:
+        number = int(value, 0) if isinstance(value, str) else value
+    except ValueError as e:
+        raise ValueError("value must be an unsigned integer or decimal/0x string") from e
+    if not isinstance(number, int) or not 0 <= number < 1 << (width * 8):
+        raise ValueError(f"value must fit in an unsigned {width}-byte integer")
+    data = number.to_bytes(width, endian)
+    mask = bytearray([255] * width)
+    if thumb and number & 1 == 0:
+        # The even value and value|1 differ only in the low bit. An odd input
+        # already equals value|1 and must not also match the even value.
+        mask[0 if endian == "little" else width - 1] = 254
+    return data, bytes(mask)
 
 
 @contextmanager
@@ -798,7 +833,7 @@ class GhidraTools:
 
     @handle_exceptions
     def read_bytes(self, address: str, size: int = 32) -> BytesReadResult:
-        """Reads raw bytes from memory at a specified address."""
+        """Read 1-8192 bytes; chunk larger reads or use search_bytes to find patterns."""
         # Maximum size limit to prevent excessive memory reads
         max_read_size = 8192
 
@@ -806,7 +841,10 @@ class GhidraTools:
             raise ValueError("size must be > 0")
 
         if size > max_read_size:
-            raise ValueError(f"Size {size} exceeds maximum {max_read_size}")
+            raise ValueError(
+                f"Size {size} exceeds the read_bytes limit of {max_read_size} bytes. "
+                "Read in chunks of at most 8192 bytes, or use search_bytes to find patterns."
+            )
 
         # Get address factory and parse address
         af = self.program.getAddressFactory()
@@ -843,6 +881,131 @@ class GhidraTools:
             address=str(addr),
             size=len(data),
             data=data.hex(),
+        )
+
+    def _byte_search_address(self, text):
+        if text is None:
+            return None
+        addr = self.program.getAddressFactory().getAddress(re.sub(r"^0x", "", text, flags=re.I))
+        if addr is None or not addr.isMemoryAddress():
+            raise ValueError(f"Invalid memory address: {text}")
+        return addr
+
+    def _byte_search_ranges(self, memory, start, end):
+        lower = self._byte_search_address(start)
+        upper = self._byte_search_address(end)
+        if lower is not None and upper is not None:
+            if not lower.hasSameAddressSpace(upper) or lower.compareTo(upper) > 0:
+                raise ValueError(
+                    "start and end must be ordered addresses in the same address space"
+                )
+        bound = lower if lower is not None else upper
+        for block in memory.getBlocks():
+            if not block.isInitialized():
+                continue
+            lo, hi = block.getStart(), block.getEnd()
+            if bound is not None and not lo.hasSameAddressSpace(bound):
+                continue
+            if lower is not None and lo.compareTo(lower) < 0:
+                lo = lower
+            if upper is not None and hi.compareTo(upper) > 0:
+                hi = upper
+            if lo.compareTo(hi) <= 0:
+                yield block, lo, hi
+
+    @staticmethod
+    def _iter_byte_matches(memory, lo, hi, data, mask, alignment):
+        from ghidra.util.task import TaskMonitor
+
+        # findBytes bounds candidate start addresses, not the end of the match.
+        # Keep the entire match within this initialized block and requested range.
+        if hi.subtract(lo) + 1 < len(data):
+            return
+        last = hi.subtract(len(data) - 1)
+        cursor = lo
+        while cursor.compareTo(last) <= 0:
+            hit = memory.findBytes(cursor, last, data, mask, True, TaskMonitor.DUMMY)
+            if hit is None:
+                return
+            if hit.getOffset() % alignment == 0:
+                yield hit
+            if hit.compareTo(last) == 0:
+                return
+            # Include overlapping matches, with alignment relative to address zero.
+            step = alignment - hit.getOffset() % alignment
+            if last.subtract(hit) < step:
+                return
+            cursor = hit.add(step)
+
+    @staticmethod
+    def _byte_search_hit(memory, block, address, lo, hi, length, context_bytes):
+        result = BytesSearchHit(address=str(address), block=str(block.getName()))
+        if context_bytes:
+            before = min(context_bytes, address.subtract(lo))
+            after = min(context_bytes, hi.subtract(address) - length + 1)
+
+            def read_hex(start, size):
+                if size == 0:
+                    return ""
+                buf: typing.Any = JByte[size]  # type: ignore[reportInvalidTypeArguments]
+                count = memory.getBytes(start, buf)
+                return bytes(b & 0xFF for b in buf[:count]).hex()
+
+            result.context_before = read_hex(address.subtract(before), before)
+            result.context_after = read_hex(address.add(length), after) if after else ""
+        return result
+
+    @handle_exceptions
+    def search_bytes(
+        self,
+        pattern: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        alignment: int = 1,
+        max_results: int = 50,
+        context_bytes: int = 0,
+        value: int | str | None = None,
+        width: int = 4,
+        endian: str = "little",
+        thumb: bool = False,
+    ) -> BytesSearchResults:
+        """Search initialized blocks with Memory.findBytes; no program transactions."""
+        if alignment not in (1, 2, 4, 8):
+            raise ValueError("alignment must be 1, 2, 4 or 8")
+        if not 1 <= max_results <= 1000:
+            raise ValueError("max_results must be between 1 and 1000")
+        if not 0 <= context_bytes <= 16:
+            raise ValueError("context_bytes must be between 0 and 16")
+        data, mask = _byte_search_pattern(pattern, value, width, endian, thumb)
+        # The established Memory API accepts byte masks directly, avoiding a
+        # dependency on newer MemorySearcher APIs and Python-side memory dumps.
+        data_array = JByte[:](data)  # type: ignore[reportInvalidTypeArguments]
+        mask_array = JByte[:](mask)  # type: ignore[reportInvalidTypeArguments]
+        memory = self.program.getMemory()
+        hits: list[BytesSearchHit] = []
+        searched_blocks: list[str] = []
+        for block, lo, hi in self._byte_search_ranges(memory, start, end):
+            searched_blocks.append(str(block.getName()))
+            for address in self._iter_byte_matches(
+                memory, lo, hi, data_array, mask_array, alignment
+            ):
+                if len(hits) == max_results:
+                    return BytesSearchResults(
+                        hits=hits,
+                        returned_count=len(hits),
+                        total_matches=None,
+                        truncated=True,
+                        searched_blocks=searched_blocks,
+                    )
+                hits.append(
+                    self._byte_search_hit(memory, block, address, lo, hi, len(data), context_bytes)
+                )
+        return BytesSearchResults(
+            hits=hits,
+            returned_count=len(hits),
+            total_matches=len(hits),
+            truncated=False,
+            searched_blocks=searched_blocks,
         )
 
     @handle_exceptions
