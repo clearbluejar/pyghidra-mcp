@@ -9,7 +9,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from pyghidra_mcp.tools import GhidraTools, _name_lookup_needs_scan, _name_patterns
+from pyghidra_mcp.tools import GhidraTools, _name_patterns
 
 
 class TestNamePatterns:
@@ -21,9 +21,9 @@ class TestNamePatterns:
         assert _name_patterns("ns::cls::foo", partial=False) == ["*foo"]
 
     def test_exact_thunk_name_also_searches_its_target(self):
-        assert _name_patterns("thunk_fun_1400", partial=False) == [
-            "thunk_fun_1400",
+        assert sorted(_name_patterns("thunk_fun_1400", partial=False)) == [
             "fun_1400",
+            "thunk_fun_1400",
         ]
 
     def test_partial_is_a_contains_pattern(self):
@@ -37,29 +37,19 @@ class TestNamePatterns:
 
 
 class TestNeedsScan:
-    @pytest.mark.parametrize("partial", [False, True])
-    def test_plain_names_use_the_symbol_table(self, partial):
-        assert not _name_lookup_needs_scan("createfilew", partial)
-
-    def test_exact_qualified_names_use_the_symbol_table(self):
-        assert not _name_lookup_needs_scan("kernel32.dll::createfilew", partial=False)
+    """``_name_patterns`` returns None when only a full scan can answer exactly."""
 
     def test_partial_with_colon_scans(self):
-        assert _name_lookup_needs_scan("s::cre", partial=True)
+        assert _name_patterns("s::cre", partial=True) is None
 
-    @pytest.mark.parametrize("name", ["a*b", "a?b", "a\\b"])
-    def test_glob_characters_scan(self, name):
-        assert _name_lookup_needs_scan(name, partial=False)
-
-    def test_non_ascii_scans(self):
-        assert _name_lookup_needs_scan("café", partial=False)
-
-    def test_empty_scans(self):
-        assert _name_lookup_needs_scan("", partial=True)
+    @pytest.mark.parametrize("partial", [False, True])
+    @pytest.mark.parametrize("name", ["a*b", "a?b", "a\\b", "café", ""])
+    def test_globs_non_ascii_and_empty_scan(self, name, partial):
+        assert _name_patterns(name, partial) is None
 
     @pytest.mark.parametrize("name", ["_", "thunk", "unk_", "thunk_"])
     def test_partial_inside_thunk_prefix_scans(self, name):
-        assert _name_lookup_needs_scan(name, partial=True)
+        assert _name_patterns(name, partial=True) is None
 
 
 def _symbol(name, address, qualified=None, sym_id=None):
@@ -106,7 +96,7 @@ def _tools(functions=(), symbols=(), address_hits=None):
     def get_all_functions(include_externals=False):
         return [f for f in functions if include_externals or not f.thunk]
 
-    def name_candidates(name_lc, partial, *, functions_only):
+    def name_candidates(patterns, partial, *, functions_only):
         if functions_only:
             return [f.getSymbol() for f in functions]
         return symbols
