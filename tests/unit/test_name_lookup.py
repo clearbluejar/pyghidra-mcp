@@ -87,11 +87,13 @@ def _function(name, address, full_name=None, thunk_of=None, external=False):
     return func
 
 
-def _tools(functions=(), symbols=(), address_hits=None):
+def _tools(functions=(), symbols=(), address_hits=None, name_index=()):
     """GhidraTools over mocks. Names are never addresses unless listed in address_hits.
 
     ``functions`` with ``external=True`` stand in for imports: the full scan finds them
     through getExternalFunctions(), as Ghidra's getFunctions() never returns them.
+    ``name_index`` is what Ghidra's exact-case name index returns; when it is empty,
+    lookups fall back to the search.
     """
     tools = GhidraTools.__new__(GhidraTools)
     tools.program_info = Mock()
@@ -125,7 +127,65 @@ def _tools(functions=(), symbols=(), address_hits=None):
     tools.get_all_functions = Mock(return_value=internal)
     tools.get_all_symbols = Mock(return_value=symbols)
     tools._find_candidate_symbols = Mock(side_effect=find_candidate_symbols)
+    tools._symbols_from_name_index = Mock(return_value=list(name_index))
     return tools
+
+
+class TestNameIndex:
+    """Exact lookups try Ghidra's name index before searching."""
+
+    def test_index_hit_skips_the_search(self):
+        target = _function("CreateFileW", 0x10, "KERNEL32.DLL::CreateFileW", external=True)
+        tools = _tools(functions=[target], name_index=[target.getSymbol()])
+        assert tools.find_function("CreateFileW") is target
+        tools._find_candidate_symbols.assert_not_called()
+
+    def test_index_hits_are_checked_against_the_full_name(self):
+        a = _function("foo", 0x1000, "A::foo")
+        b = _function("foo", 0x2000, "B::foo")
+        tools = _tools(functions=[a, b], name_index=[a.getSymbol(), b.getSymbol()])
+        assert tools.find_function("B::foo") is b
+        tools._find_candidate_symbols.assert_not_called()
+
+    def test_index_hit_on_a_stub_resolves_to_its_target(self):
+        target = _function("printf", 0x10, "LIBC::printf", external=True)
+        stub = _function("printf", 0x1000, "LIBC::printf", thunk_of=target)
+        tools = _tools(functions=[stub, target], name_index=[stub.getSymbol()])
+        assert tools.find_function("printf") is target
+
+    def test_exact_case_wins_over_other_spellings(self):
+        # The index only finds "foo"; "Foo" would make the search ambiguous.
+        lower = _function("foo", 0x1000)
+        upper = _function("Foo", 0x2000)
+        tools = _tools(functions=[lower, upper], name_index=[lower.getSymbol()])
+        assert tools.find_function("foo") is lower
+
+    def test_index_miss_falls_back_to_the_search(self):
+        target = _function("CreateFileW", 0x10, "KERNEL32.DLL::CreateFileW", external=True)
+        tools = _tools(functions=[target])
+        assert tools.find_function("createfilew") is target
+        tools._find_candidate_symbols.assert_called_once()
+
+    def test_partial_lookups_never_use_the_index(self):
+        func = _function("main", 0x1000)
+        tools = _tools(functions=[func], name_index=[func.getSymbol()])
+        assert tools.find_functions("main") == [func]
+        tools._symbols_from_name_index.assert_not_called()
+
+    def test_symbol_index_hit_skips_the_search(self):
+        label = _symbol("start", 0x1000)
+        tools = _tools(symbols=[label], name_index=[label])
+        assert tools.find_symbol("start") is label
+        tools._find_candidate_symbols.assert_not_called()
+
+    def test_index_is_asked_for_the_last_part_in_its_original_case(self):
+        tools = GhidraTools.__new__(GhidraTools)
+        tools.program = Mock()
+        func = _function("Foo", 0x1000, "Ns::Foo")
+        symbol_table = tools.program.getSymbolTable.return_value
+        symbol_table.getSymbols.return_value = [func.getSymbol()]
+        assert tools._symbols_from_name_index("Ns::Foo", functions_only=True) == [func.getSymbol()]
+        symbol_table.getSymbols.assert_called_once_with("Foo")
 
 
 class TestFindFunction:

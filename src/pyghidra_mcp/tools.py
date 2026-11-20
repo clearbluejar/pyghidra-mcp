@@ -85,6 +85,24 @@ def _matches_exactly(symbol, name: str) -> bool:
     return symbol.getName().lower() == name or symbol.getName(True).lower() == name
 
 
+def _keep_lookup_kinds(symbols: typing.Iterable, functions_only: bool) -> list:
+    """Keep function symbols, or with ``functions_only`` unset, the symbols
+    getAllSymbols() would list: it skips variables and namespaces, which have no memory
+    address."""
+    from ghidra.program.model.symbol import SymbolType
+
+    results = []
+    for symbol in symbols:
+        if functions_only:
+            if symbol.getSymbolType() == SymbolType.FUNCTION:
+                results.append(symbol)
+            continue
+        address = symbol.getAddress()
+        if address.isMemoryAddress() or address.isExternalAddress():
+            results.append(symbol)
+    return results
+
+
 def _address_then_id(symbol) -> tuple:
     # Several symbols can share an address, so the ID keeps the order stable.
     return (symbol.getAddress(), int(symbol.getID()))
@@ -206,17 +224,13 @@ class GhidraTools:
             return [func]
 
         name = name_or_address.lower()
-        patterns = _symbol_search_patterns(name, partial)
-        if patterns is None:
-            candidates = []
-            for func in self.get_all_functions(include_externals=True):
-                candidates.append(func.getSymbol())
-            for func in self.program.getFunctionManager().getExternalFunctions():
-                candidates.append(func.getSymbol())
-        else:
-            candidates = self._find_candidate_symbols(patterns, partial, functions_only=True)
-
-        matches = _filter_and_sort_matches(candidates, name, partial)
+        matches = []
+        if not partial:
+            indexed = self._symbols_from_name_index(name_or_address, functions_only=True)
+            matches = _filter_and_sort_matches(indexed, name, partial)
+        if not matches:
+            candidates = self._function_candidates(name, partial)
+            matches = _filter_and_sort_matches(candidates, name, partial)
         if not partial:
             matches = self._replace_stubs_with_targets(matches, name)
 
@@ -227,6 +241,31 @@ class GhidraTools:
                 continue
             functions.append(func)
         return functions
+
+    def _function_candidates(self, name: str, partial: bool) -> list["Symbol"]:
+        """Function symbols that might match ``name``; the caller checks each one."""
+        # The symbol table can only search simple names (foo, not ns::foo), so the
+        # patterns find every symbol that might match, plus some that don't.
+        patterns = _symbol_search_patterns(name, partial)
+        if patterns is not None:
+            return self._find_candidate_symbols(patterns, partial, functions_only=True)
+        candidates = []
+        for func in self.get_all_functions(include_externals=True):
+            candidates.append(func.getSymbol())
+        for func in self.program.getFunctionManager().getExternalFunctions():
+            candidates.append(func.getSymbol())
+        return candidates
+
+    def _symbols_from_name_index(
+        self, name_or_address: str, *, functions_only: bool
+    ) -> list["Symbol"]:
+        """Symbols whose simple name is exactly the last part of ``name_or_address``,
+        case included, from Ghidra's name index. One call instead of a search, but it
+        misses other spellings of the case and auto-named thunks, so callers fall back to
+        a search when it finds no match."""
+        simple_name = name_or_address.split("::")[-1]
+        symbols = self.program.getSymbolTable().getSymbols(simple_name)
+        return _keep_lookup_kinds(symbols, functions_only)
 
     def _function_at_address(self, text: str) -> "Function | None":
         """The function at or containing ``text`` read as an address, if any."""
@@ -273,8 +312,6 @@ class GhidraTools:
         * Partial matches on a namespace (``Ns`` matching ``Ns::foo``). Everything
           inside a matching namespace is added.
         """
-        from ghidra.program.model.symbol import SymbolType
-
         symbol_table = self.program.getSymbolTable()
         found: dict[int, Symbol] = {}
         to_visit: list[Symbol] = []
@@ -288,19 +325,7 @@ class GhidraTools:
                 continue
             found[symbol_id] = symbol
             to_visit.extend(self._symbols_named_after(symbol, partial, functions_only))
-
-        results = []
-        for symbol in found.values():
-            if functions_only:
-                if symbol.getSymbolType() == SymbolType.FUNCTION:
-                    results.append(symbol)
-                continue
-            # Match getAllSymbols(), which skips variables and namespaces because they
-            # have no memory address.
-            address = symbol.getAddress()
-            if address.isMemoryAddress() or address.isExternalAddress():
-                results.append(symbol)
-        return results
+        return _keep_lookup_kinds(found.values(), functions_only)
 
     def _symbols_named_after(
         self, symbol: "Symbol", partial: bool, functions_only: bool
@@ -392,16 +417,23 @@ class GhidraTools:
             candidates = self.get_all_symbols(include_externals=True, include_dynamic=True)
             return _filter_and_sort_matches(candidates, name, partial=True)
 
+        if partial:
+            return _filter_and_sort_matches(self._symbol_candidates(name, partial), name, True)
+        indexed = self._symbols_from_name_index(name_or_address, functions_only=False)
+        matches = _filter_and_sort_matches(indexed, name, partial)
+        if not matches:
+            candidates = self._symbol_candidates(name, partial)
+            matches = _filter_and_sort_matches(candidates, name, partial)
+        return self._replace_stubs_with_targets(matches, name)
+
+    def _symbol_candidates(self, name: str, partial: bool) -> list["Symbol"]:
+        """Symbols that might match ``name``; the caller checks each one."""
+        # The symbol table can only search simple names (foo, not ns::foo), so the
+        # patterns find every symbol that might match, plus some that don't.
         patterns = _symbol_search_patterns(name, partial)
         if patterns is None:
-            candidates = self.get_all_symbols(include_externals=True)
-        else:
-            candidates = self._find_candidate_symbols(patterns, partial, functions_only=False)
-
-        matches = _filter_and_sort_matches(candidates, name, partial)
-        if partial:
-            return matches
-        return self._replace_stubs_with_targets(matches, name)
+            return list(self.get_all_symbols(include_externals=True))
+        return self._find_candidate_symbols(patterns, partial, functions_only=False)
 
     @handle_exceptions
     def find_symbols(self, name_or_address: str) -> list["Symbol"]:
