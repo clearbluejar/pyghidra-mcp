@@ -33,45 +33,76 @@ from pyghidra_mcp.models import (
 
 _REGEX_META = re.compile(r"[\\^$.|?*+(){}\[\]]")
 
-# A default thunk of a default function (FUN_...) is named "thunk_" + its name.
-_THUNK_PREFIX = "thunk_"
 
+def _symbol_search_patterns(name: str, partial: bool) -> list[str] | None:
+    """Build the patterns to pass to ``SymbolTable.getSymbolIterator`` for a name lookup.
 
-def _name_patterns(name_lc: str, partial: bool) -> list[str] | None:
-    """``getSymbolIterator`` patterns (case-insensitive, on simple names) whose hits cover
-    every symbol whose qualified name could match ``name_lc``, or None when only a full
-    scan can answer exactly."""
-    # Globs and escapes mean something to the pattern; Java folds case for ASCII only.
-    if not name_lc or not name_lc.isascii() or any(c in name_lc for c in "*?\\"):
+    ``name`` is the lower-cased name being looked up. The patterns are matched
+    case-insensitively against each symbol's simple name (``foo``, not ``Ns::foo``) and
+    may find extra symbols; the caller checks the full name of every hit.
+
+    Returns None when this search could miss a match, so the caller must check every
+    symbol instead.
+    """
+    if not name:
         return None
-    if not partial:
-        # The simple name ends with the last "::" segment but can contain "::" itself
-        # (templates), so match that segment as a suffix.
-        tail = name_lc.rsplit("::", 1)[-1]
-        glob = "*" if "::" in name_lc else ""
-        return [glob + t for t in {tail, tail.removeprefix(_THUNK_PREFIX)}]
-    # A substring with ':' can span "::"; one inside "thunk_" matches every thunk_FUN_ name.
-    if ":" in name_lc or name_lc in _THUNK_PREFIX:
+    # Java only ignores case for ASCII letters.
+    if not name.isascii():
         return None
-    # A substring that starts inside "thunk_" continues into the target's FUN_ name.
-    into_target = [
-        name_lc[k:] + "*"
-        for k in range(1, len(_THUNK_PREFIX) + 1)
-        if _THUNK_PREFIX.endswith(name_lc[:k])
-    ]
-    return [f"*{name_lc}*", *into_target]
+    # The pattern language uses * and ? as wildcards and \ as an escape.
+    if "*" in name or "?" in name or "\\" in name:
+        return None
+
+    if partial:
+        # Text with ':' can match across the "::" between a namespace and a name.
+        if ":" in name:
+            return None
+        # The search can't see thunks Ghidra named "thunk_FUN_1234", so text that
+        # mentions them needs a full scan.
+        if "thunk" in name:
+            return None
+        return [f"*{name}*"]
+
+    if "::" in name:
+        # "ns::foo": search for simple names ending in "foo". A simple name can contain
+        # "::" itself (template arguments), so it can be longer than the last part.
+        last_part = name.split("::")[-1]
+        pattern = "*" + last_part
+    else:
+        last_part = name
+        pattern = name
+    patterns = [pattern]
+    # The search can't see thunks Ghidra named "thunk_FUN_1234", so search for FUN_1234
+    # instead; _find_candidate_symbols adds its thunks back.
+    if last_part.startswith("thunk_"):
+        patterns.append(pattern.replace("thunk_", "", 1))
+    return patterns
 
 
-def _rank_name_matches(symbols: typing.Iterable, name_lc: str, partial: bool) -> list:
-    """The symbols whose qualified name equals ``name_lc`` (or contains it, if
-    ``partial``): exact matches first, then by address and symbol ID."""
-    ranked = []
-    for sym in symbols:
-        qualified = sym.getName(True).lower()
-        if qualified == name_lc or (partial and name_lc in qualified):
-            ranked.append((qualified != name_lc, sym.getAddress(), int(sym.getID()), sym))
-    ranked.sort(key=lambda r: r[:3])
-    return [r[3] for r in ranked]
+def _matches_exactly(symbol, name: str) -> bool:
+    """True if ``name`` is the symbol's simple name (``CreateFileW``) or its full name
+    (``KERNEL32.DLL::CreateFileW``), ignoring case."""
+    return symbol.getName().lower() == name or symbol.getName(True).lower() == name
+
+
+def _address_then_id(symbol) -> tuple:
+    # Several symbols can share an address, so the ID keeps the order stable.
+    return (symbol.getAddress(), int(symbol.getID()))
+
+
+def _filter_and_sort_matches(symbols: typing.Iterable, name: str, partial: bool) -> list:
+    """Keep the symbols that match ``name`` exactly, or whose full name contains it when
+    ``partial`` is set. Exact matches come first; each group is sorted by address."""
+    exact_matches = []
+    partial_matches = []
+    for symbol in symbols:
+        if _matches_exactly(symbol, name):
+            exact_matches.append(symbol)
+        elif partial and name in symbol.getName(True).lower():
+            partial_matches.append(symbol)
+    exact_matches.sort(key=_address_then_id)
+    partial_matches.sort(key=_address_then_id)
+    return exact_matches + partial_matches
 
 
 if typing.TYPE_CHECKING:
@@ -158,109 +189,150 @@ class GhidraTools:
         parser = DataTypeParser(dtm, dtm, typing.cast(typing.Any, None), AllowedDataTypes.DYNAMIC)
         return parser.parse(type_name)
 
-    def _lookup_functions(
-        self,
-        name_or_address: str,
-        partial: bool = False,
-        include_externals: bool = True,
-    ) -> list["Function"]:
+    def _lookup_functions(self, name_or_address: str, partial: bool = False) -> list["Function"]:
         """
-        Resolve functions by name or address.
-        Returns a flat list of unique Function objects.
-        Exact matches come first, then partial (substring) matches when
-        ``partial`` is enabled, each group sorted by entry point.
+        Resolve functions by address, or by name ignoring case.
 
-        ``include_externals=False`` drops thunks. External functions are never
-        returned, matching ``FunctionManager.getFunctions(True)``.
+        Exact lookups match the simple name (``CreateFileW``) or the full name
+        (``KERNEL32.DLL::CreateFileW``). They include imported functions and return the
+        real function rather than a jump stub named after it (see
+        ``_replace_stubs_with_targets``). Results are sorted by address.
+
+        Partial lookups (substring of the full name) are for listing: they return exact
+        matches first, include stubs, and leave out imported functions.
         """
-        af = self.program.getAddressFactory()
-        fm = self.program.getFunctionManager()
+        func = self._function_at_address(name_or_address)
+        if func is not None:
+            return [func]
 
-        # Try interpreting as an address first
-        try:
-            addr = af.getAddress(name_or_address)
-            if addr:
-                func = fm.getFunctionAt(addr)
-                if func is None:
-                    func = fm.getFunctionContaining(addr)
-                if func:
-                    return [func]
-        except Exception as e:
-            logger.debug(f"'{name_or_address}' is not an address ({e}); searching by name")
-
-        name_lc = name_or_address.lower()
-        patterns = _name_patterns(name_lc, partial)
+        name = name_or_address.lower()
+        patterns = _symbol_search_patterns(name, partial)
         if patterns is None:
-            candidates = [f.getSymbol() for f in self.get_all_functions(include_externals=True)]
+            candidates = []
+            for func in self.get_all_functions(include_externals=True):
+                candidates.append(func.getSymbol())
+            for func in self.program.getFunctionManager().getExternalFunctions():
+                candidates.append(func.getSymbol())
         else:
-            candidates = self._name_candidates(patterns, partial, functions_only=True)
-        functions = (s.getObject() for s in _rank_name_matches(candidates, name_lc, partial))
-        return [
-            f for f in functions if not f.isExternal() and (include_externals or not f.isThunk())
-        ]
+            candidates = self._find_candidate_symbols(patterns, partial, functions_only=True)
 
-    def _name_candidates(
+        matches = _filter_and_sort_matches(candidates, name, partial)
+        if not partial:
+            matches = self._replace_stubs_with_targets(matches, name)
+
+        functions = []
+        for symbol in matches:
+            func = symbol.getObject()
+            if partial and func.isExternal():
+                continue
+            functions.append(func)
+        return functions
+
+    def _function_at_address(self, text: str) -> "Function | None":
+        """The function at or containing ``text`` read as an address, if any."""
+        fm = self.program.getFunctionManager()
+        try:
+            addr = self.program.getAddressFactory().getAddress(text)
+        except Exception as e:
+            logger.debug(f"'{text}' is not an address ({e}); searching by name")
+            return None
+        if not addr:
+            return None
+        func = fm.getFunctionAt(addr)
+        if func is None:
+            func = fm.getFunctionContaining(addr)
+        return func
+
+    def _replace_stubs_with_targets(self, symbols: list["Symbol"], name: str) -> list["Symbol"]:
+        """Replace each thunk that carries the looked-up name of the function it jumps to
+        (an import's jump stub, say) with that function, so that a name means the real
+        function. A thunk with a name of its own, such as ``thunk_FUN_1234``, stays."""
+        from ghidra.program.model.symbol import SymbolType
+
+        results: dict[int, Symbol] = {}
+        for symbol in symbols:
+            if symbol.getSymbolType() == SymbolType.FUNCTION and symbol.getObject().isThunk():
+                target = symbol.getObject().getThunkedFunction(True)
+                if target is not None and _matches_exactly(target.getSymbol(), name):
+                    symbol = target.getSymbol()
+            results[int(symbol.getID())] = symbol
+        return sorted(results.values(), key=_address_then_id)
+
+    def _find_candidate_symbols(
         self, patterns: list[str], partial: bool, *, functions_only: bool
     ) -> list["Symbol"]:
-        """A superset of the symbols matching a name lookup, found without walking every
-        symbol in Python; ``_rank_name_matches`` applies the real comparison.
+        """Find every symbol that might match a name lookup, without walking the whole
+        symbol table in Python. The caller checks each one's full name.
 
-        ``SymbolTable.getSymbolIterator`` matches the patterns in Java, so only hits cross
-        into Python. Two kinds of match are added back:
+        ``getSymbolIterator`` does the matching in Java, so only its hits cross into
+        Python. It misses two kinds of match, which are added here:
 
-        * Default thunks, which the iterator skips. A default thunk takes its name (or
-          ``thunk_`` + it, for a ``FUN_`` target) and namespace from its target, so they
-          come from ``getFunctionThunkAddresses`` of every function found.
-        * Partial matches in the namespace path (``Ns`` matching ``Ns::foo``): every
-          descendant of a matching namespace.
+        * Thunks that Ghidra named after their target. The iterator never returns them.
+          They share their target's name (or ``thunk_`` + it) and namespace, so they are
+          found by asking each function found for its thunks.
+        * Partial matches on a namespace (``Ns`` matching ``Ns::foo``). Everything
+          inside a matching namespace is added.
         """
         from ghidra.program.model.symbol import SymbolType
 
-        st = self.program.getSymbolTable()
-        fm = self.program.getFunctionManager()
-        function_type = SymbolType.FUNCTION
-
+        symbol_table = self.program.getSymbolTable()
         found: dict[int, Symbol] = {}
-        pending: list[Symbol] = []
+        to_visit: list[Symbol] = []
         for pattern in patterns:
-            pending.extend(st.getSymbolIterator(pattern, False))
-        while pending:
-            sym = pending.pop()
-            sym_id = int(sym.getID())
-            if sym_id in found:
-                continue
-            found[sym_id] = sym
-            sym_type = sym.getSymbolType()
-            if sym_type == function_type:
-                for thunk_addr in sym.getObject().getFunctionThunkAddresses(True) or []:
-                    pending.append(fm.getFunctionAt(thunk_addr).getSymbol())
-            # Functions can't contain functions, so a function search skips their variables.
-            if partial and sym_type.isNamespace():
-                if not (functions_only and sym_type == function_type):
-                    pending.extend(st.getChildren(sym))
+            to_visit.extend(symbol_table.getSymbolIterator(pattern, False))
 
-        if functions_only:
-            return [s for s in found.values() if s.getSymbolType() == function_type]
-        # Like getAllSymbols(), leave out variables and namespaces (no memory address).
-        return [
-            s
-            for s in found.values()
-            if s.getAddress().isMemoryAddress() or s.getAddress().isExternalAddress()
-        ]
+        while to_visit:
+            symbol = to_visit.pop()
+            symbol_id = int(symbol.getID())
+            if symbol_id in found:
+                continue
+            found[symbol_id] = symbol
+            to_visit.extend(self._symbols_named_after(symbol, partial, functions_only))
+
+        results = []
+        for symbol in found.values():
+            if functions_only:
+                if symbol.getSymbolType() == SymbolType.FUNCTION:
+                    results.append(symbol)
+                continue
+            # Match getAllSymbols(), which skips variables and namespaces because they
+            # have no memory address.
+            address = symbol.getAddress()
+            if address.isMemoryAddress() or address.isExternalAddress():
+                results.append(symbol)
+        return results
+
+    def _symbols_named_after(
+        self, symbol: "Symbol", partial: bool, functions_only: bool
+    ) -> list["Symbol"]:
+        """Symbols whose full name is built from ``symbol``'s name, so they can match
+        whenever it does: a function's thunks, and for partial lookups everything inside
+        a namespace."""
+        from ghidra.program.model.symbol import SymbolType
+
+        related = []
+        is_function = symbol.getSymbolType() == SymbolType.FUNCTION
+        if is_function:
+            function_manager = self.program.getFunctionManager()
+            for address in symbol.getObject().getFunctionThunkAddresses(True) or []:
+                related.append(function_manager.getFunctionAt(address).getSymbol())
+
+        if not partial or not symbol.getSymbolType().isNamespace():
+            return related
+        # Functions can't be nested in functions, so when we only want functions there
+        # is no need to look at a function's parameters and locals.
+        if functions_only and is_function:
+            return related
+        related.extend(self.program.getSymbolTable().getChildren(symbol))
+        return related
 
     @handle_exceptions
-    def find_function(
-        self,
-        name_or_address: str,
-        include_externals: bool = True,
-    ) -> "Function":
+    def find_function(self, name_or_address: str) -> "Function":
         """
         Resolve a single function by name or address (exact match only).
         Raises if ambiguous or not found.
         """
-        matches = self._lookup_functions(
-            name_or_address, partial=False, include_externals=include_externals
-        )
+        matches = self._lookup_functions(name_or_address, partial=False)
 
         if len(matches) == 1:
             return matches[0]
@@ -277,18 +349,12 @@ class GhidraTools:
             raise ValueError(f"Function or symbol '{name_or_address}' not found.")
 
     @handle_exceptions
-    def find_functions(
-        self,
-        name_or_address: str,
-        include_externals: bool = True,
-    ) -> list["Function"]:
+    def find_functions(self, name_or_address: str) -> list["Function"]:
         """
         Return all functions that match name_or_address (exact or partial).
         Never raises; returns empty list if none.
         """
-        return self._lookup_functions(
-            name_or_address, partial=True, include_externals=include_externals
-        )
+        return self._lookup_functions(name_or_address, partial=True)
 
     def _lookup_symbols(
         self,
@@ -298,11 +364,13 @@ class GhidraTools:
         dynamic: bool = False,
     ) -> list["Symbol"]:
         """
-        Resolve symbols by name or address.
-        Returns a single flat list of unique Symbol objects.
-        Exact matches come first, then partial (substring) matches when ``partial``
-        is enabled, each group sorted by address. ``dynamic`` also matches substrings of
-        dynamic symbols (``LAB_``, ``DAT_``...), which needs a full scan.
+        Resolve symbols by address, or by name ignoring case.
+
+        Exact lookups match the simple or the full name, and return the real function
+        rather than a jump stub named after it, as ``_lookup_functions`` does. Partial
+        lookups (substring of the full name) return exact matches first. ``dynamic``
+        also matches substrings of dynamic symbols (``LAB_``, ``DAT_``...), which needs
+        a full scan.
         """
         st = self.program.getSymbolTable()
         af = self.program.getAddressFactory()
@@ -317,15 +385,23 @@ class GhidraTools:
         except Exception as e:
             logger.debug(f"'{name_or_address}' is not an address ({e}); searching by name")
 
-        name_lc = name_or_address.lower()
-        patterns = None if dynamic else _name_patterns(name_lc, partial)
+        name = name_or_address.lower()
+        if dynamic:
+            # Dynamic symbols (LAB_, DAT_...) aren't stored, so only a full scan finds
+            # them. A dynamic lookup always matches substrings.
+            candidates = self.get_all_symbols(include_externals=True, include_dynamic=True)
+            return _filter_and_sort_matches(candidates, name, partial=True)
+
+        patterns = _symbol_search_patterns(name, partial)
         if patterns is None:
-            # A dynamic lookup is a substring match that includes dynamic symbols.
-            candidates = self.get_all_symbols(include_externals=True, include_dynamic=dynamic)
-            partial = partial or dynamic
+            candidates = self.get_all_symbols(include_externals=True)
         else:
-            candidates = self._name_candidates(patterns, partial, functions_only=False)
-        return _rank_name_matches(candidates, name_lc, partial)
+            candidates = self._find_candidate_symbols(patterns, partial, functions_only=False)
+
+        matches = _filter_and_sort_matches(candidates, name, partial)
+        if partial:
+            return matches
+        return self._replace_stubs_with_targets(matches, name)
 
     @handle_exceptions
     def find_symbols(self, name_or_address: str) -> list["Symbol"]:
