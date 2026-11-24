@@ -21,7 +21,7 @@ def binary_option(func):
 
 @click.group()
 def rename() -> None:
-    """Rename functions and variables."""
+    """Rename functions, symbols, and variables."""
     pass
 
 
@@ -40,6 +40,31 @@ def rename_function(
     async def run():
         async with client:
             result = await client.rename_function(binary_name, function_name_or_address, new_name)
+            format_output(result, ctx.obj["OUTPUT_FORMAT"], ctx.obj["VERBOSE"])
+
+    try:
+        from ..utils import run_async
+
+        run_async(run())
+    except (asyncio.exceptions.CancelledError, Exception) as e:
+        handle_command_error(e, ctx)
+
+
+@rename.command(name="symbol")
+@binary_option
+@click.argument("name_or_address")
+@click.argument("new_name")
+@click.pass_context
+def rename_symbol(
+    ctx: click.Context, binary_name: str, name_or_address: str, new_name: str
+) -> None:
+    """Rename a symbol by name or address (use the address for unnamed DAT_* labels)."""
+
+    client = PyGhidraMcpClient(host=ctx.obj["HOST"], port=ctx.obj["PORT"])
+
+    async def run():
+        async with client:
+            result = await client.rename_symbol(binary_name, name_or_address, new_name)
             format_output(result, ctx.obj["OUTPUT_FORMAT"], ctx.obj["VERBOSE"])
 
     try:

@@ -316,6 +316,29 @@ def rename_function(
 
 
 @mcp_error_handler
+def rename_symbol(
+    binary_name: str,
+    name_or_address: str,
+    new_name: str,
+    ctx: Context,
+) -> RenameResponse:
+    """Rename a symbol by name or address.
+
+    Unnamed data labels such as ``DAT_00401000`` are not found by name; pass the
+    address instead (``0x00401000``). Once renamed, the label is found by its new name.
+    """
+    pyghidra_context = _get_pyghidra_context(ctx)
+    program_info = pyghidra_context.get_program_info(binary_name)
+    tools = GhidraTools(program_info)
+    result = _run_for_context(
+        pyghidra_context,
+        lambda: tools.rename_symbol(name_or_address, new_name),
+    )
+    result = cast(dict, result)
+    return RenameResponse(binary_name=binary_name, **result)
+
+
+@mcp_error_handler
 def rename_variable(
     binary_name: str,
     function_name_or_address: str,
