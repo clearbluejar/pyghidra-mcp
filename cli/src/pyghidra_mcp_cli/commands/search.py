@@ -160,3 +160,69 @@ def strings(ctx: click.Context, binary_name: str, query: str, limit: int) -> Non
         run_async(run())
     except (asyncio.exceptions.CancelledError, Exception) as e:
         handle_command_error(e, ctx)
+
+
+@search.command(name="bytes")
+@binary_option
+@click.argument("pattern", required=False)
+@click.option("--value", help="Unsigned value to find (decimal or 0x hex) instead of a pattern.")
+@click.option("--width", type=int, default=4, help="Value width in bytes: 1, 2, 4, or 8.")
+@click.option(
+    "--endian",
+    type=click.Choice(["little", "big"]),
+    default="little",
+    help="Value byte order.",
+)
+@click.option("--thumb", is_flag=True, help="Also match the value with its low bit set.")
+@click.option("--start", help="Inclusive start address (hex).")
+@click.option("--end", help="Inclusive end address (hex).")
+@click.option("--alignment", type=int, default=1, help="Match alignment: 1, 2, 4, or 8.")
+@click.option("-l", "--limit", type=int, default=50, help="Maximum results to return (1-1000).")
+@click.option("--context", type=int, default=0, help="Bytes of context each side (0-16).")
+@click.pass_context
+def bytes(
+    ctx: click.Context,
+    binary_name: str,
+    pattern: str | None,
+    value: str | None,
+    width: int,
+    endian: str,
+    thumb: bool,
+    start: str | None,
+    end: str | None,
+    alignment: int,
+    limit: int,
+    context: int,
+) -> None:
+    """Search initialized memory for PATTERN (hex, ?? wildcard) or --value."""
+
+    client = PyGhidraMcpClient(
+        host=ctx.obj["HOST"],
+        port=ctx.obj["PORT"],
+    )
+
+    async def run():
+        async with client:
+            result = await client.search_bytes(
+                binary_name=binary_name,
+                pattern=pattern,
+                value=value,
+                start=start,
+                end=end,
+                width=width,
+                endian=endian,
+                thumb=thumb,
+                alignment=alignment,
+                max_results=limit,
+                context_bytes=context,
+            )
+            format_output(result, ctx.obj["OUTPUT_FORMAT"], ctx.obj["VERBOSE"])
+
+    import asyncio
+
+    try:
+        from ..utils import run_async
+
+        run_async(run())
+    except (asyncio.exceptions.CancelledError, Exception) as e:
+        handle_command_error(e, ctx)

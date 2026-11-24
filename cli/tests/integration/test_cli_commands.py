@@ -319,6 +319,59 @@ async def test_search_strings(client, binary_name):
 
 
 @pytest.mark.asyncio
+async def test_search_bytes(client, binary_name):
+    """Test searching memory for the bytes of a known string."""
+    from pyghidra_mcp_cli.client import ClientError
+
+    async with client:
+        result = await client.search_bytes(binary_name, "48 65 6c 6c 6f", context_bytes=2)
+        assert result["returned_count"] > 0
+        assert all(hit["block"] in result["searched_blocks"] for hit in result["hits"])
+        assert result["hits"][0]["context_after"] is not None
+
+        with pytest.raises(ClientError, match="exactly one"):
+            await client.search_bytes(binary_name)
+
+
+def test_cli_search_bytes_command(binary_name, server_port):
+    """Test the grouped CLI search bytes command."""
+    import json
+
+    limited = run_cli(
+        server_port,
+        "search",
+        "bytes",
+        "--binary",
+        binary_name,
+        "0000",
+        "--limit",
+        "2",
+    )
+    limited_result = json.loads(limited.stdout)
+    assert limited_result["returned_count"] == 2
+    assert limited_result["truncated"] is True
+
+    completed = run_cli(
+        server_port,
+        "search",
+        "bytes",
+        "--binary",
+        binary_name,
+        "--value",
+        "0x48656c6c",
+        "--width",
+        "4",
+        "--endian",
+        "big",
+        "--context",
+        "2",
+    )
+    result = json.loads(completed.stdout)
+    assert result["returned_count"] > 0
+    assert result["hits"][0]["context_after"] is not None
+
+
+@pytest.mark.asyncio
 async def test_list_imports(client, binary_name):
     """Test listing imports."""
     async with client:

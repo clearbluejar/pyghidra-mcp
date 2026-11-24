@@ -15,6 +15,7 @@ from mcp.client.streamable_http import streamable_http_client
 from pyghidra_mcp.context import PyGhidraContext
 from pyghidra_mcp.models import (
     BytesReadResult,
+    BytesSearchResults,
     CallGraphResult,
     CodeSearchResults,
     CommentResponse,
@@ -188,6 +189,10 @@ async def invoke_tool_concurrently(base_url: str, server_binary_path):
                     "gen_callgraph",
                     {"binary_name": binary_name, "function_name": _MAIN_FUNC_NAME},
                 ),
+                await session.call_tool(
+                    "search_bytes",
+                    {"binary_name": binary_name, "pattern": "46 75 6e 63 74 69 6f 6e"},
+                ),
             ]
             return responses
 
@@ -263,7 +268,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     assert len(results) == num_clients
 
     for client_responses in results:
-        assert len(client_responses) == 12
+        assert len(client_responses) == 13
 
         # Decompiled function
         decompiled_func_result = json.loads(client_responses[0].content[0].text)
@@ -361,6 +366,12 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         assert _MAIN_FUNC_NAME in call_graph.function_name
         # Graph should be non-empty; entry node name may vary by platform/toolchain
         assert len(call_graph.graph.strip()) > 0
+
+        # Search initialized memory for the shared "Function" string prefix.
+        assert not client_responses[12].is_error
+        byte_search = BytesSearchResults.model_validate_json(client_responses[12].content[0].text)
+        assert byte_search.returned_count >= 2
+        assert all(hit.block in byte_search.searched_blocks for hit in byte_search.hits)
 
     (
         rename_response,
